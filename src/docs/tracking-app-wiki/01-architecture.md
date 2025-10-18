@@ -18,7 +18,7 @@
 │  - Hono Web Server                           │
 │  - API Routes                                │
 │  - Business Logic                            │
-└──────────────┬──────────────────────────────┘
+└────────��─────┬──────────────────────────────┘
                │
                │ Database Operations
                │
@@ -275,9 +275,43 @@ EXCHANGE_RATE_API_KEY           # ExchangeRate-API key
 3. **Server-side Caching**: Exchange rate di-cache di server
 4. **Lazy Loading**: Components loaded on-demand
 5. **Efficient Sorting**: Pre-sorted data di backend
+6. **Client-side Caching**: Month data di-cache untuk instant navigation
+7. **Skeleton Loading**: Better perceived performance dengan animations
+8. **Page Transitions**: Smooth animations untuk better UX
+
+### Client-Side Caching Strategy
+```typescript
+// Cache structure
+interface MonthCache {
+  budget: BudgetData;
+  expenses: Expense[];
+  additionalIncomes: AdditionalIncome[];
+  previousMonthRemaining: number | null;
+}
+
+const [cache, setCache] = useState<Record<string, MonthCache>>({});
+
+// Cache on load
+const updateCachePartial = (field, value) => {
+  const cacheKey = `${year}-${month}`;
+  setCache(prev => ({
+    ...prev,
+    [cacheKey]: { ...prev[cacheKey], [field]: value }
+  }));
+};
+
+// Invalidate on mutation
+const invalidateCache = (year, month) => {
+  // Remove current month cache
+  delete cache[`${year}-${month}`];
+  // Also remove next month (carryover changes)
+  delete cache[`${nextYear}-${nextMonth}`];
+};
+```
 
 ### Future Optimization Opportunities
 - Implement React Query for better caching
 - Add pagination untuk expense list yang panjang
 - Optimize bundle size dengan code splitting
 - Add service worker for offline support
+- Implement virtual scrolling untuk long lists

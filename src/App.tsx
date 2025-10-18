@@ -7,6 +7,7 @@ import { ExpenseList } from "./components/ExpenseList";
 import { AdditionalIncomeForm } from "./components/AdditionalIncomeForm";
 import { AdditionalIncomeList } from "./components/AdditionalIncomeList";
 import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
+import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
@@ -14,6 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./component
 import { ChevronDown, Plus } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { funnyQuotes } from "./data/funny-quotes";
+import { motion, AnimatePresence } from "motion/react";
 
 interface BudgetData {
   initialBudget: number;
@@ -47,6 +49,13 @@ interface AdditionalIncome {
   date: string;
 }
 
+interface MonthCache {
+  budget: BudgetData;
+  expenses: Expense[];
+  additionalIncomes: AdditionalIncome[];
+  previousMonthRemaining: number | null;
+}
+
 export default function App() {
   // Apply dark mode to the document
   useEffect(() => {
@@ -61,6 +70,27 @@ export default function App() {
     const randomIndex = Math.floor(Math.random() * funnyQuotes.length);
     setRandomQuote(funnyQuotes[randomIndex]);
   }, []);
+
+  // Auto-rotate quote every 20 minutes
+  useEffect(() => {
+    const rotateQuote = () => {
+      const currentIndex = funnyQuotes.indexOf(randomQuote);
+      let newIndex;
+      
+      // Get a different quote from the current one
+      do {
+        newIndex = Math.floor(Math.random() * funnyQuotes.length);
+      } while (newIndex === currentIndex && funnyQuotes.length > 1);
+      
+      setRandomQuote(funnyQuotes[newIndex]);
+    };
+
+    // Set interval for 20 minutes (1200000 milliseconds)
+    const intervalId = setInterval(rotateQuote, 1200000);
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(intervalId);
+  }, [randomQuote]);
 
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
@@ -85,14 +115,86 @@ export default function App() {
   const [templates, setTemplates] = useState<FixedExpenseTemplate[]>([]);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
 
+  // Client-side cache for month data
+  const [cache, setCache] = useState<Record<string, MonthCache>>({});
+
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
 
+  // Helper to get cache key
+  const getCacheKey = (year: number, month: number) => `${year}-${month.toString().padStart(2, '0')}`;
+
+  // Helper to invalidate cache
+  const invalidateCache = (year: number, month: number) => {
+    const key = getCacheKey(year, month);
+    setCache((prev) => {
+      const newCache = { ...prev };
+      delete newCache[key];
+      return newCache;
+    });
+
+    // Also invalidate next month (because carryover changes)
+    let nextMonth = month + 1;
+    let nextYear = year;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear = year + 1;
+    }
+    const nextKey = getCacheKey(nextYear, nextMonth);
+    setCache((prev) => {
+      const newCache = { ...prev };
+      delete newCache[nextKey];
+      return newCache;
+    });
+  };
+
+  // Helper to update cache partially
+  const updateCachePartial = (
+    field: keyof MonthCache, 
+    value: BudgetData | Expense[] | AdditionalIncome[] | number | null
+  ) => {
+    const cacheKey = getCacheKey(selectedYear, selectedMonth);
+    setCache((prev) => {
+      const existing = prev[cacheKey] || {
+        budget: { initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 },
+        expenses: [],
+        additionalIncomes: [],
+        previousMonthRemaining: null,
+      };
+      return {
+        ...prev,
+        [cacheKey]: {
+          ...existing,
+          [field]: value,
+        },
+      };
+    });
+  };
+
   useEffect(() => {
-    loadBudgetData();
-    loadExpenses();
-    loadAdditionalIncomes();
-    loadPreviousMonthData();
-    loadTemplates();
+    const cacheKey = getCacheKey(selectedYear, selectedMonth);
+    const cachedData = cache[cacheKey];
+
+    if (cachedData) {
+      // Use cached data - instant load!
+      setBudget(cachedData.budget);
+      setExpenses(cachedData.expenses);
+      setAdditionalIncomes(cachedData.additionalIncomes);
+      setPreviousMonthRemaining(cachedData.previousMonthRemaining);
+      setIsLoading(false);
+      setIsLoadingCarryover(false);
+      
+      // Load templates if not loaded yet (templates are global, not month-specific)
+      if (templates.length === 0) {
+        loadTemplates();
+      }
+    } else {
+      // No cache - fetch from server
+      loadBudgetData();
+      loadExpenses();
+      loadAdditionalIncomes();
+      loadPreviousMonthData();
+      loadTemplates();
+    }
   }, [selectedMonth, selectedYear]);
 
   const loadBudgetData = async () => {
@@ -112,6 +214,9 @@ export default function App() {
 
       const data = await response.json();
       setBudget(data);
+      
+      // Update cache with loaded data
+      updateCachePartial('budget', data);
     } catch (error) {
       console.log(`Error loading budget data: ${error}`);
       toast.error("Gagal memuat data budget");
@@ -137,6 +242,9 @@ export default function App() {
 
       const data = await response.json();
       setExpenses(data);
+      
+      // Update cache with loaded data
+      updateCachePartial('expenses', data);
     } catch (error) {
       console.log(`Error loading expenses: ${error}`);
       toast.error("Gagal memuat data pengeluaran");
@@ -160,6 +268,9 @@ export default function App() {
 
       const data = await response.json();
       setAdditionalIncomes(data);
+      
+      // Update cache with loaded data
+      updateCachePartial('additionalIncomes', data);
     } catch (error) {
       console.log(`Error loading additional incomes: ${error}`);
       toast.error("Gagal memuat data pemasukan tambahan");
@@ -435,7 +546,14 @@ export default function App() {
       }
 
       const result = await response.json();
-      setExpenses((prev) => [...prev, result.data]);
+      const newExpenses = [...expenses, result.data];
+      setExpenses(newExpenses);
+      
+      // Update cache
+      updateCachePartial('expenses', newExpenses);
+      // Invalidate next month's cache (carryover changes)
+      invalidateCache(selectedYear, selectedMonth);
+      
       toast.success("Pengeluaran berhasil ditambahkan");
     } catch (error) {
       console.log(`Error adding expense: ${error}`);
@@ -461,7 +579,14 @@ export default function App() {
         throw new Error("Failed to delete expense");
       }
 
-      setExpenses((prev) => prev.filter((expense) => expense.id !== id));
+      const newExpenses = expenses.filter((expense) => expense.id !== id);
+      setExpenses(newExpenses);
+      
+      // Update cache
+      updateCachePartial('expenses', newExpenses);
+      // Invalidate next month's cache (carryover changes)
+      invalidateCache(selectedYear, selectedMonth);
+      
       toast.success("Pengeluaran berhasil dihapus");
     } catch (error) {
       console.log(`Error deleting expense: ${error}`);
@@ -488,9 +613,14 @@ export default function App() {
       }
 
       const result = await response.json();
-      setExpenses((prev) =>
-        prev.map((expense) => (expense.id === id ? result.data : expense))
-      );
+      const newExpenses = expenses.map((expense) => (expense.id === id ? result.data : expense));
+      setExpenses(newExpenses);
+      
+      // Update cache
+      updateCachePartial('expenses', newExpenses);
+      // Invalidate next month's cache (carryover changes)
+      invalidateCache(selectedYear, selectedMonth);
+      
       toast.success("Pengeluaran berhasil diupdate");
     } catch (error) {
       console.log(`Error editing expense: ${error}`);
@@ -645,97 +775,137 @@ export default function App() {
   const remainingBudget = totalIncome - totalExpenses;
 
   if (isLoading) {
-    return (
-      <div className="size-full flex items-center justify-center">
-        <p>Memuat data...</p>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="text-center space-y-2">
-          <h1>Budget Tracker</h1>
-          <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
-        </div>
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={`${selectedYear}-${selectedMonth}`}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -20 }}
+        transition={{ duration: 0.3, ease: "easeInOut" }}
+        className="min-h-screen bg-background p-4 md:p-8"
+      >
+        <div className="max-w-6xl mx-auto space-y-6">
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-center space-y-2"
+          >
+            <h1>Budget Tracker</h1>
+            <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
+          </motion.div>
 
-        <MonthSelector
-          selectedMonth={selectedMonth}
-          selectedYear={selectedYear}
-          onMonthChange={handleMonthChange}
-        />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.15 }}
+          >
+            <MonthSelector
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
+              onMonthChange={handleMonthChange}
+            />
+          </motion.div>
 
-        <BudgetOverview
-          totalIncome={totalIncome}
-          totalExpenses={totalExpenses}
-          remainingBudget={remainingBudget}
-        />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <BudgetOverview
+              totalIncome={totalIncome}
+              totalExpenses={totalExpenses}
+              remainingBudget={remainingBudget}
+            />
+          </motion.div>
 
-        <Collapsible open={isBudgetSectionOpen} onOpenChange={setIsBudgetSectionOpen}>
-          <CollapsibleTrigger asChild>
-            <Button variant="outline" className="w-full justify-between">
-              <span>Pengaturan Budget & Pemasukan Tambahan</span>
-              <ChevronDown 
-                className={`size-4 transition-transform ${isBudgetSectionOpen ? 'rotate-180' : ''}`} 
-              />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <Collapsible open={isBudgetSectionOpen} onOpenChange={setIsBudgetSectionOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" className="w-full justify-between">
+                  <span>Pengaturan Budget & Pemasukan Tambahan</span>
+                  <ChevronDown 
+                    className={`size-4 transition-transform ${isBudgetSectionOpen ? 'rotate-180' : ''}`} 
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-6">
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <BudgetForm
+                      initialBudget={budget.initialBudget}
+                      carryover={budget.carryover}
+                      notes={budget.notes}
+                      onBudgetChange={handleBudgetChange}
+                      onSave={handleSaveBudget}
+                      isSaving={isSaving}
+                      suggestedCarryover={previousMonthRemaining}
+                      isLoadingCarryover={isLoadingCarryover}
+                    />
+
+                    <AdditionalIncomeForm 
+                      onAddIncome={handleAddIncome} 
+                      isAdding={isAddingIncome} 
+                    />
+                  </div>
+
+                  <AdditionalIncomeList 
+                    incomes={additionalIncomes} 
+                    onDeleteIncome={handleDeleteIncome} 
+                    onUpdateIncome={handleUpdateIncome} 
+                    globalDeduction={budget.incomeDeduction || 0}
+                    onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
+                  />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+          >
+            <Button 
+              onClick={() => setIsExpenseDialogOpen(true)}
+              size="lg"
+              className="w-full"
+            >
+              <Plus className="size-5 mr-2" />
+              Tambah Pengeluaran
             </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-6">
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <BudgetForm
-                  initialBudget={budget.initialBudget}
-                  carryover={budget.carryover}
-                  notes={budget.notes}
-                  onBudgetChange={handleBudgetChange}
-                  onSave={handleSaveBudget}
-                  isSaving={isSaving}
-                  suggestedCarryover={previousMonthRemaining}
-                  isLoadingCarryover={isLoadingCarryover}
-                />
+          </motion.div>
 
-                <AdditionalIncomeForm 
-                  onAddIncome={handleAddIncome} 
-                  isAdding={isAddingIncome} 
-                />
-              </div>
+          <AddExpenseDialog 
+            open={isExpenseDialogOpen}
+            onOpenChange={setIsExpenseDialogOpen}
+            onAddExpense={handleAddExpense} 
+            isAdding={isAdding} 
+            templates={templates}
+            onAddTemplate={handleAddTemplate}
+            onUpdateTemplate={handleUpdateTemplate}
+            onDeleteTemplate={handleDeleteTemplate}
+          />
 
-              <AdditionalIncomeList 
-                incomes={additionalIncomes} 
-                onDeleteIncome={handleDeleteIncome} 
-                onUpdateIncome={handleUpdateIncome} 
-                globalDeduction={budget.incomeDeduction || 0}
-                onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
-              />
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-
-        <Button 
-          onClick={() => setIsExpenseDialogOpen(true)}
-          size="lg"
-          className="w-full"
-        >
-          <Plus className="size-5 mr-2" />
-          Tambah Pengeluaran
-        </Button>
-
-        <AddExpenseDialog 
-          open={isExpenseDialogOpen}
-          onOpenChange={setIsExpenseDialogOpen}
-          onAddExpense={handleAddExpense} 
-          isAdding={isAdding} 
-          templates={templates}
-          onAddTemplate={handleAddTemplate}
-          onUpdateTemplate={handleUpdateTemplate}
-          onDeleteTemplate={handleDeleteTemplate}
-        />
-
-        <ExpenseList expenses={expenses} onDeleteExpense={handleDeleteExpense} onEditExpense={handleEditExpense} />
-      </div>
-      
-      <Toaster />
-    </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <ExpenseList expenses={expenses} onDeleteExpense={handleDeleteExpense} onEditExpense={handleEditExpense} />
+          </motion.div>
+        </div>
+        
+        <Toaster />
+      </motion.div>
+    </AnimatePresence>
   );
 }

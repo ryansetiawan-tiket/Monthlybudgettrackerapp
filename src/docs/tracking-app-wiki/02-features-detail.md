@@ -506,3 +506,206 @@ useEffect(() => {
 - Toast notification on save success
 - Error handling dengan toast
 - Loading states saat fetch
+
+---
+
+## 10. UX Enhancements
+
+### 10.1 Motivational Quotes
+
+**Komponen:** `App.tsx` + `data/funny-quotes.ts`
+
+#### Features
+- Random quote ditampilkan di header
+- Auto-rotate setiap **20 menit**
+- Quotes berbahasa Indonesia
+- Motivasi & humor untuk budget tracking
+
+#### Implementation
+```typescript
+// Select random quote on mount
+useEffect(() => {
+  const randomIndex = Math.floor(Math.random() * funnyQuotes.length);
+  setRandomQuote(funnyQuotes[randomIndex]);
+}, []);
+
+// Auto-rotate every 20 minutes
+useEffect(() => {
+  const rotateQuote = () => {
+    const currentIndex = funnyQuotes.indexOf(randomQuote);
+    let newIndex;
+    
+    // Get different quote
+    do {
+      newIndex = Math.floor(Math.random() * funnyQuotes.length);
+    } while (newIndex === currentIndex && funnyQuotes.length > 1);
+    
+    setRandomQuote(funnyQuotes[newIndex]);
+  };
+
+  const intervalId = setInterval(rotateQuote, 1200000); // 20 minutes
+  return () => clearInterval(intervalId);
+}, [randomQuote]);
+```
+
+#### Benefits
+- Keeps users engaged
+- Adds personality to app
+- Fresh motivation every 20 minutes
+- Improves user experience
+
+---
+
+### 10.2 Loading States & Animations
+
+**Komponen:** `LoadingSkeleton.tsx`
+
+#### Skeleton Loading
+- Replaces "Memuat data..." text dengan beautiful skeleton
+- Mimics actual layout structure
+- Smooth fade-in animations
+- Staggered entrance (components appear sequentially)
+
+#### Implementation
+```typescript
+// Loading skeleton dengan animations
+<motion.div 
+  initial={{ opacity: 0, y: -20 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ delay: 0.1 }}
+>
+  <Skeleton className="h-10 w-64 mx-auto" />
+</motion.div>
+```
+
+#### Page Transitions
+**Using Motion (Framer Motion):**
+```typescript
+<AnimatePresence mode="wait">
+  <motion.div
+    key={`${selectedYear}-${selectedMonth}`}
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -20 }}
+    transition={{ duration: 0.3, ease: "easeInOut" }}
+  >
+    {/* Page content */}
+  </motion.div>
+</AnimatePresence>
+```
+
+#### Animation Details
+- **Header**: Slide from top with delay 0.1s
+- **Month Selector**: Scale effect with delay 0.15s
+- **Budget Overview**: Slide up with delay 0.2s
+- **Cards**: Individual scale animations
+- **Lists**: Sequential staggered animations
+
+#### Benefits
+- Professional appearance
+- Better perceived performance
+- Visual feedback during loading
+- Smooth transitions between months
+- No jarring jumps
+
+---
+
+### 10.3 Client-Side Caching
+
+**Implementation:** `App.tsx`
+
+#### Purpose
+Prevent re-fetching data untuk bulan yang sudah pernah dibuka, membuat navigasi terasa instant.
+
+#### Cache Structure
+```typescript
+interface MonthCache {
+  budget: BudgetData;
+  expenses: Expense[];
+  additionalIncomes: AdditionalIncome[];
+  previousMonthRemaining: number | null;
+}
+
+const [cache, setCache] = useState<Record<string, MonthCache>>({});
+```
+
+#### Cache Key Format
+```
+YYYY-MM
+Examples: "2024-10", "2025-01"
+```
+
+#### Cache Flow
+```typescript
+useEffect(() => {
+  const cacheKey = getCacheKey(selectedYear, selectedMonth);
+  const cachedData = cache[cacheKey];
+
+  if (cachedData) {
+    // Use cached data - instant load!
+    setBudget(cachedData.budget);
+    setExpenses(cachedData.expenses);
+    setAdditionalIncomes(cachedData.additionalIncomes);
+    setPreviousMonthRemaining(cachedData.previousMonthRemaining);
+    setIsLoading(false);
+  } else {
+    // No cache - fetch from server
+    loadBudgetData();
+    loadExpenses();
+    loadAdditionalIncomes();
+    loadPreviousMonthData();
+  }
+}, [selectedMonth, selectedYear]);
+```
+
+#### Cache Invalidation
+**When to invalidate:**
+- User adds/edits/deletes expense → invalidate current month
+- Also invalidate next month (carryover changes)
+- User adds/edits/deletes income → invalidate current month
+
+**Implementation:**
+```typescript
+const invalidateCache = (year: number, month: number) => {
+  const key = getCacheKey(year, month);
+  setCache((prev) => {
+    const newCache = { ...prev };
+    delete newCache[key];
+    return newCache;
+  });
+
+  // Also invalidate next month (carryover changes)
+  let nextMonth = month + 1;
+  let nextYear = year;
+  if (nextMonth > 12) {
+    nextMonth = 1;
+    nextYear = year + 1;
+  }
+  const nextKey = getCacheKey(nextYear, nextMonth);
+  setCache((prev) => {
+    const newCache = { ...prev };
+    delete newCache[nextKey];
+    return newCache;
+  });
+};
+```
+
+#### User Experience Flow
+1. **Oktober (first visit)**: Loading skeleton → Fetch dari server → Data displayed → Saved to cache
+2. **November (first visit)**: Loading skeleton → Fetch dari server → Data displayed → Saved to cache
+3. **Balik ke Oktober**: **INSTANT!** ⚡ No loading, data dari cache
+4. **Add expense di Oktober**: Update state + invalidate cache Oktober & November
+5. **Visit November lagi**: Loading skeleton (cache invalidated) → Fetch fresh data
+
+#### Benefits
+- ⚡ Lightning-fast navigation untuk bulan yang sudah dibuka
+- 🎯 Better UX - users can quickly compare months
+- 💾 Memory efficient - only caches visited months
+- 🔄 Always fresh - smart invalidation ensures data consistency
+- 📱 Reduces server load - fewer API calls
+
+#### Technical Considerations
+- Cache is stored in React state (memory only)
+- Cache is cleared on page refresh (intentional - ensures fresh data on app restart)
+- No localStorage usage (keeps implementation simple)
+- Cache size is self-limiting (users typically only visit 2-3 months per session)

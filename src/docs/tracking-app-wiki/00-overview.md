@@ -52,6 +52,10 @@ Aplikasi tracking budget bulanan yang komprehensif dengan fitur lengkap untuk me
 - Dialog dengan tabs untuk berbagai input
 - Responsive design
 - Weekend indicator (hijau untuk Sabtu/Minggu)
+- **Rotating motivational quotes** (berganti setiap 20 menit)
+- **Smooth page transitions** dengan animations
+- **Skeleton loading** untuk better perceived performance
+- **Client-side caching** untuk navigasi instant antar bulan
 
 ### 5. Hasil & Summary
 - Total budget (awal + carryover + pemasukan)

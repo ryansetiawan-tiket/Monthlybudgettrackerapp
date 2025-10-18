@@ -5,6 +5,7 @@
 ```
 App.tsx
 ├── Toaster (from sonner)
+├── LoadingSkeleton (conditional)
 ├── MonthSelector
 ├── BudgetForm
 ├── AdditionalIncomeList
@@ -636,6 +637,90 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 ```
+
+---
+
+## 10. LoadingSkeleton.tsx
+
+### Purpose
+Beautiful skeleton loading screen with animations untuk better user experience saat fetching data.
+
+### Features
+- Mimics actual layout structure
+- Smooth fade-in and slide animations
+- Staggered entrance (components appear sequentially)
+- Pulsing dots animation untuk visual feedback
+- No props needed (pure presentational component)
+
+### Structure
+```tsx
+export function LoadingSkeleton() {
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="min-h-screen bg-background p-4 md:p-8"
+    >
+      {/* Header skeleton */}
+      <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+        <Skeleton className="h-10 w-64 mx-auto" />
+        <Skeleton className="h-5 w-96 mx-auto" />
+      </motion.div>
+
+      {/* Month selector skeleton */}
+      <Skeleton className="h-12 w-full max-w-md mx-auto" />
+
+      {/* Budget overview cards skeleton */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-8 w-full" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      {/* More skeletons... */}
+
+      {/* Loading indicator with pulse animation */}
+      <motion.div className="flex items-center justify-center gap-2 py-8">
+        <motion.div
+          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
+          transition={{ duration: 1.5, repeat: Infinity }}
+          className="size-2 rounded-full bg-primary"
+        />
+        {/* More dots... */}
+      </motion.div>
+    </motion.div>
+  );
+}
+```
+
+### Animation Delays
+- Header: 0.1s
+- Month Selector: 0.15s
+- Budget Cards: 0.2s, 0.3s, 0.4s (staggered)
+- Collapsible Section: 0.5s
+- Add Button: 0.6s
+- Expense List: 0.7s
+- List items: 0.7s, 0.8s, 0.9s, 1.0s (staggered)
+
+### Usage
+```tsx
+if (isLoading) {
+  return <LoadingSkeleton />;
+}
+```
+
+### Benefits
+- Professional appearance
+- Better perceived performance (feels faster)
+- Clear visual feedback during loading
+- Prevents layout shift
+- Engaging animation keeps users patient
 
 ---
 
