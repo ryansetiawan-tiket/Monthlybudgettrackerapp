@@ -20,6 +20,7 @@ interface AdditionalIncomeFormProps {
     amountIDR: number;
     conversionType: string;
     date: string;
+    deduction: number;
   }) => void;
   isAdding: boolean;
 }
@@ -38,6 +39,7 @@ export function AdditionalIncomeForm({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [deduction, setDeduction] = useState("");
 
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
 
@@ -142,6 +144,7 @@ export function AdditionalIncomeForm({
       amountIDR: calculateIDR(),
       conversionType: currency === "USD" ? conversionType : "manual",
       date,
+      deduction: Number(deduction) || 0,
     });
 
     // Reset form
@@ -150,6 +153,7 @@ export function AdditionalIncomeForm({
     setCurrency("IDR");
     setConversionType("auto");
     setManualRate("");
+    setDeduction("");
   };
 
   const filteredSuggestions = suggestions.filter((suggestion) =>
@@ -335,6 +339,23 @@ export function AdditionalIncomeForm({
               />
             </PopoverContent>
           </Popover>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="incomeDeduction">Potongan Individual (Optional)</Label>
+          <Input
+            id="incomeDeduction"
+            type="number"
+            value={deduction}
+            onChange={(e) => setDeduction(e.target.value)}
+            placeholder="0"
+          />
+          {deduction && Number(deduction) > 0 && (
+            <div className="p-2 bg-accent rounded-md">
+              <p className="text-sm text-muted-foreground">Nilai Bersih:</p>
+              <p className="text-green-600">{formatCurrency(amountIDR - (Number(deduction) || 0))}</p>
+            </div>
+          )}
         </div>
 
         <Button 

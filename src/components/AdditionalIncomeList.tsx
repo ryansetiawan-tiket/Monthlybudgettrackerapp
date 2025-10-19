@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, ChevronDown, Minus } from "lucide-react";
+import { Badge } from "./ui/badge";
+import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, ChevronDown, Minus, Eye, EyeOff, ArrowDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
@@ -22,6 +23,7 @@ interface AdditionalIncome {
   amountIDR: number;
   conversionType: string;
   date: string;
+  deduction: number;
 }
 
 interface AdditionalIncomeListProps {
@@ -35,12 +37,27 @@ interface AdditionalIncomeListProps {
     amountIDR: number;
     conversionType: string;
     date: string;
+    deduction: number;
   }) => void;
   globalDeduction: number;
   onUpdateGlobalDeduction: (deduction: number) => void;
+  onExcludedIdsChange?: (ids: Set<string>) => void;
+  isDeductionExcluded?: boolean;
+  onDeductionExcludedChange?: (excluded: boolean) => void;
+  onMoveToExpense?: (income: AdditionalIncome) => void;
 }
 
-export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, globalDeduction, onUpdateGlobalDeduction }: AdditionalIncomeListProps) {
+export function AdditionalIncomeList({ 
+  incomes, 
+  onDeleteIncome, 
+  onUpdateIncome, 
+  globalDeduction, 
+  onUpdateGlobalDeduction, 
+  onExcludedIdsChange,
+  isDeductionExcluded = false,
+  onDeductionExcludedChange,
+  onMoveToExpense
+}: AdditionalIncomeListProps) {
   const [editingIncome, setEditingIncome] = useState<AdditionalIncome | null>(null);
   const [editName, setEditName] = useState("");
   const [editAmount, setEditAmount] = useState("");
@@ -49,8 +66,10 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
   const [editExchangeRate, setEditExchangeRate] = useState<number | null>(null);
   const [editManualRate, setEditManualRate] = useState("");
   const [editDate, setEditDate] = useState("");
+  const [editDeduction, setEditDeduction] = useState("");
   const [loadingRate, setLoadingRate] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
 
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
 
@@ -117,6 +136,7 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
     setEditExchangeRate(income.exchangeRate);
     setEditManualRate(income.exchangeRate?.toString() || "");
     setEditDate(income.date || new Date().toISOString().split('T')[0]);
+    setEditDeduction((income.deduction || 0).toString());
     setIsOpen(true);
   };
 
@@ -160,14 +180,84 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
       amountIDR: calculateIDR(),
       conversionType: editCurrency === "USD" ? editConversionType : "manual",
       date: editDate,
+      deduction: Number(editDeduction) || 0,
     });
 
     setEditingIncome(null);
     setIsOpen(false);
   };
 
-  const totalIncome = incomes.reduce((sum, income) => sum + income.amountIDR, 0);
-  const netIncome = totalIncome - globalDeduction;
+  // Toggle exclude income from calculation
+  const handleToggleExclude = useCallback((id: string) => {
+    const income = incomes.find(inc => inc.id === id);
+    setExcludedIncomeIds(prev => {
+      const newSet = new Set(prev);
+      const wasExcluded = newSet.has(id);
+      if (wasExcluded) {
+        newSet.delete(id);
+        if (income) {
+          toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
+        }
+      } else {
+        newSet.add(id);
+        if (income) {
+          toast.info(`${income.name} dikecualikan dari hitungan`);
+        }
+      }
+      // Notify parent about the change
+      if (onExcludedIdsChange) {
+        onExcludedIdsChange(newSet);
+      }
+      return newSet;
+    });
+  }, [onExcludedIdsChange, incomes]);
+
+  const handleToggleExcludeAll = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent collapsible toggle
+    if (incomes.length === 0) return;
+
+    setExcludedIncomeIds(prev => {
+      const allExcluded = prev.size === incomes.length;
+      const newSet = new Set<string>();
+      
+      if (allExcluded) {
+        // Include all items
+        toast.success(`Semua pemasukan tambahan dimasukkan kembali dalam hitungan`);
+        // Also include the global deduction
+        if (onDeductionExcludedChange) {
+          onDeductionExcludedChange(false);
+        }
+      } else {
+        // Exclude all items
+        incomes.forEach(income => newSet.add(income.id));
+        toast.info(`Semua pemasukan tambahan dikecualikan dari hitungan`);
+        // Also exclude the global deduction
+        if (onDeductionExcludedChange) {
+          onDeductionExcludedChange(true);
+        }
+      }
+      
+      // Notify parent about the change
+      if (onExcludedIdsChange) {
+        onExcludedIdsChange(newSet);
+      }
+      return newSet;
+    });
+  }, [incomes, onExcludedIdsChange, onDeductionExcludedChange]);
+
+  // Calculate totals excluding excluded items and apply individual deductions
+  const totalIncomeBeforeIndividualDeduction = incomes
+    .filter(income => !excludedIncomeIds.has(income.id))
+    .reduce((sum, income) => sum + income.amountIDR, 0);
+  const totalIndividualDeduction = incomes
+    .filter(income => !excludedIncomeIds.has(income.id))
+    .reduce((sum, income) => sum + (income.deduction || 0), 0);
+  const totalIncome = totalIncomeBeforeIndividualDeduction - totalIndividualDeduction;
+  const appliedDeduction = isDeductionExcluded ? 0 : globalDeduction;
+  const netIncome = totalIncome - appliedDeduction;
+  
+  // Count excluded items
+  const excludedCount = excludedIncomeIds.size;
 
   return (
     <>
@@ -179,8 +269,30 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
                 <span className="flex items-center gap-2">
                   Pemasukan Tambahan
                   <ChevronDown className={`size-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  {excludedCount > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {excludedCount} excluded
+                    </Badge>
+                  )}
                 </span>
-                <span className="text-sm text-green-600">{formatCurrency(netIncome)}</span>
+                <div className="flex items-center gap-2">
+                  {incomes.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleToggleExcludeAll}
+                      title={excludedIncomeIds.size === incomes.length ? "Tampilkan semua" : "Sembunyikan semua"}
+                    >
+                      {excludedIncomeIds.size === incomes.length ? (
+                        <EyeOff className="size-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="size-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  )}
+                  <span className="text-sm text-green-600">{formatCurrency(netIncome)}</span>
+                </div>
               </CardTitle>
             </CardHeader>
           </CollapsibleTrigger>
@@ -192,49 +304,86 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {incomes.map((income) => (
-                    <div
-                      key={income.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p>{income.name}</p>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(income.date)}
-                          </span>
-                        </div>
-                        {income.currency === "USD" && (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <DollarSign className="size-3" />
-                            <span>
-                              {formatUSD(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
-                              <span className="ml-1 text-xs">
-                                ({income.conversionType === "auto" ? "realtime" : "manual"})
-                              </span>
+                  {incomes.map((income) => {
+                    const isExcluded = excludedIncomeIds.has(income.id);
+                    return (
+                      <div
+                        key={income.id}
+                        className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className={isExcluded ? 'line-through' : ''}>{income.name}</p>
+                            <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                              {formatDate(income.date)}
                             </span>
                           </div>
-                        )}
+                          {income.currency === "USD" && (
+                            <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                              <DollarSign className="size-3" />
+                              <span>
+                                {formatUSD(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
+                                <span className="ml-1 text-xs">
+                                  ({income.conversionType === "auto" ? "realtime" : "manual"})
+                                </span>
+                              </span>
+                            </div>
+                          )}
+                          {income.deduction && income.deduction > 0 && (
+                            <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                              <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className={`text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                              {formatCurrency(income.deduction && income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
+                            </p>
+                            {income.deduction && income.deduction > 0 && (
+                              <p className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                Kotor: {formatCurrency(income.amountIDR)}
+                              </p>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleToggleExclude(income.id)}
+                            title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                          >
+                            {isExcluded ? (
+                              <EyeOff className="size-4 text-muted-foreground" />
+                            ) : (
+                              <Eye className="size-4 text-muted-foreground" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onMoveToExpense?.(income)}
+                            title="Pindahkan ke pengeluaran"
+                          >
+                            <ArrowDown className="size-4 text-blue-500" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(income)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onDeleteIncome(income.id)}
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <p className="text-green-600">{formatCurrency(income.amountIDR)}</p>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(income)}
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onDeleteIncome(income.id)}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -242,21 +391,64 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
                 <div className="pt-4 border-t space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Total Kotor</span>
-                    <span>{formatCurrency(totalIncome)}</span>
+                    <span>{formatCurrency(totalIncomeBeforeIndividualDeduction)}</span>
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label htmlFor="globalDeduction" className="text-sm flex items-center gap-2">
-                      <Minus className="size-3 text-red-600" />
-                      Potongan
-                    </Label>
+                  {totalIndividualDeduction > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-1">
+                        <Minus className="size-3 text-red-600" />
+                        Potongan Individual
+                      </span>
+                      <span className="text-red-600">-{formatCurrency(totalIndividualDeduction)}</span>
+                    </div>
+                  )}
+                  
+                  {totalIndividualDeduction > 0 && (
+                    <div className="flex items-center justify-between text-sm pt-2 border-t">
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span>{formatCurrency(totalIncome)}</span>
+                    </div>
+                  )}
+                  
+                  <div className={`space-y-2 ${isDeductionExcluded ? 'opacity-50' : ''}`}>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="globalDeduction" className="text-sm flex items-center gap-2">
+                        <Minus className="size-3 text-red-600" />
+                        <span className={isDeductionExcluded ? 'line-through' : ''}>Potongan Global</span>
+                        {isDeductionExcluded && (
+                          <Badge variant="secondary" className="text-xs">
+                            excluded
+                          </Badge>
+                        )}
+                      </Label>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6"
+                        onClick={() => {
+                          const newValue = !isDeductionExcluded;
+                          if (onDeductionExcludedChange) {
+                            onDeductionExcludedChange(newValue);
+                          }
+                          toast.info(newValue ? "Potongan dikecualikan dari hitungan" : "Potongan dimasukkan dalam hitungan");
+                        }}
+                        title={isDeductionExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                      >
+                        {isDeductionExcluded ? (
+                          <EyeOff className="size-3 text-muted-foreground" />
+                        ) : (
+                          <Eye className="size-3 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
                     <Input
                       id="globalDeduction"
                       type="number"
                       value={globalDeduction || ""}
                       onChange={(e) => onUpdateGlobalDeduction(Number(e.target.value) || 0)}
                       placeholder="0"
-                      className="text-sm"
+                      className={`text-sm ${isDeductionExcluded ? 'line-through' : ''}`}
                     />
                   </div>
 
@@ -417,6 +609,28 @@ export function AdditionalIncomeList({ incomes, onDeleteIncome, onUpdateIncome, 
                   />
                 </PopoverContent>
               </Popover>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="editDeduction">Potongan Individual (Optional)</Label>
+              <Input
+                id="editDeduction"
+                type="number"
+                value={editDeduction}
+                onChange={(e) => setEditDeduction(e.target.value)}
+                placeholder="0"
+              />
+              {editDeduction && Number(editDeduction) > 0 && (
+                <div className="p-2 bg-accent rounded-md space-y-1">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Nilai Bersih (Net):</p>
+                    <p className="text-green-600">{formatCurrency(calculateIDR() - (Number(editDeduction) || 0))}</p>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Kotor: {formatCurrency(calculateIDR())}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>

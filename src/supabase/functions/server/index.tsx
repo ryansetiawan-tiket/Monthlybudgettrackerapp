@@ -39,6 +39,7 @@ app.get("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
         carryover: 0,
         additionalIncome: 0,
         notes: "",
+        incomeDeduction: 0,
       });
     }
     
@@ -57,12 +58,13 @@ app.post("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
     const key = `budget:${year}-${month}`;
     
     const body = await c.req.json();
-    const { initialBudget, carryover, notes } = body;
+    const { initialBudget, carryover, notes, incomeDeduction } = body;
     
     const budgetData = {
       initialBudget: Number(initialBudget) || 0,
       carryover: Number(carryover) || 0,
       notes: notes || "",
+      incomeDeduction: Number(incomeDeduction) || 0,
       updatedAt: new Date().toISOString(),
     };
     
@@ -98,7 +100,9 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, date, items, color } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction } = body;
+    
+    console.log('POST expense - Received body:', body);
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -114,8 +118,16 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       date: date || new Date().toISOString().split('T')[0],
       ...(items && items.length > 0 ? { items } : {}),
       ...(color ? { color } : {}),
+      ...(fromIncome ? { fromIncome: true } : {}),
+      ...(currency ? { currency } : {}),
+      ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
+      ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
+      ...(conversionType ? { conversionType } : {}),
+      ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
       createdAt: new Date().toISOString(),
     };
+    
+    console.log('POST expense - Saving to DB:', expenseData);
     
     await kv.set(key, expenseData);
     
@@ -152,7 +164,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     const key = `expense:${year}-${month}:${id}`;
     const body = await c.req.json();
     
-    const { name, amount, date, items, color } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -165,6 +177,12 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
       date: date || new Date().toISOString().split('T')[0],
       ...(items && items.length > 0 ? { items } : {}),
       ...(color ? { color } : {}),
+      ...(fromIncome ? { fromIncome: true } : {}),
+      ...(currency ? { currency } : {}),
+      ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
+      ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
+      ...(conversionType ? { conversionType } : {}),
+      ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
       updatedAt: new Date().toISOString(),
     };
     
@@ -200,7 +218,9 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date } = body;
+    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction } = body;
+    
+    console.log('POST income - Received body:', body);
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -218,8 +238,11 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
       amountIDR: Number(amountIDR),
       conversionType: conversionType || "manual",
       date: date || new Date().toISOString().split('T')[0],
+      deduction: Number(deduction) || 0,
       createdAt: new Date().toISOString(),
     };
+    
+    console.log('POST income - Saving to DB:', incomeData);
     
     await kv.set(key, incomeData);
     
@@ -260,7 +283,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
     const key = `income:${year}-${month}:${id}`;
     const body = await c.req.json();
     
-    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date } = body;
+    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -275,6 +298,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
       amountIDR: Number(amountIDR),
       conversionType: conversionType || "manual",
       date: date || new Date().toISOString().split('T')[0],
+      deduction: Number(deduction) || 0,
       updatedAt: new Date().toISOString(),
     };
     

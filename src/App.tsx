@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MonthSelector } from "./components/MonthSelector";
 import { BudgetOverview } from "./components/BudgetOverview";
 import { BudgetForm } from "./components/BudgetForm";
@@ -36,6 +36,12 @@ interface Expense {
   date: string;
   items?: ExpenseItem[];
   color?: string;
+  fromIncome?: boolean;
+  currency?: string;
+  originalAmount?: number;
+  exchangeRate?: number;
+  conversionType?: string;
+  deduction?: number;
 }
 
 interface AdditionalIncome {
@@ -47,6 +53,7 @@ interface AdditionalIncome {
   amountIDR: number;
   conversionType: string;
   date: string;
+  deduction: number;
 }
 
 interface MonthCache {
@@ -114,6 +121,9 @@ export default function App() {
   const [isBudgetSectionOpen, setIsBudgetSectionOpen] = useState(false);
   const [templates, setTemplates] = useState<FixedExpenseTemplate[]>([]);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
+  const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
+  const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
+  const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
 
   // Client-side cache for month data
   const [cache, setCache] = useState<Record<string, MonthCache>>({});
@@ -173,6 +183,11 @@ export default function App() {
   useEffect(() => {
     const cacheKey = getCacheKey(selectedYear, selectedMonth);
     const cachedData = cache[cacheKey];
+
+    // Reset excluded expenses and incomes when month changes
+    setExcludedExpenseIds(new Set());
+    setExcludedIncomeIds(new Set());
+    setIsDeductionExcluded(false);
 
     if (cachedData) {
       // Use cached data - instant load!
@@ -241,6 +256,7 @@ export default function App() {
       }
 
       const data = await response.json();
+      console.log('Expenses loaded from server:', data);
       setExpenses(data);
       
       // Update cache with loaded data
@@ -267,6 +283,7 @@ export default function App() {
       }
 
       const data = await response.json();
+      console.log('Additional incomes loaded from server:', data);
       setAdditionalIncomes(data);
       
       // Update cache with loaded data
@@ -613,7 +630,9 @@ export default function App() {
       }
 
       const result = await response.json();
-      const newExpenses = expenses.map((expense) => (expense.id === id ? result.data : expense));
+      // Preserve fromIncome flag if it exists in the update
+      const updatedData = updatedExpense.fromIncome ? { ...result.data, fromIncome: true } : result.data;
+      const newExpenses = expenses.map((expense) => (expense.id === id ? updatedData : expense));
       setExpenses(newExpenses);
       
       // Update cache
@@ -636,6 +655,7 @@ export default function App() {
     amountIDR: number;
     conversionType: string;
     date: string;
+    deduction: number;
   }) => {
     setIsAddingIncome(true);
     try {
@@ -690,6 +710,141 @@ export default function App() {
     }
   };
 
+  const handleMoveIncomeToExpense = async (income: AdditionalIncome) => {
+    try {
+      // Add as expense with fromIncome flag and preserve all conversion data
+      const response = await fetch(
+        `${baseUrl}/expenses/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({ 
+            name: income.name, 
+            amount: income.amountIDR - (income.deduction || 0), // Nilai bersih (net amount)
+            date: income.date,
+            fromIncome: true,
+            currency: income.currency,
+            originalAmount: income.amount,
+            exchangeRate: income.exchangeRate,
+            conversionType: income.conversionType,
+            deduction: income.deduction || 0,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to add expense");
+      }
+
+      const result = await response.json();
+      console.log('Moving income to expense - Income data:', income);
+      console.log('Moving income to expense - Server response:', result.data);
+      
+      // Ensure fromIncome flag is set (workaround if server didn't save it)
+      const expenseWithFlag = {
+        ...result.data,
+        fromIncome: true,
+        currency: income.currency,
+        originalAmount: income.amount,
+        exchangeRate: income.exchangeRate,
+        conversionType: income.conversionType,
+        deduction: income.deduction || 0,
+      };
+      console.log('Moving income to expense - Final expense object:', expenseWithFlag);
+      
+      // Delete from income
+      const deleteResponse = await fetch(
+        `${baseUrl}/additional-income/${selectedYear}/${selectedMonth}/${income.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!deleteResponse.ok) {
+        throw new Error("Failed to delete income");
+      }
+
+      // Update states with the flagged expense
+      setExpenses((prev) => [...prev, expenseWithFlag]);
+      setAdditionalIncomes((prev) => prev.filter((inc) => inc.id !== income.id));
+      
+      // Invalidate cache (both income and expense changed)
+      invalidateCache(selectedYear, selectedMonth);
+      
+      toast.success(`"${income.name}" dipindahkan ke pengeluaran`);
+    } catch (error) {
+      console.log(`Error moving income to expense: ${error}`);
+      toast.error("Gagal memindahkan ke pengeluaran");
+    }
+  };
+
+  const handleMoveExpenseToIncome = async (expense: Expense) => {
+    try {
+      // Add back as income - preserve conversion data if it exists
+      const hasConversionData = expense.currency && expense.originalAmount !== undefined;
+      
+      const response = await fetch(
+        `${baseUrl}/additional-income/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({
+            name: expense.name,
+            amount: hasConversionData ? expense.originalAmount : (expense.amount + (expense.deduction || 0)),
+            currency: expense.currency || "IDR",
+            exchangeRate: expense.exchangeRate || null,
+            amountIDR: expense.amount + (expense.deduction || 0), // Nilai kotor (gross)
+            conversionType: expense.conversionType || "manual",
+            date: expense.date,
+            deduction: expense.deduction || 0,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to add back to income");
+      }
+
+      const result = await response.json();
+      
+      // Delete from expenses
+      const deleteResponse = await fetch(
+        `${baseUrl}/expenses/${selectedYear}/${selectedMonth}/${expense.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!deleteResponse.ok) {
+        throw new Error("Failed to delete expense");
+      }
+
+      // Update states
+      setAdditionalIncomes((prev) => [...prev, result.data]);
+      setExpenses((prev) => prev.filter((exp) => exp.id !== expense.id));
+      
+      // Invalidate cache
+      invalidateCache(selectedYear, selectedMonth);
+      
+      toast.success(`"${expense.name}" dikembalikan ke pemasukan tambahan`);
+    } catch (error) {
+      console.log(`Error moving expense to income: ${error}`);
+      toast.error("Gagal mengembalikan ke pemasukan");
+    }
+  };
+
   const handleUpdateIncome = async (id: string, income: {
     name: string;
     amount: number;
@@ -698,6 +853,7 @@ export default function App() {
     amountIDR: number;
     conversionType: string;
     date: string;
+    deduction: number;
   }) => {
     try {
       const response = await fetch(
@@ -730,6 +886,52 @@ export default function App() {
     }
   };
 
+  const handleBulkDeleteExpenses = useCallback(async (ids: string[]) => {
+    try {
+      // Delete all expenses in parallel
+      const deletePromises = ids.map(id =>
+        fetch(
+          `${baseUrl}/expenses/${selectedYear}/${selectedMonth}/${id}`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+          }
+        )
+      );
+
+      const results = await Promise.allSettled(deletePromises);
+      
+      // Check for failures
+      const failures = results.filter(r => r.status === 'rejected');
+      const successes = results.filter(r => r.status === 'fulfilled');
+      
+      if (failures.length > 0) {
+        console.log(`Some deletes failed: ${failures.length} out of ${ids.length}`);
+      }
+
+      // Update local state - remove successfully deleted items
+      setExpenses(prev => prev.filter(exp => !ids.includes(exp.id)));
+      
+      // Update cache after state update
+      const newExpenses = expenses.filter(exp => !ids.includes(exp.id));
+      updateCachePartial('expenses', newExpenses);
+      
+      // Invalidate next month's cache (carryover changes)
+      invalidateCache(selectedYear, selectedMonth);
+
+      if (failures.length > 0 && successes.length > 0) {
+        toast.warning(`${successes.length} dari ${ids.length} pengeluaran berhasil dihapus`);
+      } else if (failures.length > 0) {
+        throw new Error("All deletes failed");
+      }
+    } catch (error) {
+      console.log(`Error bulk deleting expenses: ${error}`);
+      throw error; // Re-throw to be caught by ExpenseList
+    }
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, expenses, updateCachePartial, invalidateCache]);
+
   const handleMonthChange = (month: number, year: number) => {
     setSelectedMonth(month);
     setSelectedYear(year);
@@ -739,6 +941,11 @@ export default function App() {
   const handleUpdateGlobalDeduction = async (deduction: number) => {
     const newBudget = { ...budget, incomeDeduction: deduction };
     setBudget(newBudget);
+    
+    // Update cache
+    updateCachePartial('budget', newBudget);
+    // Invalidate next month's cache (carryover changes)
+    invalidateCache(selectedYear, selectedMonth);
     
     // Auto-save on change
     try {
@@ -759,19 +966,34 @@ export default function App() {
       }
     } catch (error) {
       console.log(`Error saving global deduction: ${error}`);
+      toast.error("Gagal menyimpan potongan");
     }
   };
 
-  const grossAdditionalIncome = additionalIncomes.reduce(
-    (sum, income) => sum + income.amountIDR, 
-    0
-  );
-  const totalAdditionalIncome = grossAdditionalIncome - (budget.incomeDeduction || 0);
+  // Calculate gross additional income excluding excluded items and apply individual deductions
+  const grossAdditionalIncome = additionalIncomes
+    .filter(income => !excludedIncomeIds.has(income.id))
+    .reduce((sum, income) => {
+      const netAmount = income.amountIDR - (income.deduction || 0);
+      return sum + netAmount;
+    }, 0);
+  // Apply global deduction only if not excluded
+  const appliedDeduction = isDeductionExcluded ? 0 : (budget.incomeDeduction || 0);
+  const totalAdditionalIncome = grossAdditionalIncome - appliedDeduction;
   const totalIncome =
     Number(budget.initialBudget) +
     Number(budget.carryover) +
     totalAdditionalIncome;
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  // Calculate total expenses excluding excluded items
+  // Items from income (fromIncome: true) add to budget instead of subtracting
+  const totalExpenses = expenses
+    .filter(expense => !excludedExpenseIds.has(expense.id))
+    .reduce((sum, expense) => {
+      if (expense.fromIncome) {
+        return sum - expense.amount; // Subtract from expenses (adds to budget)
+      }
+      return sum + expense.amount;
+    }, 0);
   const remainingBudget = totalIncome - totalExpenses;
 
   if (isLoading) {
@@ -863,6 +1085,10 @@ export default function App() {
                     onUpdateIncome={handleUpdateIncome} 
                     globalDeduction={budget.incomeDeduction || 0}
                     onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
+                    onExcludedIdsChange={setExcludedIncomeIds}
+                    isDeductionExcluded={isDeductionExcluded}
+                    onDeductionExcludedChange={setIsDeductionExcluded}
+                    onMoveToExpense={handleMoveIncomeToExpense}
                   />
                 </div>
               </CollapsibleContent>
@@ -900,7 +1126,14 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
           >
-            <ExpenseList expenses={expenses} onDeleteExpense={handleDeleteExpense} onEditExpense={handleEditExpense} />
+            <ExpenseList 
+              expenses={expenses} 
+              onDeleteExpense={handleDeleteExpense} 
+              onEditExpense={handleEditExpense}
+              onBulkDeleteExpenses={handleBulkDeleteExpenses}
+              onExcludedIdsChange={setExcludedExpenseIds}
+              onMoveToIncome={handleMoveExpenseToIncome}
+            />
           </motion.div>
         </div>
         

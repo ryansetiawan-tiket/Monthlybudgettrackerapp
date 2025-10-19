@@ -1,11 +1,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search } from "lucide-react";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowUp, DollarSign, Minus } from "lucide-react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle 
+} from "./ui/alert-dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Checkbox } from "./ui/checkbox";
+import { toast } from "sonner@2.0.3";
 
 interface ExpenseItem {
   name: string;
@@ -19,26 +31,58 @@ interface Expense {
   date: string;
   items?: ExpenseItem[];
   color?: string;
+  fromIncome?: boolean;
+  currency?: string;
+  originalAmount?: number;
+  exchangeRate?: number;
+  conversionType?: string;
+  deduction?: number;
 }
 
 interface ExpenseListProps {
   expenses: Expense[];
   onDeleteExpense: (id: string) => void;
   onEditExpense: (id: string, expense: Omit<Expense, 'id'>) => void;
+  onBulkDeleteExpenses: (ids: string[]) => Promise<void>;
+  onExcludedIdsChange?: (ids: Set<string>) => void;
+  onMoveToIncome?: (expense: Expense) => void;
 }
 
-export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: ExpenseListProps) {
+export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, onExcludedIdsChange, onMoveToIncome }: ExpenseListProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [editingExpense, setEditingExpense] = useState<Omit<Expense, 'id'>>({ name: '', amount: 0, date: '', items: [], color: '' });
+  const [editingExpense, setEditingExpense] = useState<Omit<Expense, 'id'>>({ 
+    name: '', 
+    amount: 0, 
+    date: '', 
+    items: [], 
+    color: '', 
+    fromIncome: undefined,
+    currency: undefined,
+    originalAmount: undefined,
+    exchangeRate: undefined,
+    conversionType: undefined,
+    deduction: undefined
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [upcomingExpanded, setUpcomingExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [expenseToDelete, setExpenseToDelete] = useState<{ id: string; name: string; amount: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+  
+  // Bulk select states
+  const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  
+  // Exclude from calculation states
+  const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
 
   // Helper function to get day name
   const getDayName = (dateString: string): string => {
@@ -221,59 +265,41 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
     return date < today;
   };
 
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-
-  const handleEditExpense = (id: string) => {
-    const expense = expenses.find(e => e.id === id);
-    if (expense) {
-      setEditingExpenseId(id);
-      setEditingExpense({ 
-        name: expense.name, 
-        amount: expense.amount, 
-        date: expense.date, 
-        items: expense.items ? [...expense.items] : [], 
-        color: expense.color || '' 
-      });
-    }
-  };
-
-  const handleSaveEditExpense = () => {
-    if (editingExpenseId) {
-      // Recalculate amount if items exist
-      let finalAmount = editingExpense.amount;
-      if (editingExpense.items && editingExpense.items.length > 0) {
-        finalAmount = editingExpense.items.reduce((sum, item) => sum + item.amount, 0);
+  // Toggle exclude expense from calculation
+  const handleToggleExclude = useCallback((id: string) => {
+    const expense = expenses.find(exp => exp.id === id);
+    setExcludedExpenseIds(prev => {
+      const newSet = new Set(prev);
+      const wasExcluded = newSet.has(id);
+      if (wasExcluded) {
+        newSet.delete(id);
+        if (expense) {
+          toast.success(`${expense.name} dimasukkan kembali dalam hitungan`);
+        }
+      } else {
+        newSet.add(id);
+        if (expense) {
+          toast.info(`${expense.name} dikecualikan dari hitungan`);
+        }
       }
-      
-      onEditExpense(editingExpenseId, { ...editingExpense, amount: finalAmount });
-      setEditingExpenseId(null);
-      setEditingExpense({ name: '', amount: 0, date: '', items: [], color: '' });
-    }
-  };
-
-  const handleCloseEditDialog = () => {
-    setEditingExpenseId(null);
-    setEditingExpense({ name: '', amount: 0, date: '', items: [], color: '' });
-  };
-
-  const handleUpdateItem = (index: number, field: 'name' | 'amount', value: string | number) => {
-    const newItems = [...(editingExpense.items || [])];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setEditingExpense({ ...editingExpense, items: newItems });
-  };
-
-  const handleAddItem = () => {
-    setEditingExpense({ 
-      ...editingExpense, 
-      items: [...(editingExpense.items || []), { name: '', amount: 0 }] 
+      // Notify parent about the change
+      if (onExcludedIdsChange) {
+        onExcludedIdsChange(newSet);
+      }
+      return newSet;
     });
-  };
+  }, [onExcludedIdsChange, expenses]);
 
-  const handleRemoveItem = (index: number) => {
-    const newItems = [...(editingExpense.items || [])];
-    newItems.splice(index, 1);
-    setEditingExpense({ ...editingExpense, items: newItems });
-  };
+  // Calculate totals excluding excluded items
+  // Items from income (fromIncome: true) subtract from expenses
+  const totalExpenses = expenses
+    .filter(expense => !excludedExpenseIds.has(expense.id))
+    .reduce((sum, expense) => {
+      if (expense.fromIncome) {
+        return sum - expense.amount;
+      }
+      return sum + expense.amount;
+    }, 0);
 
   // Fuzzy search function - checks if expense name, items, day name, or date matches
   const fuzzyMatch = (expense: Expense, query: string): boolean => {
@@ -334,33 +360,257 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
       .filter((expense) => fuzzyMatch(expense, searchQuery));
   }, [expenses, sortOrder, searchQuery]);
 
+  // Check if all filtered expenses are selected
+  const isAllSelected = useMemo(() => {
+    return sortedAndFilteredExpenses.length > 0 && 
+           selectedExpenseIds.size === sortedAndFilteredExpenses.length &&
+           sortedAndFilteredExpenses.every(exp => selectedExpenseIds.has(exp.id));
+  }, [selectedExpenseIds, sortedAndFilteredExpenses]);
+
+  // Bulk select handlers with useCallback for performance
+  const handleActivateBulkMode = useCallback(() => {
+    setIsBulkSelectMode(true);
+    setSelectedExpenseIds(new Set());
+  }, []);
+
+  const handleCancelBulkMode = useCallback(() => {
+    setIsBulkSelectMode(false);
+    setSelectedExpenseIds(new Set());
+  }, []);
+
+  const handleToggleExpense = useCallback((id: string) => {
+    setSelectedExpenseIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (isAllSelected) {
+      setSelectedExpenseIds(new Set());
+    } else {
+      const allIds = new Set(sortedAndFilteredExpenses.map(exp => exp.id));
+      setSelectedExpenseIds(allIds);
+    }
+  }, [isAllSelected, sortedAndFilteredExpenses]);
+
+  const handleBulkDelete = useCallback(() => {
+    if (selectedExpenseIds.size === 0) return;
+    setShowBulkDeleteDialog(true);
+  }, [selectedExpenseIds.size]);
+
+  const handleConfirmBulkDelete = useCallback(async () => {
+    const idsToDelete = Array.from(selectedExpenseIds);
+    
+    setIsBulkDeleting(true);
+    try {
+      await onBulkDeleteExpenses(idsToDelete);
+      
+      setSelectedExpenseIds(new Set());
+      setIsBulkSelectMode(false);
+      setShowBulkDeleteDialog(false);
+      
+      toast.success(`${idsToDelete.length} pengeluaran berhasil dihapus`);
+    } catch (error) {
+      console.log(`Error in bulk delete: ${error}`);
+      toast.error("Gagal menghapus beberapa pengeluaran");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }, [selectedExpenseIds, onBulkDeleteExpenses]);
+
+  // Auto-exit bulk mode when expenses change (e.g., month change)
+  useEffect(() => {
+    if (isBulkSelectMode) {
+      // Keep selections valid - remove any that no longer exist
+      const validIds = new Set(
+        Array.from(selectedExpenseIds).filter(id => 
+          expenses.some(exp => exp.id === id)
+        )
+      );
+      if (validIds.size !== selectedExpenseIds.size) {
+        setSelectedExpenseIds(validIds);
+      }
+    }
+  }, [expenses, isBulkSelectMode, selectedExpenseIds]);
+
+  // Clean up excluded IDs when expenses change (remove deleted expenses from excluded list)
+  useEffect(() => {
+    const validExcludedIds = new Set(
+      Array.from(excludedExpenseIds).filter(id => 
+        expenses.some(exp => exp.id === id)
+      )
+    );
+    if (validExcludedIds.size !== excludedExpenseIds.size) {
+      setExcludedExpenseIds(validExcludedIds);
+      if (onExcludedIdsChange) {
+        onExcludedIdsChange(validExcludedIds);
+      }
+    }
+  }, [expenses, excludedExpenseIds, onExcludedIdsChange]);
+
+  // Keyboard support: Escape to exit bulk mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isBulkSelectMode) {
+        handleCancelBulkMode();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isBulkSelectMode, handleCancelBulkMode]);
+
+  const handleEditExpense = (id: string) => {
+    const expense = expenses.find(e => e.id === id);
+    if (expense) {
+      setEditingExpenseId(id);
+      setEditingExpense({ 
+        name: expense.name, 
+        amount: expense.amount, 
+        date: expense.date, 
+        items: expense.items ? [...expense.items] : [], 
+        color: expense.color || '',
+        fromIncome: expense.fromIncome,
+        currency: expense.currency,
+        originalAmount: expense.originalAmount,
+        exchangeRate: expense.exchangeRate,
+        conversionType: expense.conversionType,
+        deduction: expense.deduction
+      });
+    }
+  };
+
+  const handleSaveEditExpense = () => {
+    if (editingExpenseId) {
+      // Recalculate amount if items exist
+      let finalAmount = editingExpense.amount;
+      if (editingExpense.items && editingExpense.items.length > 0) {
+        finalAmount = editingExpense.items.reduce((sum, item) => sum + item.amount, 0);
+      }
+      
+      onEditExpense(editingExpenseId, { ...editingExpense, amount: finalAmount });
+      setEditingExpenseId(null);
+      setEditingExpense({ 
+        name: '', 
+        amount: 0, 
+        date: '', 
+        items: [], 
+        color: '', 
+        fromIncome: undefined,
+        currency: undefined,
+        originalAmount: undefined,
+        exchangeRate: undefined,
+        conversionType: undefined,
+        deduction: undefined
+      });
+    }
+  };
+
+  const handleCloseEditDialog = () => {
+    setEditingExpenseId(null);
+    setEditingExpense({ 
+      name: '', 
+      amount: 0, 
+      date: '', 
+      items: [], 
+      color: '', 
+      fromIncome: undefined,
+      currency: undefined,
+      originalAmount: undefined,
+      exchangeRate: undefined,
+      conversionType: undefined,
+      deduction: undefined
+    });
+  };
+
+  const handleUpdateItem = (index: number, field: 'name' | 'amount', value: string | number) => {
+    const newItems = [...(editingExpense.items || [])];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setEditingExpense({ ...editingExpense, items: newItems });
+  };
+
+  const handleAddItem = () => {
+    setEditingExpense({ 
+      ...editingExpense, 
+      items: [...(editingExpense.items || []), { name: '', amount: 0 }] 
+    });
+  };
+
+  const handleRemoveItem = (index: number) => {
+    const newItems = [...(editingExpense.items || [])];
+    newItems.splice(index, 1);
+    setEditingExpense({ ...editingExpense, items: newItems });
+  };
+
   // Split into upcoming and history
   const upcomingExpenses = sortedAndFilteredExpenses.filter(exp => !isPast(exp.date));
   const historyExpenses = sortedAndFilteredExpenses.filter(exp => isPast(exp.date));
 
-  // Calculate subtotals
-  const upcomingTotal = upcomingExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const historyTotal = historyExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  // Calculate subtotals (excluding excluded items)
+  // Items from income (fromIncome: true) subtract from expenses
+  const upcomingTotal = upcomingExpenses
+    .filter(expense => !excludedExpenseIds.has(expense.id))
+    .reduce((sum, expense) => {
+      if (expense.fromIncome) {
+        return sum - expense.amount;
+      }
+      return sum + expense.amount;
+    }, 0);
+  const historyTotal = historyExpenses
+    .filter(expense => !excludedExpenseIds.has(expense.id))
+    .reduce((sum, expense) => {
+      if (expense.fromIncome) {
+        return sum - expense.amount;
+      }
+      return sum + expense.amount;
+    }, 0);
 
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
+    const isExcluded = excludedExpenseIds.has(expense.id);
+    
+    // Debug: Log fromIncome expenses with deduction data
+    if (expense.fromIncome) {
+      console.log('Rendering fromIncome expense:', {
+        name: expense.name,
+        amount: expense.amount,
+        deduction: expense.deduction,
+        currency: expense.currency,
+        originalAmount: expense.originalAmount,
+        exchangeRate: expense.exchangeRate
+      });
+    }
+    
     if (expense.items && expense.items.length > 0) {
       return (
         <Collapsible key={expense.id} open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''}`}>
+          <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
             <CollapsibleTrigger asChild>
               <div className="flex items-center justify-between p-3 cursor-pointer">
                 <div className="flex-1 flex items-center gap-2">
+                  {isBulkSelectMode && (
+                    <Checkbox
+                      checked={selectedExpenseIds.has(expense.id)}
+                      onCheckedChange={() => handleToggleExpense(expense.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
                   {isToday(expense.date) && (
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
                   )}
                   <span 
-                    className={isWeekend(expense.date) ? "text-green-600" : ""}
-                    style={expense.color && !isWeekend(expense.date) ? { color: expense.color } : {}}
+                    className={`${isWeekend(expense.date) || expense.fromIncome ? "text-green-600" : ""} ${isExcluded ? 'line-through' : ''}`}
+                    style={expense.color && !isWeekend(expense.date) && !expense.fromIncome ? { color: expense.color } : {}}
                   >
                     {formatDateShort(expense.date)}
                   </span>
-                  <p className="text-sm text-muted-foreground">{expense.name}</p>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
                   {expandedItems.has(expense.id) ? (
                     <ChevronUp className="size-4" />
                   ) : (
@@ -368,30 +618,79 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
                   )}
                 </div>
                 <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                  <p className="text-red-600">{formatCurrency(expense.amount)}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onDeleteExpense(expense.id)}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleEditExpense(expense.id)}
-                  >
-                    <Pencil className="size-4 text-muted-foreground" />
-                  </Button>
+                  <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                    {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+                  </p>
+                  {!isBulkSelectMode && (
+                    <>
+                      {expense.fromIncome && onMoveToIncome && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onMoveToIncome(expense)}
+                          title="Kembalikan ke pemasukan tambahan"
+                        >
+                          <ArrowLeft className="size-4 text-green-600" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleToggleExclude(expense.id)}
+                        title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                      >
+                        {isExcluded ? (
+                          <EyeOff className="size-4 text-muted-foreground" />
+                        ) : (
+                          <Eye className="size-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEditExpense(expense.id)}
+                      >
+                        <Pencil className="size-4 text-muted-foreground" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                          setDeleteConfirmOpen(true);
+                        }}
+                      >
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="px-3 pb-3 space-y-1 border-t pt-2 mt-1">
+                {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                  <div className={`flex items-center gap-2 text-sm text-green-600 pl-8 mb-2 ${isExcluded ? 'line-through' : ''}`}>
+                    <DollarSign className="size-3" />
+                    <span>
+                      {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                      <span className="ml-1 text-xs">
+                        ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                  <div className={`text-xs text-muted-foreground pl-8 mb-2 ${isExcluded ? 'line-through' : ''}`}>
+                    <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
+                  </div>
+                )}
                 {expense.items.map((item, index) => (
-                  <div key={index} className="flex justify-between text-sm pl-8">
+                  <div key={index} className={`flex justify-between text-sm pl-8 ${isExcluded ? 'line-through' : ''}`}>
                     <span className="text-muted-foreground">{item.name}</span>
-                    <span className="text-red-600">{formatCurrency(item.amount)}</span>
+                    <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
+                      {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -403,33 +702,86 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
       return (
         <div
           key={expense.id}
-          className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''}`}
+          className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
         >
           <div className="flex-1 flex items-center gap-2">
+            {isBulkSelectMode && (
+              <Checkbox
+                checked={selectedExpenseIds.has(expense.id)}
+                onCheckedChange={() => handleToggleExpense(expense.id)}
+              />
+            )}
             {isToday(expense.date) && (
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
             )}
             <div>
-              <p>{expense.name}</p>
-              <p className="text-sm text-muted-foreground">{formatDateShort(expense.date)}</p>
+              <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+              {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                <div className={`flex items-center gap-2 text-sm text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                  <DollarSign className="size-3" />
+                  <span>
+                    {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                    <span className="ml-1 text-xs">
+                      ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                    </span>
+                  </span>
+                </div>
+              )}
+              {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                  <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
+                </div>
+              )}
+              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>{formatDateShort(expense.date)}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <p className="text-red-600">{formatCurrency(expense.amount)}</p>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onDeleteExpense(expense.id)}
-            >
-              <Trash2 className="size-4 text-destructive" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleEditExpense(expense.id)}
-            >
-              <Pencil className="size-4 text-muted-foreground" />
-            </Button>
+            <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+              {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+            </p>
+            {!isBulkSelectMode && (
+              <>
+                {expense.fromIncome && onMoveToIncome && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onMoveToIncome(expense)}
+                    title="Kembalikan ke pemasukan tambahan"
+                  >
+                    <ArrowUp className="size-4 text-green-600" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleToggleExclude(expense.id)}
+                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                >
+                  {isExcluded ? (
+                    <EyeOff className="size-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="size-4 text-muted-foreground" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleEditExpense(expense.id)}
+                >
+                  <Pencil className="size-4 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                    setDeleteConfirmOpen(true);
+                  }}
+                >
+                  <Trash2 className="size-4 text-destructive" />
+                </Button>
+              </>
+            )}
           </div>
         </div>
       );
@@ -440,19 +792,72 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
-          <span>Daftar Pengeluaran</span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleSortOrder}
-              className="h-8 w-8"
-              title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
-            >
-              <ArrowUpDown className="size-4" />
-            </Button>
-            <span className="text-sm text-red-600">{formatCurrency(totalExpenses)}</span>
-          </div>
+          {!isBulkSelectMode ? (
+            // Normal Mode
+            <>
+              <span>Daftar Pengeluaran</span>
+              <div className="flex items-center gap-2">
+                {expenses.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleActivateBulkMode}
+                  >
+                    Pilih
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleSortOrder}
+                  className="h-8 w-8"
+                  title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
+                >
+                  <ArrowUpDown className="size-4" />
+                </Button>
+                {excludedExpenseIds.size > 0 && (
+                  <span className="text-xs text-muted-foreground" title={`${excludedExpenseIds.size} item dikecualikan dari hitungan`}>
+                    ({excludedExpenseIds.size} excluded)
+                  </span>
+                )}
+                <span className={`text-sm ${totalExpenses < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {totalExpenses < 0 ? '+' : ''}{formatCurrency(Math.abs(totalExpenses))}
+                </span>
+              </div>
+            </>
+          ) : (
+            // Bulk Select Mode
+            <>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={handleSelectAll}
+                />
+                <span className="text-sm">
+                  {selectedExpenseIds.size > 0
+                    ? `${selectedExpenseIds.size} item dipilih`
+                    : "Pilih semua"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                  disabled={selectedExpenseIds.size === 0}
+                >
+                  Hapus ({selectedExpenseIds.size})
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancelBulkMode}
+                >
+                  Batal
+                </Button>
+              </div>
+            </>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -648,6 +1053,91 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense }: Expens
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Pengeluaran</AlertDialogTitle>
+            <AlertDialogDescription>
+              Anda yakin ingin menghapus pengeluaran "{expenseToDelete?.name}" sebesar {expenseToDelete?.amount ? formatCurrency(expenseToDelete.amount) : "Rp 0"}?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (expenseToDelete) {
+                  onDeleteExpense(expenseToDelete.id);
+                  setExpenseToDelete(null);
+                }
+                setDeleteConfirmOpen(false);
+              }}
+            >
+              Hapus
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <AlertDialogContent className="max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus {selectedExpenseIds.size} Pengeluaran</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>Anda yakin ingin menghapus pengeluaran berikut?</p>
+                <div className="space-y-2 max-h-60 overflow-y-auto border rounded-md p-3 bg-muted/50">
+                  {Array.from(selectedExpenseIds).map(id => {
+                    const expense = expenses.find(e => e.id === id);
+                    if (!expense) return null;
+                    return (
+                      <div key={id} className="flex justify-between text-sm border-b pb-2 last:border-b-0">
+                        <span className="flex-1 truncate pr-2">{expense.name}</span>
+                        <span className="text-red-600 flex-shrink-0">{formatCurrency(expense.amount)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between pt-2 border-t">
+                  <span>Total:</span>
+                  <span className="text-red-600">
+                    {formatCurrency(
+                      Array.from(selectedExpenseIds).reduce((sum, id) => {
+                        const expense = expenses.find(e => e.id === id);
+                        return sum + (expense?.amount || 0);
+                      }, 0)
+                    )}
+                  </span>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBulkDeleting}>
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isBulkDeleting}
+            >
+              {isBulkDeleting ? "Menghapus..." : "Hapus Semua"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
+
+// Helper function for USD formatting
+const formatUSD = (amount: number): string => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
