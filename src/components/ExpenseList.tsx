@@ -78,6 +78,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
   // Bulk select states
   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
+  
+  // Track input strings for item amounts (for math expression support)
+  const [itemAmountInputs, setItemAmountInputs] = useState<{ [index: number]: string }>({});
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   
@@ -483,6 +486,12 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         conversionType: expense.conversionType,
         deduction: expense.deduction
       });
+      // Initialize input strings for items
+      const initialInputs: { [index: number]: string } = {};
+      expense.items?.forEach((item, index) => {
+        initialInputs[index] = item.amount.toString();
+      });
+      setItemAmountInputs(initialInputs);
     }
   };
 
@@ -527,25 +536,82 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       conversionType: undefined,
       deduction: undefined
     });
+    setItemAmountInputs({});
+  };
+
+  // Evaluate math expression
+  const evaluateMathExpression = (expression: string): number => {
+    try {
+      // Remove all whitespace
+      const cleaned = expression.replace(/\s/g, '');
+      
+      // Check if it's just a number
+      if (/^-?\d+\.?\d*$/.test(cleaned)) {
+        return parseFloat(cleaned) || 0;
+      }
+      
+      // Only allow numbers and basic operators
+      if (!/^[\d+\-*/().]+$/.test(cleaned)) {
+        return 0;
+      }
+      
+      // Evaluate the expression using Function constructor (safer than eval)
+      const result = new Function(`return ${cleaned}`)();
+      return typeof result === 'number' && !isNaN(result) ? result : 0;
+    } catch {
+      return 0;
+    }
   };
 
   const handleUpdateItem = (index: number, field: 'name' | 'amount', value: string | number) => {
     const newItems = [...(editingExpense.items || [])];
-    newItems[index] = { ...newItems[index], [field]: value };
+    if (field === 'amount' && typeof value === 'string') {
+      // Just update the input string, don't evaluate yet
+      setItemAmountInputs(prev => ({ ...prev, [index]: value }));
+      // Don't update the item amount yet
+      return;
+    } else {
+      newItems[index] = { ...newItems[index], [field]: value };
+    }
     setEditingExpense({ ...editingExpense, items: newItems });
   };
 
+  const handleBlurItemAmount = (index: number) => {
+    const inputValue = itemAmountInputs[index];
+    if (inputValue !== undefined) {
+      const evaluatedValue = evaluateMathExpression(inputValue);
+      const newItems = [...(editingExpense.items || [])];
+      newItems[index] = { ...newItems[index], amount: evaluatedValue };
+      setEditingExpense({ ...editingExpense, items: newItems });
+      // Update input to show evaluated value
+      setItemAmountInputs(prev => ({ ...prev, [index]: evaluatedValue.toString() }));
+    }
+  };
+
   const handleAddItem = () => {
+    const newIndex = (editingExpense.items || []).length;
     setEditingExpense({ 
       ...editingExpense, 
       items: [...(editingExpense.items || []), { name: '', amount: 0 }] 
     });
+    setItemAmountInputs(prev => ({ ...prev, [newIndex]: '0' }));
   };
 
   const handleRemoveItem = (index: number) => {
     const newItems = [...(editingExpense.items || [])];
     newItems.splice(index, 1);
     setEditingExpense({ ...editingExpense, items: newItems });
+    // Remove the input string for this index and shift others
+    const newInputs: { [index: number]: string } = {};
+    Object.keys(itemAmountInputs).forEach(key => {
+      const idx = parseInt(key);
+      if (idx < index) {
+        newInputs[idx] = itemAmountInputs[idx];
+      } else if (idx > index) {
+        newInputs[idx - 1] = itemAmountInputs[idx];
+      }
+    });
+    setItemAmountInputs(newInputs);
   };
 
   // Split into upcoming and history
@@ -1010,9 +1076,10 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                         className="flex-1"
                       />
                       <Input
-                        type="number"
-                        value={item.amount.toString()}
-                        onChange={(e) => handleUpdateItem(index, 'amount', parseFloat(e.target.value) || 0)}
+                        type="text"
+                        value={itemAmountInputs[index] ?? item.amount.toString()}
+                        onChange={(e) => handleUpdateItem(index, 'amount', e.target.value)}
+                        onBlur={() => handleBlurItemAmount(index)}
                         placeholder="Jumlah"
                         className="w-32"
                       />
