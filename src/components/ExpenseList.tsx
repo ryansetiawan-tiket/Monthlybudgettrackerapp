@@ -614,9 +614,26 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
     setItemAmountInputs(newInputs);
   };
 
+  // Group expenses by date
+  const groupExpensesByDate = (expenses: Expense[]): Map<string, Expense[]> => {
+    const grouped = new Map<string, Expense[]>();
+    expenses.forEach(expense => {
+      const dateKey = expense.date;
+      if (!grouped.has(dateKey)) {
+        grouped.set(dateKey, []);
+      }
+      grouped.get(dateKey)!.push(expense);
+    });
+    return grouped;
+  };
+
   // Split into upcoming and history
   const upcomingExpenses = sortedAndFilteredExpenses.filter(exp => !isPast(exp.date));
   const historyExpenses = sortedAndFilteredExpenses.filter(exp => isPast(exp.date));
+
+  // Group by date
+  const upcomingGrouped = groupExpensesByDate(upcomingExpenses);
+  const historyGrouped = groupExpensesByDate(historyExpenses);
 
   // Calculate subtotals (excluding excluded items)
   // Items from income (fromIncome: true) subtract from expenses
@@ -636,6 +653,312 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       }
       return sum + expense.amount;
     }, 0);
+
+  // Render grouped expenses by date
+  const renderGroupedExpenseItem = (date: string, expenses: Expense[]) => {
+    // If only 1 expense, render as single item
+    if (expenses.length === 1) {
+      return renderExpenseItem(expenses[0]);
+    }
+
+    // Multiple expenses on same date - render as grouped card
+    const dateExpenses = expenses;
+    const isGroupExpanded = expandedItems.has(`group-${date}`);
+    const hasExcludedInGroup = dateExpenses.some(exp => excludedExpenseIds.has(exp.id));
+    const allExcluded = dateExpenses.every(exp => excludedExpenseIds.has(exp.id));
+    const hasSelectedInGroup = dateExpenses.some(exp => selectedExpenseIds.has(exp.id));
+    const allSelected = dateExpenses.every(exp => selectedExpenseIds.has(exp.id));
+
+    // Calculate total for this date group (excluding excluded items)
+    const groupTotal = dateExpenses
+      .filter(exp => !excludedExpenseIds.has(exp.id))
+      .reduce((sum, exp) => {
+        if (exp.fromIncome) {
+          return sum - exp.amount;
+        }
+        return sum + exp.amount;
+      }, 0);
+
+    const hasFromIncome = dateExpenses.some(exp => exp.fromIncome);
+    const hasNormalExpense = dateExpenses.some(exp => !exp.fromIncome);
+
+    return (
+      <Collapsible 
+        key={`group-${date}`} 
+        open={isGroupExpanded} 
+        onOpenChange={() => {
+          setExpandedItems(prev => {
+            const newSet = new Set(prev);
+            const key = `group-${date}`;
+            if (newSet.has(key)) {
+              newSet.delete(key);
+            } else {
+              newSet.add(key);
+            }
+            return newSet;
+          });
+        }}
+      >
+        <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(date) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+          <CollapsibleTrigger asChild>
+            <div className="flex items-center justify-between p-3 cursor-pointer">
+              <div className="flex-1 flex items-center gap-2">
+                {isBulkSelectMode && (
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={() => {
+                      // Toggle all expenses in this group
+                      setSelectedExpenseIds(prev => {
+                        const newSet = new Set(prev);
+                        if (allSelected) {
+                          dateExpenses.forEach(exp => newSet.delete(exp.id));
+                        } else {
+                          dateExpenses.forEach(exp => newSet.add(exp.id));
+                        }
+                        return newSet;
+                      });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+                {isToday(date) && (
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
+                )}
+                <span 
+                  className={`${isWeekend(date) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''}`}
+                >
+                  {formatDateShort(date)}
+                </span>
+                <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''}`}>
+                  {dateExpenses.length} item{dateExpenses.length > 1 ? 's' : ''}
+                </p>
+                {isGroupExpanded ? (
+                  <ChevronUp className="size-4" />
+                ) : (
+                  <ChevronDown className="size-4" />
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''}`}>
+                  {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
+                </p>
+              </div>
+            </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="px-3 pb-3 space-y-2 border-t pt-2 mt-1">
+              {dateExpenses.map(expense => renderIndividualExpenseInGroup(expense))}
+            </div>
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
+    );
+  };
+
+  // Render individual expense within a group
+  const renderIndividualExpenseInGroup = (expense: Expense) => {
+    const isExcluded = excludedExpenseIds.has(expense.id);
+
+    if (expense.items && expense.items.length > 0) {
+      // Template expense with items
+      const isItemExpanded = expandedItems.has(expense.id);
+      return (
+        <Collapsible key={expense.id} open={isItemExpanded} onOpenChange={() => toggleExpanded(expense.id)}>
+          <div className={`border rounded-md hover:bg-accent/50 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+            <CollapsibleTrigger asChild>
+              <div className="flex items-center justify-between p-2 cursor-pointer">
+                <div className="flex-1 flex items-center gap-2">
+                  {isBulkSelectMode && (
+                    <Checkbox
+                      checked={selectedExpenseIds.has(expense.id)}
+                      onCheckedChange={() => handleToggleExpense(expense.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
+                    {expense.name}
+                  </p>
+                  {isItemExpanded ? (
+                    <ChevronUp className="size-3" />
+                  ) : (
+                    <ChevronDown className="size-3" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                    {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+                  </p>
+                  {!isBulkSelectMode && (
+                    <>
+                      {expense.fromIncome && onMoveToIncome && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => onMoveToIncome(expense)}
+                          title="Kembalikan ke pemasukan tambahan"
+                        >
+                          <ArrowUp className="size-3 text-green-600" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => handleToggleExclude(expense.id)}
+                        title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                      >
+                        {isExcluded ? (
+                          <EyeOff className="size-3 text-muted-foreground" />
+                        ) : (
+                          <Eye className="size-3 text-muted-foreground" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => handleEditExpense(expense.id)}
+                      >
+                        <Pencil className="size-3 text-muted-foreground" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                          setDeleteConfirmOpen(true);
+                        }}
+                      >
+                        <Trash2 className="size-3 text-destructive" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-2 pb-2 space-y-1 border-t pt-1 mt-1">
+                {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                  <div className={`flex items-center gap-2 text-xs text-green-600 pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                    <DollarSign className="size-3" />
+                    <span>
+                      {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                      <span className="ml-1 text-xs">
+                        ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                  <div className={`text-xs text-muted-foreground pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                    <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
+                  </div>
+                )}
+                {expense.items.map((item, index) => (
+                  <div key={index} className={`flex justify-between text-xs pl-6 ${isExcluded ? 'line-through' : ''}`}>
+                    <span className="text-muted-foreground">{item.name}</span>
+                    <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
+                      {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      );
+    } else {
+      // Single expense without items
+      return (
+        <div
+          key={expense.id}
+          className={`flex items-center justify-between p-2 border rounded-md hover:bg-accent/50 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+        >
+          <div className="flex-1 flex items-center gap-2">
+            {isBulkSelectMode && (
+              <Checkbox
+                checked={selectedExpenseIds.has(expense.id)}
+                onCheckedChange={() => handleToggleExpense(expense.id)}
+              />
+            )}
+            <div>
+              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+              {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                <div className={`flex items-center gap-2 text-xs text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                  <DollarSign className="size-3" />
+                  <span>
+                    {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                    <span className="ml-1 text-xs">
+                      ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                    </span>
+                  </span>
+                </div>
+              )}
+              {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                  <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+              {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+            </p>
+            {!isBulkSelectMode && (
+              <>
+                {expense.fromIncome && onMoveToIncome && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => onMoveToIncome(expense)}
+                    title="Kembalikan ke pemasukan tambahan"
+                  >
+                    <ArrowUp className="size-3 text-green-600" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => handleToggleExclude(expense.id)}
+                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                >
+                  {isExcluded ? (
+                    <EyeOff className="size-3 text-muted-foreground" />
+                  ) : (
+                    <Eye className="size-3 text-muted-foreground" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => handleEditExpense(expense.id)}
+                >
+                  <Pencil className="size-3 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => {
+                    setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                    setDeleteConfirmOpen(true);
+                  }}
+                >
+                  <Trash2 className="size-3 text-destructive" />
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+  };
 
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
@@ -980,7 +1303,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                       <span>Hari Ini & Mendatang</span>
                       <span className="text-xs text-muted-foreground">({upcomingExpenses.length})</span>
                     </div>
-                    <span className="text-sm text-red-600">{formatCurrency(upcomingTotal)}</span>
+                    <span className={`text-sm ${upcomingTotal < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {upcomingTotal < 0 ? '+' : ''}{formatCurrency(Math.abs(upcomingTotal))}
+                    </span>
                   </div>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
@@ -990,7 +1315,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                         Tidak ada pengeluaran mendatang
                       </p>
                     ) : (
-                      upcomingExpenses.map(renderExpenseItem)
+                      Array.from(upcomingGrouped.entries()).map(([date, expenses]) => 
+                        renderGroupedExpenseItem(date, expenses)
+                      )
                     )}
                   </div>
                 </CollapsibleContent>
@@ -1011,12 +1338,16 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                         <span>Riwayat</span>
                         <span className="text-xs text-muted-foreground">({historyExpenses.length})</span>
                       </div>
-                      <span className="text-sm text-red-600">{formatCurrency(historyTotal)}</span>
+                      <span className={`text-sm ${historyTotal < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {historyTotal < 0 ? '+' : ''}{formatCurrency(Math.abs(historyTotal))}
+                      </span>
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="space-y-2 mt-2">
-                      {historyExpenses.map(renderExpenseItem)}
+                      {Array.from(historyGrouped.entries()).map(([date, expenses]) => 
+                        renderGroupedExpenseItem(date, expenses)
+                      )}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
