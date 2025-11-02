@@ -23,11 +23,15 @@ interface AdditionalIncomeFormProps {
     deduction: number;
   }) => void;
   isAdding: boolean;
+  onSuccess?: () => void;
+  inDialog?: boolean;
 }
 
 export function AdditionalIncomeForm({
   onAddIncome,
   isAdding,
+  onSuccess,
+  inDialog = false,
 }: AdditionalIncomeFormProps) {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
@@ -154,6 +158,11 @@ export function AdditionalIncomeForm({
     setConversionType("auto");
     setManualRate("");
     setDeduction("");
+    
+    // Call onSuccess callback if provided (for dialog)
+    if (onSuccess) {
+      onSuccess();
+    }
   };
 
   const filteredSuggestions = suggestions.filter((suggestion) =>
@@ -162,12 +171,9 @@ export function AdditionalIncomeForm({
 
   const amountIDR = calculateIDR();
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Tambah Pemasukan Tambahan</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+  // If in dialog, render without Card wrapper
+  const formContent = (
+    <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="incomeName">Nama Pemasukan</Label>
           <div className="relative">
@@ -366,6 +372,21 @@ export function AdditionalIncomeForm({
           <Plus className="size-4 mr-2" />
           {isAdding ? "Menambahkan..." : "Tambah Pemasukan"}
         </Button>
+      </div>
+  );
+
+  // Return with or without Card wrapper based on inDialog prop
+  if (inDialog) {
+    return formContent;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Tambah Pemasukan Tambahan</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {formContent}
       </CardContent>
     </Card>
   );

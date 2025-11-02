@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowUp, DollarSign, Minus } from "lucide-react";
+import { Badge } from "./ui/badge";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, DollarSign, Minus } from "lucide-react";
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -702,7 +703,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(date) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
           <CollapsibleTrigger asChild>
             <div className="flex items-center justify-between p-3 cursor-pointer">
-              <div className="flex-1 flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 min-w-0">
                 {isBulkSelectMode && (
                   <Checkbox
                     checked={allSelected}
@@ -722,24 +723,24 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   />
                 )}
                 {isToday(date) && (
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
                 )}
                 <span 
-                  className={`${isWeekend(date) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''}`}
+                  className={`${isWeekend(date) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} whitespace-nowrap`}
                 >
                   {formatDateShort(date)}
                 </span>
-                <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''}`}>
+                <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''} truncate`}>
                   {dateExpenses.length} item{dateExpenses.length > 1 ? 's' : ''}
                 </p>
                 {isGroupExpanded ? (
-                  <ChevronUp className="size-4" />
+                  <ChevronUp className="size-4 shrink-0" />
                 ) : (
-                  <ChevronDown className="size-4" />
+                  <ChevronDown className="size-4 shrink-0" />
                 )}
               </div>
-              <div className="flex items-center gap-3">
-                <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''}`}>
+              <div className="flex items-center gap-1 shrink-0">
+                <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
                   {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
                 </p>
               </div>
@@ -798,7 +799,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                           onClick={() => onMoveToIncome(expense)}
                           title="Kembalikan ke pemasukan tambahan"
                         >
-                          <ArrowUp className="size-3 text-green-600" />
+                          <ArrowRight className="size-3 text-green-600" />
                         </Button>
                       )}
                       <Button
@@ -917,7 +918,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                     onClick={() => onMoveToIncome(expense)}
                     title="Kembalikan ke pemasukan tambahan"
                   >
-                    <ArrowUp className="size-3 text-green-600" />
+                    <ArrowRight className="size-3 text-green-600" />
                   </Button>
                 )}
                 <Button
@@ -982,7 +983,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
           <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
             <CollapsibleTrigger asChild>
               <div className="flex items-center justify-between p-3 cursor-pointer">
-                <div className="flex-1 flex items-center gap-2">
+                <div className="flex-1 flex items-center gap-2 min-w-0">
                   {isBulkSelectMode && (
                     <Checkbox
                       checked={selectedExpenseIds.has(expense.id)}
@@ -991,67 +992,73 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                     />
                   )}
                   {isToday(expense.date) && (
-                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
                   )}
                   <span 
-                    className={`${isWeekend(expense.date) || expense.fromIncome ? "text-green-600" : ""} ${isExcluded ? 'line-through' : ''}`}
+                    className={`${isWeekend(expense.date) || expense.fromIncome ? "text-green-600" : ""} ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}
                     style={expense.color && !isWeekend(expense.date) && !expense.fromIncome ? { color: expense.color } : {}}
                   >
                     {formatDateShort(expense.date)}
                   </span>
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
                   {expandedItems.has(expense.id) ? (
-                    <ChevronUp className="size-4" />
+                    <ChevronUp className="size-4 shrink-0" />
                   ) : (
-                    <ChevronDown className="size-4" />
+                    <ChevronDown className="size-4 shrink-0" />
                   )}
                 </div>
-                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                  <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
                     {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                   </p>
                   {!isBulkSelectMode && (
-                    <>
+                    <div className="flex items-center gap-0.5">
                       {expense.fromIncome && onMoveToIncome && (
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-8 w-8"
                           onClick={() => onMoveToIncome(expense)}
                           title="Kembalikan ke pemasukan tambahan"
                         >
-                          <ArrowLeft className="size-4 text-green-600" />
+                          <ArrowLeft className="size-3.5 text-green-600" />
                         </Button>
                       )}
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-8 w-8"
                         onClick={() => handleToggleExclude(expense.id)}
                         title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
                       >
                         {isExcluded ? (
-                          <EyeOff className="size-4 text-muted-foreground" />
+                          <EyeOff className="size-3.5 text-muted-foreground" />
                         ) : (
-                          <Eye className="size-4 text-muted-foreground" />
+                          <Eye className="size-3.5 text-muted-foreground" />
                         )}
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-8 w-8"
                         onClick={() => handleEditExpense(expense.id)}
+                        title="Edit"
                       >
-                        <Pencil className="size-4 text-muted-foreground" />
+                        <Pencil className="size-3.5 text-muted-foreground" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-8 w-8"
                         onClick={() => {
                           setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
                           setDeleteConfirmOpen(true);
                         }}
+                        title="Hapus"
                       >
-                        <Trash2 className="size-4 text-destructive" />
+                        <Trash2 className="size-3.5 text-destructive" />
                       </Button>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1091,9 +1098,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       return (
         <div
           key={expense.id}
-          className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
         >
-          <div className="flex-1 flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 min-w-0">
             {isBulkSelectMode && (
               <Checkbox
                 checked={selectedExpenseIds.has(expense.id)}
@@ -1101,16 +1108,16 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
               />
             )}
             {isToday(expense.date) && (
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" title="Hari ini" />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
             )}
-            <div>
-              <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+            <div className="min-w-0 flex-1">
+              <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
               {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
                 <div className={`flex items-center gap-2 text-sm text-green-600 ${isExcluded ? 'line-through' : ''}`}>
                   <DollarSign className="size-3" />
-                  <span>
+                  <span className="text-xs">
                     {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
-                    <span className="ml-1 text-xs">
+                    <span className="ml-1">
                       ({expense.conversionType === "auto" ? "realtime" : "manual"})
                     </span>
                   </span>
@@ -1124,52 +1131,58 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
               <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>{formatDateShort(expense.date)}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+          <div className="flex items-center justify-between sm:justify-end gap-1">
+            <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
               {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
             </p>
             {!isBulkSelectMode && (
-              <>
+              <div className="flex items-center gap-0.5">
                 {expense.fromIncome && onMoveToIncome && (
                   <Button
                     variant="ghost"
                     size="icon"
+                    className="h-8 w-8"
                     onClick={() => onMoveToIncome(expense)}
                     title="Kembalikan ke pemasukan tambahan"
                   >
-                    <ArrowUp className="size-4 text-green-600" />
+                    <ArrowRight className="size-3.5 text-green-600" />
                   </Button>
                 )}
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
                   onClick={() => handleToggleExclude(expense.id)}
                   title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
                 >
                   {isExcluded ? (
-                    <EyeOff className="size-4 text-muted-foreground" />
+                    <EyeOff className="size-3.5 text-muted-foreground" />
                   ) : (
-                    <Eye className="size-4 text-muted-foreground" />
+                    <Eye className="size-3.5 text-muted-foreground" />
                   )}
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
                   onClick={() => handleEditExpense(expense.id)}
+                  title="Edit"
                 >
-                  <Pencil className="size-4 text-muted-foreground" />
+                  <Pencil className="size-3.5 text-muted-foreground" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
                   onClick={() => {
                     setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
                     setDeleteConfirmOpen(true);
                   }}
+                  title="Hapus"
                 >
-                  <Trash2 className="size-4 text-destructive" />
+                  <Trash2 className="size-3.5 text-destructive" />
                 </Button>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -1179,18 +1192,19 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           {!isBulkSelectMode ? (
             // Normal Mode
             <>
-              <span>Daftar Pengeluaran</span>
-              <div className="flex items-center gap-2">
+              <span className="text-base sm:text-lg">Daftar Pengeluaran</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {expenses.length > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleActivateBulkMode}
+                    className="h-8 text-xs"
                   >
                     Pilih
                   </Button>
@@ -1205,11 +1219,11 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   <ArrowUpDown className="size-4" />
                 </Button>
                 {excludedExpenseIds.size > 0 && (
-                  <span className="text-xs text-muted-foreground" title={`${excludedExpenseIds.size} item dikecualikan dari hitungan`}>
-                    ({excludedExpenseIds.size} excluded)
-                  </span>
+                  <Badge variant="secondary" className="text-xs h-6 px-1.5">
+                    {excludedExpenseIds.size} excluded
+                  </Badge>
                 )}
-                <span className={`text-sm ${totalExpenses < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className={`text-sm whitespace-nowrap ${totalExpenses < 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {totalExpenses < 0 ? '+' : ''}{formatCurrency(Math.abs(totalExpenses))}
                 </span>
               </div>
@@ -1224,7 +1238,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                 />
                 <span className="text-sm">
                   {selectedExpenseIds.size > 0
-                    ? `${selectedExpenseIds.size} item dipilih`
+                    ? `${selectedExpenseIds.size} dipilih`
                     : "Pilih semua"}
                 </span>
               </div>
@@ -1234,6 +1248,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   size="sm"
                   onClick={handleBulkDelete}
                   disabled={selectedExpenseIds.size === 0}
+                  className="h-8 text-xs"
                 >
                   Hapus ({selectedExpenseIds.size})
                 </Button>
@@ -1241,6 +1256,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   variant="outline"
                   size="sm"
                   onClick={handleCancelBulkMode}
+                  className="h-8 text-xs"
                 >
                   Batal
                 </Button>
@@ -1290,7 +1306,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
               )}
             </div>
             
-            <div className="space-y-2">
+            <div>
               <Collapsible open={upcomingExpanded} onOpenChange={setUpcomingExpanded}>
                 <CollapsibleTrigger asChild>
                   <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
@@ -1309,7 +1325,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   </div>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="space-y-2 mt-2">
+                  <div className="space-y-2 mt-3">
                     {upcomingExpenses.length === 0 ? (
                       <p className="text-center text-muted-foreground py-4 text-sm">
                         Tidak ada pengeluaran mendatang
@@ -1325,7 +1341,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
             </div>
             
             {historyExpenses.length > 0 && (
-              <div className="space-y-2">
+              <div className="mt-2">
                 <Collapsible open={historyExpanded} onOpenChange={setHistoryExpanded}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
@@ -1344,7 +1360,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="space-y-2 mt-2">
+                    <div className="space-y-2 mt-3">
                       {Array.from(historyGrouped.entries()).map(([date, expenses]) => 
                         renderGroupedExpenseItem(date, expenses)
                       )}

@@ -19,8 +19,8 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget }: 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <Card>
-        <CardContent className="pt-6 space-y-6">
-          <div className="space-y-2">
+        <CardContent className="p-6 space-y-5">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium">Total Pemasukan</p>
               <div className="size-2 rounded-full bg-green-500"></div>
@@ -28,7 +28,7 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget }: 
             <p className="text-2xl text-green-600">{formatCurrency(totalIncome)}</p>
           </div>
           <div className="h-px bg-border"></div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium">Total Pengeluaran</p>
               <div className="size-2 rounded-full bg-red-500"></div>
@@ -39,14 +39,14 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget }: 
       </Card>
 
       <Card className={`relative overflow-hidden ${remainingBudget >= 0 ? 'bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/50' : 'bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/50'}`}>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <CardTitle className="text-sm">Sisa Budget</CardTitle>
         </CardHeader>
-        <CardContent className="pt-2">
+        <CardContent className="pt-0">
           <div className={`text-4xl font-bold ${remainingBudget >= 0 ? "text-green-600" : "text-red-600"}`}>
             {formatCurrency(remainingBudget)}
           </div>
-          <div className={`mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${remainingBudget >= 0 ? 'bg-green-500/20 text-green-700' : 'bg-red-500/20 text-red-700'}`}>
+          <div className={`mt-3 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs ${remainingBudget >= 0 ? 'bg-green-500/20 text-green-700' : 'bg-red-500/20 text-red-700'}`}>
             {remainingBudget >= 0 ? '✓ Aman' : '⚠ Defisit'}
           </div>
         </CardContent>

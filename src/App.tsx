@@ -3,8 +3,8 @@ import { MonthSelector } from "./components/MonthSelector";
 import { BudgetOverview } from "./components/BudgetOverview";
 import { BudgetForm } from "./components/BudgetForm";
 import { AddExpenseDialog } from "./components/AddExpenseDialog";
+import { AddAdditionalIncomeDialog } from "./components/AddAdditionalIncomeDialog";
 import { ExpenseList } from "./components/ExpenseList";
-import { AdditionalIncomeForm } from "./components/AdditionalIncomeForm";
 import { AdditionalIncomeList } from "./components/AdditionalIncomeList";
 import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
@@ -12,8 +12,9 @@ import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./components/ui/collapsible";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Plus, DollarSign } from "lucide-react";
 import { Button } from "./components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { funnyQuotes } from "./data/funny-quotes";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -54,6 +55,7 @@ interface AdditionalIncome {
   conversionType: string;
   date: string;
   deduction: number;
+  createdAt?: string;
 }
 
 interface MonthCache {
@@ -121,6 +123,7 @@ export default function App() {
   const [isBudgetSectionOpen, setIsBudgetSectionOpen] = useState(false);
   const [templates, setTemplates] = useState<FixedExpenseTemplate[]>([]);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
+  const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
   const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
   const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
@@ -1008,14 +1011,14 @@ export default function App() {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className="min-h-screen bg-background p-4 md:p-8"
+        className="min-h-screen bg-background p-4 md:p-6 lg:p-8"
       >
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-5xl mx-auto space-y-8">
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="text-center space-y-2"
+            className="text-center space-y-2 pt-2"
           >
             <h1>Budget Tracker</h1>
             <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
@@ -1053,61 +1056,25 @@ export default function App() {
             <Collapsible open={isBudgetSectionOpen} onOpenChange={setIsBudgetSectionOpen}>
               <CollapsibleTrigger asChild>
                 <Button variant="outline" className="w-full justify-between">
-                  <span>Pengaturan Budget & Pemasukan Tambahan</span>
+                  <span>Pengaturan Budget</span>
                   <ChevronDown 
                     className={`size-4 transition-transform ${isBudgetSectionOpen ? 'rotate-180' : ''}`} 
                   />
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="mt-6">
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <BudgetForm
-                      initialBudget={budget.initialBudget}
-                      carryover={budget.carryover}
-                      notes={budget.notes}
-                      onBudgetChange={handleBudgetChange}
-                      onSave={handleSaveBudget}
-                      isSaving={isSaving}
-                      suggestedCarryover={previousMonthRemaining}
-                      isLoadingCarryover={isLoadingCarryover}
-                    />
-
-                    <AdditionalIncomeForm 
-                      onAddIncome={handleAddIncome} 
-                      isAdding={isAddingIncome} 
-                    />
-                  </div>
-
-                  <AdditionalIncomeList 
-                    incomes={additionalIncomes} 
-                    onDeleteIncome={handleDeleteIncome} 
-                    onUpdateIncome={handleUpdateIncome} 
-                    globalDeduction={budget.incomeDeduction || 0}
-                    onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
-                    onExcludedIdsChange={setExcludedIncomeIds}
-                    isDeductionExcluded={isDeductionExcluded}
-                    onDeductionExcludedChange={setIsDeductionExcluded}
-                    onMoveToExpense={handleMoveIncomeToExpense}
-                  />
-                </div>
+              <CollapsibleContent className="mt-4">
+                <BudgetForm
+                  initialBudget={budget.initialBudget}
+                  carryover={budget.carryover}
+                  notes={budget.notes}
+                  onBudgetChange={handleBudgetChange}
+                  onSave={handleSaveBudget}
+                  isSaving={isSaving}
+                  suggestedCarryover={previousMonthRemaining}
+                  isLoadingCarryover={isLoadingCarryover}
+                />
               </CollapsibleContent>
             </Collapsible>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-          >
-            <Button 
-              onClick={() => setIsExpenseDialogOpen(true)}
-              size="lg"
-              className="w-full"
-            >
-              <Plus className="size-5 mr-2" />
-              Tambah Pengeluaran
-            </Button>
           </motion.div>
 
           <AddExpenseDialog 
@@ -1121,19 +1088,75 @@ export default function App() {
             onDeleteTemplate={handleDeleteTemplate}
           />
 
+          <AddAdditionalIncomeDialog 
+            open={isIncomeDialogOpen}
+            onOpenChange={setIsIncomeDialogOpen}
+            onAddIncome={handleAddIncome}
+            isAdding={isAddingIncome}
+          />
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
+            transition={{ delay: 0.35 }}
           >
-            <ExpenseList 
-              expenses={expenses} 
-              onDeleteExpense={handleDeleteExpense} 
-              onEditExpense={handleEditExpense}
-              onBulkDeleteExpenses={handleBulkDeleteExpenses}
-              onExcludedIdsChange={setExcludedExpenseIds}
-              onMoveToIncome={handleMoveExpenseToIncome}
-            />
+            <Tabs defaultValue="expenses" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger 
+                  value="expenses"
+                  className="data-[state=active]:bg-[rgba(255,76,76,0.1)] data-[state=active]:border-[#ff4c4c] data-[state=active]:text-neutral-50"
+                >
+                  Pengeluaran
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="income"
+                  className="data-[state=active]:bg-[rgba(34,197,94,0.1)] data-[state=active]:border-[#22c55e] data-[state=active]:text-neutral-50"
+                >
+                  Pemasukan Tambahan
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="expenses" className="space-y-3 mt-4">
+                <Button 
+                  onClick={() => setIsExpenseDialogOpen(true)}
+                  variant="outline"
+                  className="w-full border-red-500/30 hover:bg-red-500/10 hover:border-red-500/50 text-red-600 dark:text-red-400"
+                >
+                  <Plus className="size-4 mr-2" />
+                  Tambah Pengeluaran
+                </Button>
+                <ExpenseList 
+                  expenses={expenses} 
+                  onDeleteExpense={handleDeleteExpense} 
+                  onEditExpense={handleEditExpense}
+                  onBulkDeleteExpenses={handleBulkDeleteExpenses}
+                  onExcludedIdsChange={setExcludedExpenseIds}
+                  onMoveToIncome={handleMoveExpenseToIncome}
+                />
+              </TabsContent>
+
+              <TabsContent value="income" className="space-y-3 mt-4">
+                <Button 
+                  onClick={() => setIsIncomeDialogOpen(true)}
+                  variant="outline"
+                  className="w-full border-green-500/30 hover:bg-green-500/10 hover:border-green-500/50 text-green-600 dark:text-green-400"
+                >
+                  <DollarSign className="size-4 mr-2" />
+                  Tambah Pemasukan
+                </Button>
+                <AdditionalIncomeList 
+                  incomes={additionalIncomes} 
+                  onDeleteIncome={handleDeleteIncome} 
+                  onUpdateIncome={handleUpdateIncome} 
+                  globalDeduction={budget.incomeDeduction || 0}
+                  onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
+                  onExcludedIdsChange={setExcludedIncomeIds}
+                  isDeductionExcluded={isDeductionExcluded}
+                  onDeductionExcludedChange={setIsDeductionExcluded}
+                  onMoveToExpense={handleMoveIncomeToExpense}
+                />
+              </TabsContent>
+            </Tabs>
           </motion.div>
         </div>
         

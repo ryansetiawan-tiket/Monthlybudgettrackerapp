@@ -289,6 +289,9 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
       return c.json({ error: "Name and amount are required" }, 400);
     }
     
+    // Get existing data to preserve createdAt
+    const existingIncome = await kv.get(key);
+    
     const incomeData = {
       id,
       name,
@@ -299,6 +302,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
       conversionType: conversionType || "manual",
       date: date || new Date().toISOString().split('T')[0],
       deduction: Number(deduction) || 0,
+      createdAt: existingIncome?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     

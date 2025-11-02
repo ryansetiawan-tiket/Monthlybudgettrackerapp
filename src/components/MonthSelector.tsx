@@ -43,7 +43,7 @@ export function MonthSelector({ selectedMonth, selectedYear, onMonthChange }: Mo
   const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex items-center justify-center gap-3 px-4">
       <Button variant="outline" size="icon" onClick={handlePrevious}>
         <ChevronLeft className="size-4" />
       </Button>

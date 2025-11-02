@@ -43,10 +43,10 @@ export function BudgetForm({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle>Budget Bulanan</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 pt-4">
         <div className="space-y-2">
           <Label htmlFor="initialBudget">Budget Awal</Label>
           <Input

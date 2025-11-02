@@ -4,7 +4,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
-import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, ChevronDown, Minus, Eye, EyeOff, ArrowDown } from "lucide-react";
+import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
 import { cn } from "./ui/utils";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+
 
 interface AdditionalIncome {
   id: string;
@@ -24,6 +24,7 @@ interface AdditionalIncome {
   conversionType: string;
   date: string;
   deduction: number;
+  createdAt?: string;
 }
 
 interface AdditionalIncomeListProps {
@@ -68,8 +69,9 @@ export function AdditionalIncomeList({
   const [editDate, setEditDate] = useState("");
   const [editDeduction, setEditDeduction] = useState("");
   const [loadingRate, setLoadingRate] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<'date' | 'createdAt'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
 
@@ -245,6 +247,35 @@ export function AdditionalIncomeList({
     });
   }, [incomes, onExcludedIdsChange, onDeductionExcludedChange]);
 
+  // Toggle sort order
+  const toggleSortOrder = () => {
+    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
+
+  // Toggle sort type
+  const toggleSortBy = () => {
+    setSortBy(prev => prev === 'date' ? 'createdAt' : 'date');
+  };
+
+  // Sort incomes
+  const sortedIncomes = [...incomes].sort((a, b) => {
+    let compareValue = 0;
+    
+    if (sortBy === 'date') {
+      const dateA = new Date(a.date || '');
+      const dateB = new Date(b.date || '');
+      compareValue = dateA.getTime() - dateB.getTime();
+    } else {
+      // Sort by createdAt (entry creation time)
+      // If createdAt is not available, fallback to id (which might contain timestamp)
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : parseInt(a.id) || 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : parseInt(b.id) || 0;
+      compareValue = timeA - timeB;
+    }
+    
+    return sortOrder === 'asc' ? compareValue : -compareValue;
+  });
+
   // Calculate totals excluding excluded items and apply individual deductions
   const totalIncomeBeforeIndividualDeduction = incomes
     .filter(income => !excludedIncomeIds.has(income.id))
@@ -261,125 +292,150 @@ export function AdditionalIncomeList({
 
   return (
     <>
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <Card>
-          <CollapsibleTrigger asChild>
-            <CardHeader className="cursor-pointer hover:bg-accent/50 transition-colors">
-              <CardTitle className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  Pemasukan Tambahan
-                  <ChevronDown className={`size-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                  {excludedCount > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {excludedCount} excluded
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-base sm:text-lg">
+              Pemasukan Tambahan
+              {excludedCount > 0 && (
+                <Badge variant="secondary" className="text-xs h-6 px-1.5">
+                  {excludedCount} excluded
+                </Badge>
+              )}
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {incomes.length > 0 && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={toggleSortBy}
+                    title={sortBy === 'date' ? 'Urutkan berdasarkan: Tanggal Masuk' : 'Urutkan berdasarkan: Tanggal Entry'}
+                  >
+                    <Badge variant="outline" className="text-xs px-1 h-6">
+                      {sortBy === 'date' ? 'Masuk' : 'Entry'}
                     </Badge>
-                  )}
-                </span>
-                <div className="flex items-center gap-2">
-                  {incomes.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={handleToggleExcludeAll}
-                      title={excludedIncomeIds.size === incomes.length ? "Tampilkan semua" : "Sembunyikan semua"}
-                    >
-                      {excludedIncomeIds.size === incomes.length ? (
-                        <EyeOff className="size-4 text-muted-foreground" />
-                      ) : (
-                        <Eye className="size-4 text-muted-foreground" />
-                      )}
-                    </Button>
-                  )}
-                  <span className="text-sm text-green-600">{formatCurrency(netIncome)}</span>
-                </div>
-              </CardTitle>
-            </CardHeader>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <CardContent className="space-y-4">
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={toggleSortOrder}
+                    title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
+                  >
+                    <ArrowUpDown className="size-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={handleToggleExcludeAll}
+                    title={excludedIncomeIds.size === incomes.length ? "Tampilkan semua" : "Sembunyikan semua"}
+                  >
+                    {excludedIncomeIds.size === incomes.length ? (
+                      <EyeOff className="size-4 text-muted-foreground" />
+                    ) : (
+                      <Eye className="size-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                </>
+              )}
+              <span className="text-sm text-green-600 whitespace-nowrap">{formatCurrency(netIncome)}</span>
+            </div>
+          </CardTitle>
+        </CardHeader>
+            <CardContent className="space-y-3">
               {incomes.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">
                   Belum ada pemasukan tambahan untuk bulan ini
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {incomes.map((income) => {
+                  {sortedIncomes.map((income) => {
                     const isExcluded = excludedIncomeIds.has(income.id);
                     return (
                       <div
                         key={income.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                        className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent transition-colors ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
                       >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className={isExcluded ? 'line-through' : ''}>{income.name}</p>
-                            <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
+                            <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
                               {formatDate(income.date)}
                             </span>
                           </div>
                           {income.currency === "USD" && (
                             <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
                               <DollarSign className="size-3" />
-                              <span>
+                              <span className="text-xs">
                                 {formatUSD(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
-                                <span className="ml-1 text-xs">
+                                <span className="ml-1">
                                   ({income.conversionType === "auto" ? "realtime" : "manual"})
                                 </span>
                               </span>
                             </div>
                           )}
-                          {income.deduction && income.deduction > 0 && (
+                          {income.deduction > 0 && (
                             <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
                               <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
                             </div>
                           )}
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-between sm:justify-end gap-1">
                           <div className="text-right">
-                            <p className={`text-green-600 ${isExcluded ? 'line-through' : ''}`}>
-                              {formatCurrency(income.deduction && income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
+                            <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                              {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
                             </p>
-                            {income.deduction && income.deduction > 0 && (
-                              <p className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                            {income.deduction > 0 && (
+                              <p className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
                                 Kotor: {formatCurrency(income.amountIDR)}
                               </p>
                             )}
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleToggleExclude(income.id)}
-                            title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                          >
-                            {isExcluded ? (
-                              <EyeOff className="size-4 text-muted-foreground" />
-                            ) : (
-                              <Eye className="size-4 text-muted-foreground" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => onMoveToExpense?.(income)}
-                            title="Pindahkan ke pengeluaran"
-                          >
-                            <ArrowDown className="size-4 text-blue-500" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleEdit(income)}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => onDeleteIncome(income.id)}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleToggleExclude(income.id)}
+                              title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                            >
+                              {isExcluded ? (
+                                <EyeOff className="size-3.5 text-muted-foreground" />
+                              ) : (
+                                <Eye className="size-3.5 text-muted-foreground" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => onMoveToExpense?.(income)}
+                              title="Pindahkan ke pengeluaran"
+                            >
+                              <ArrowLeft className="size-3.5 text-blue-500" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleEdit(income)}
+                              title="Edit"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => onDeleteIncome(income.id)}
+                              title="Hapus"
+                            >
+                              <Trash2 className="size-3.5 text-destructive" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -459,9 +515,7 @@ export function AdditionalIncomeList({
                 </div>
               )}
             </CardContent>
-          </CollapsibleContent>
         </Card>
-      </Collapsible>
 
       <Dialog open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
