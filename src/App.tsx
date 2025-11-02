@@ -11,8 +11,7 @@ import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./components/ui/collapsible";
-import { ChevronDown, Plus, DollarSign } from "lucide-react";
+import { Plus, DollarSign } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { funnyQuotes } from "./data/funny-quotes";
@@ -120,10 +119,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [previousMonthRemaining, setPreviousMonthRemaining] = useState<number | null>(null);
   const [isLoadingCarryover, setIsLoadingCarryover] = useState(false);
-  const [isBudgetSectionOpen, setIsBudgetSectionOpen] = useState(false);
   const [templates, setTemplates] = useState<FixedExpenseTemplate[]>([]);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
+  const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
   const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
@@ -1045,37 +1044,22 @@ export default function App() {
               totalIncome={totalIncome}
               totalExpenses={totalExpenses}
               remainingBudget={remainingBudget}
+              onOpenBudgetSettings={() => setIsBudgetDialogOpen(true)}
             />
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Collapsible open={isBudgetSectionOpen} onOpenChange={setIsBudgetSectionOpen}>
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" className="w-full justify-between">
-                  <span>Pengaturan Budget</span>
-                  <ChevronDown 
-                    className={`size-4 transition-transform ${isBudgetSectionOpen ? 'rotate-180' : ''}`} 
-                  />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-4">
-                <BudgetForm
-                  initialBudget={budget.initialBudget}
-                  carryover={budget.carryover}
-                  notes={budget.notes}
-                  onBudgetChange={handleBudgetChange}
-                  onSave={handleSaveBudget}
-                  isSaving={isSaving}
-                  suggestedCarryover={previousMonthRemaining}
-                  isLoadingCarryover={isLoadingCarryover}
-                />
-              </CollapsibleContent>
-            </Collapsible>
-          </motion.div>
+          <BudgetForm
+            open={isBudgetDialogOpen}
+            onOpenChange={setIsBudgetDialogOpen}
+            initialBudget={budget.initialBudget}
+            carryover={budget.carryover}
+            notes={budget.notes}
+            onBudgetChange={handleBudgetChange}
+            onSave={handleSaveBudget}
+            isSaving={isSaving}
+            suggestedCarryover={previousMonthRemaining}
+            isLoadingCarryover={isLoadingCarryover}
+          />
 
           <AddExpenseDialog 
             open={isExpenseDialogOpen}

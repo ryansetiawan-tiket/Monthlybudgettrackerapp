@@ -1,12 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Button } from "./ui/button";
+import { Settings } from "lucide-react";
 
 interface BudgetOverviewProps {
   totalIncome: number;
   totalExpenses: number;
   remainingBudget: number;
+  onOpenBudgetSettings: () => void;
 }
 
-export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget }: BudgetOverviewProps) {
+export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, onOpenBudgetSettings }: BudgetOverviewProps) {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -40,7 +43,17 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget }: 
 
       <Card className={`relative overflow-hidden ${remainingBudget >= 0 ? 'bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/50' : 'bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/50'}`}>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Sisa Budget</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Sisa Budget</CardTitle>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="size-7 hover:bg-background/50"
+              onClick={onOpenBudgetSettings}
+            >
+              <Settings className="size-4" />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="pt-0">
           <div className={`text-4xl font-bold ${remainingBudget >= 0 ? "text-green-600" : "text-red-600"}`}>

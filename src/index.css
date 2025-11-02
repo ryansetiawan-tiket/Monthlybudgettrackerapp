@@ -871,10 +871,6 @@
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
 
-  .rotate-180 {
-    rotate: 180deg;
-  }
-
   .animate-pulse {
     animation: var(--animate-pulse);
   }
@@ -1749,12 +1745,6 @@
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
 
-  .transition-transform {
-    transition-property: transform, translate, scale, rotate;
-    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
-    transition-duration: var(--tw-duration, var(--default-transition-duration));
-  }
-
   .transition-none {
     transition-property: none;
   }
@@ -1896,6 +1886,18 @@
     @supports (color: color-mix(in lab, red, red)) {
       .hover\:bg-accent\/70:hover {
         background-color: color-mix(in oklab, var(--accent) 70%, transparent);
+      }
+    }
+  }
+
+  @media (hover: hover) {
+    .hover\:bg-background\/50:hover {
+      background-color: var(--background);
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-background\/50:hover {
+        background-color: color-mix(in oklab, var(--background) 50%, transparent);
       }
     }
   }
@@ -2296,6 +2298,12 @@
 
   .data-\[state\=open\]\:zoom-in-95[data-state="open"] {
     --tw-enter-scale: .95;
+  }
+
+  @media (width >= 40rem) {
+    .sm\:max-w-\[500px\] {
+      max-width: 500px;
+    }
   }
 
   @media (width >= 40rem) {

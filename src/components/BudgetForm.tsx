@@ -1,11 +1,13 @@
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { ArrowDownToLine } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 
 interface BudgetFormProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   initialBudget: number;
   carryover: number;
   notes: string;
@@ -17,6 +19,8 @@ interface BudgetFormProps {
 }
 
 export function BudgetForm({
+  open,
+  onOpenChange,
   initialBudget,
   carryover,
   notes,
@@ -41,78 +45,88 @@ export function BudgetForm({
     }
   };
 
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle>Budget Bulanan</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-4">
-        <div className="space-y-2">
-          <Label htmlFor="initialBudget">Budget Awal</Label>
-          <Input
-            id="initialBudget"
-            type="number"
-            value={initialBudget || ""}
-            onChange={(e) => onBudgetChange("initialBudget", e.target.value)}
-            placeholder="0"
-          />
-        </div>
+  const handleSave = () => {
+    onSave();
+    onOpenChange(false);
+  };
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="carryover">Carryover Bulan Sebelumnya (Opsional)</Label>
-            {suggestedCarryover !== null && suggestedCarryover !== 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleAutoFill}
-                disabled={isLoadingCarryover}
-                className="h-auto py-1 px-2"
-              >
-                <ArrowDownToLine className="size-3 mr-1" />
-                Auto-fill
-              </Button>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Budget Bulanan</DialogTitle>
+          <DialogDescription>
+            Atur budget awal, carryover, dan catatan untuk bulan ini
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="initialBudget">Budget Awal</Label>
+            <Input
+              id="initialBudget"
+              type="number"
+              value={initialBudget || ""}
+              onChange={(e) => onBudgetChange("initialBudget", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="carryover">Carryover Bulan Sebelumnya (Opsional)</Label>
+              {suggestedCarryover !== null && suggestedCarryover !== 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleAutoFill}
+                  disabled={isLoadingCarryover}
+                  className="h-auto py-1 px-2"
+                >
+                  <ArrowDownToLine className="size-3 mr-1" />
+                  Auto-fill
+                </Button>
+              )}
+            </div>
+            <Input
+              id="carryover"
+              type="number"
+              value={carryover || ""}
+              onChange={(e) => onBudgetChange("carryover", e.target.value)}
+              placeholder="0"
+            />
+            {suggestedCarryover !== null && (
+              <p className="text-xs text-muted-foreground">
+                {isLoadingCarryover ? (
+                  "Memuat sisa bulan lalu..."
+                ) : (
+                  <>
+                    Sisa bulan lalu: {" "}
+                    <span className={suggestedCarryover >= 0 ? "text-green-600" : "text-red-600"}>
+                      {formatCurrency(suggestedCarryover)}
+                    </span>
+                  </>
+                )}
+              </p>
             )}
           </div>
-          <Input
-            id="carryover"
-            type="number"
-            value={carryover || ""}
-            onChange={(e) => onBudgetChange("carryover", e.target.value)}
-            placeholder="0"
-          />
-          {suggestedCarryover !== null && (
-            <p className="text-xs text-muted-foreground">
-              {isLoadingCarryover ? (
-                "Memuat sisa bulan lalu..."
-              ) : (
-                <>
-                  Sisa bulan lalu: {" "}
-                  <span className={suggestedCarryover >= 0 ? "text-green-600" : "text-red-600"}>
-                    {formatCurrency(suggestedCarryover)}
-                  </span>
-                </>
-              )}
-            </p>
-          )}
-        </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="notes">Catatan</Label>
-          <Textarea
-            id="notes"
-            value={notes}
-            onChange={(e) => onBudgetChange("notes", e.target.value)}
-            placeholder="Tulis catatan untuk bulan ini..."
-            rows={3}
-          />
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="notes">Catatan</Label>
+            <Textarea
+              id="notes"
+              value={notes}
+              onChange={(e) => onBudgetChange("notes", e.target.value)}
+              placeholder="Tulis catatan untuk bulan ini..."
+              rows={3}
+            />
+          </div>
 
-        <Button onClick={onSave} disabled={isSaving} className="w-full">
-          {isSaving ? "Menyimpan..." : "Simpan Budget"}
-        </Button>
-      </CardContent>
-    </Card>
+          <Button onClick={handleSave} disabled={isSaving} className="w-full">
+            {isSaving ? "Menyimpan..." : "Simpan Budget"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
