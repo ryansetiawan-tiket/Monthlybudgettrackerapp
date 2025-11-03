@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, DollarSign, Minus } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, DollarSign, Minus, Lock, Unlock } from "lucide-react";
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -45,11 +45,14 @@ interface ExpenseListProps {
   onDeleteExpense: (id: string) => void;
   onEditExpense: (id: string, expense: Omit<Expense, 'id'>) => void;
   onBulkDeleteExpenses: (ids: string[]) => Promise<void>;
+  excludedExpenseIds?: Set<string>;
   onExcludedIdsChange?: (ids: Set<string>) => void;
   onMoveToIncome?: (expense: Expense) => void;
+  isExcludeLocked?: boolean;
+  onToggleExcludeLock?: () => void;
 }
 
-export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, onExcludedIdsChange, onMoveToIncome }: ExpenseListProps) {
+export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock }: ExpenseListProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -85,8 +88,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   
-  // Exclude from calculation states
-  const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
+  // Exclude from calculation states - use prop or default to empty Set
+  const excludedExpenseIds = excludedExpenseIdsProp || new Set<string>();
 
   // Helper function to get day name
   const getDayName = (dateString: string): string => {
@@ -272,27 +275,26 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
   // Toggle exclude expense from calculation
   const handleToggleExclude = useCallback((id: string) => {
     const expense = expenses.find(exp => exp.id === id);
-    setExcludedExpenseIds(prev => {
-      const newSet = new Set(prev);
-      const wasExcluded = newSet.has(id);
-      if (wasExcluded) {
-        newSet.delete(id);
-        if (expense) {
-          toast.success(`${expense.name} dimasukkan kembali dalam hitungan`);
-        }
-      } else {
-        newSet.add(id);
-        if (expense) {
-          toast.info(`${expense.name} dikecualikan dari hitungan`);
-        }
+    const wasExcluded = excludedExpenseIds.has(id);
+    const newSet = new Set(excludedExpenseIds);
+    
+    if (wasExcluded) {
+      newSet.delete(id);
+      if (expense) {
+        toast.success(`${expense.name} dimasukkan kembali dalam hitungan`);
       }
-      // Notify parent about the change
-      if (onExcludedIdsChange) {
-        onExcludedIdsChange(newSet);
+    } else {
+      newSet.add(id);
+      if (expense) {
+        toast.info(`${expense.name} dikecualikan dari hitungan`);
       }
-      return newSet;
-    });
-  }, [onExcludedIdsChange, expenses]);
+    }
+    
+    // Notify parent about the change
+    if (onExcludedIdsChange) {
+      onExcludedIdsChange(newSet);
+    }
+  }, [excludedExpenseIds, onExcludedIdsChange, expenses]);
 
   // Calculate totals excluding excluded items
   // Items from income (fromIncome: true) subtract from expenses
@@ -1199,12 +1201,24 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
             <>
               <span className="text-base sm:text-lg">Daftar Pengeluaran</span>
               <div className="flex items-center gap-1.5 flex-wrap">
+                {onToggleExcludeLock && (
+                  <Button
+                    variant={isExcludeLocked ? "default" : "outline"}
+                    size="sm"
+                    onClick={onToggleExcludeLock}
+                    className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
+                    title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
+                  >
+                    {isExcludeLocked ? <Lock className="size-3.5 mr-1.5" /> : <Unlock className="size-3.5 mr-1.5" />}
+                    {isExcludeLocked ? 'Locked' : 'Lock'}
+                  </Button>
+                )}
                 {expenses.length > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleActivateBulkMode}
-                    className="h-8 text-xs"
+                    className="h-8 px-3 text-xs"
                   >
                     Pilih
                   </Button>

@@ -4,7 +4,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
-import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown } from "lucide-react";
+import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
@@ -42,10 +42,13 @@ interface AdditionalIncomeListProps {
   }) => void;
   globalDeduction: number;
   onUpdateGlobalDeduction: (deduction: number) => void;
+  excludedIncomeIds?: Set<string>;
   onExcludedIdsChange?: (ids: Set<string>) => void;
   isDeductionExcluded?: boolean;
   onDeductionExcludedChange?: (excluded: boolean) => void;
   onMoveToExpense?: (income: AdditionalIncome) => void;
+  isExcludeLocked?: boolean;
+  onToggleExcludeLock?: () => void;
 }
 
 export function AdditionalIncomeList({ 
@@ -54,10 +57,13 @@ export function AdditionalIncomeList({
   onUpdateIncome, 
   globalDeduction, 
   onUpdateGlobalDeduction, 
+  excludedIncomeIds: excludedIncomeIdsProp,
   onExcludedIdsChange,
   isDeductionExcluded = false,
   onDeductionExcludedChange,
-  onMoveToExpense
+  onMoveToExpense,
+  isExcludeLocked = false,
+  onToggleExcludeLock
 }: AdditionalIncomeListProps) {
   const [editingIncome, setEditingIncome] = useState<AdditionalIncome | null>(null);
   const [editName, setEditName] = useState("");
@@ -69,9 +75,12 @@ export function AdditionalIncomeList({
   const [editDate, setEditDate] = useState("");
   const [editDeduction, setEditDeduction] = useState("");
   const [loadingRate, setLoadingRate] = useState(false);
-  const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
+  
+  // Exclude from calculation states - use prop or default to empty Set
+  const excludedIncomeIds = excludedIncomeIdsProp || new Set<string>();
+  
   const [sortBy, setSortBy] = useState<'date' | 'createdAt'>('date');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
 
@@ -192,60 +201,56 @@ export function AdditionalIncomeList({
   // Toggle exclude income from calculation
   const handleToggleExclude = useCallback((id: string) => {
     const income = incomes.find(inc => inc.id === id);
-    setExcludedIncomeIds(prev => {
-      const newSet = new Set(prev);
-      const wasExcluded = newSet.has(id);
-      if (wasExcluded) {
-        newSet.delete(id);
-        if (income) {
-          toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
-        }
-      } else {
-        newSet.add(id);
-        if (income) {
-          toast.info(`${income.name} dikecualikan dari hitungan`);
-        }
+    const wasExcluded = excludedIncomeIds.has(id);
+    const newSet = new Set(excludedIncomeIds);
+    
+    if (wasExcluded) {
+      newSet.delete(id);
+      if (income) {
+        toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
       }
-      // Notify parent about the change
-      if (onExcludedIdsChange) {
-        onExcludedIdsChange(newSet);
+    } else {
+      newSet.add(id);
+      if (income) {
+        toast.info(`${income.name} dikecualikan dari hitungan`);
       }
-      return newSet;
-    });
-  }, [onExcludedIdsChange, incomes]);
+    }
+    
+    // Notify parent about the change
+    if (onExcludedIdsChange) {
+      onExcludedIdsChange(newSet);
+    }
+  }, [excludedIncomeIds, onExcludedIdsChange, incomes]);
 
   const handleToggleExcludeAll = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent collapsible toggle
     if (incomes.length === 0) return;
 
-    setExcludedIncomeIds(prev => {
-      const allExcluded = prev.size === incomes.length;
-      const newSet = new Set<string>();
-      
-      if (allExcluded) {
-        // Include all items
-        toast.success(`Semua pemasukan tambahan dimasukkan kembali dalam hitungan`);
-        // Also include the global deduction
-        if (onDeductionExcludedChange) {
-          onDeductionExcludedChange(false);
-        }
-      } else {
-        // Exclude all items
-        incomes.forEach(income => newSet.add(income.id));
-        toast.info(`Semua pemasukan tambahan dikecualikan dari hitungan`);
-        // Also exclude the global deduction
-        if (onDeductionExcludedChange) {
-          onDeductionExcludedChange(true);
-        }
+    const allExcluded = excludedIncomeIds.size === incomes.length;
+    const newSet = new Set<string>();
+    
+    if (allExcluded) {
+      // Include all items
+      toast.success(`Semua pemasukan tambahan dimasukkan kembali dalam hitungan`);
+      // Also include the global deduction
+      if (onDeductionExcludedChange) {
+        onDeductionExcludedChange(false);
       }
-      
-      // Notify parent about the change
-      if (onExcludedIdsChange) {
-        onExcludedIdsChange(newSet);
+    } else {
+      // Exclude all items
+      incomes.forEach(income => newSet.add(income.id));
+      toast.info(`Semua pemasukan tambahan dikecualikan dari hitungan`);
+      // Also exclude the global deduction
+      if (onDeductionExcludedChange) {
+        onDeductionExcludedChange(true);
       }
-      return newSet;
-    });
-  }, [incomes, onExcludedIdsChange, onDeductionExcludedChange]);
+    }
+    
+    // Notify parent about the change
+    if (onExcludedIdsChange) {
+      onExcludedIdsChange(newSet);
+    }
+  }, [incomes, excludedIncomeIds, onExcludedIdsChange, onDeductionExcludedChange]);
 
   // Toggle sort order
   const toggleSortOrder = () => {
@@ -304,6 +309,18 @@ export function AdditionalIncomeList({
               )}
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
+              {onToggleExcludeLock && (
+                <Button
+                  variant={isExcludeLocked ? "default" : "outline"}
+                  size="sm"
+                  onClick={onToggleExcludeLock}
+                  className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
+                  title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
+                >
+                  {isExcludeLocked ? <Lock className="size-3.5 mr-1.5" /> : <Unlock className="size-3.5 mr-1.5" />}
+                  {isExcludeLocked ? 'Locked' : 'Lock'}
+                </Button>
+              )}
               {incomes.length > 0 && (
                 <>
                   <Button
@@ -313,7 +330,7 @@ export function AdditionalIncomeList({
                     onClick={toggleSortBy}
                     title={sortBy === 'date' ? 'Urutkan berdasarkan: Tanggal Masuk' : 'Urutkan berdasarkan: Tanggal Entry'}
                   >
-                    <Badge variant="outline" className="text-xs px-1 h-6">
+                    <Badge variant="outline" className="text-xs px-1 h-6 px-[4px] py-[2px] m-[0px]">
                       {sortBy === 'date' ? 'Masuk' : 'Entry'}
                     </Badge>
                   </Button>

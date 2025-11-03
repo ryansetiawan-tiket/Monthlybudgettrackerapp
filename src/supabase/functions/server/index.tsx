@@ -458,4 +458,72 @@ app.delete("/make-server-3adbeaf1/templates/:id", async (c) => {
   }
 });
 
+// Get exclude state lock for specific month
+app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const key = `exclude-state:${year}-${month}`;
+    
+    const excludeState = await kv.get(key);
+    
+    if (!excludeState) {
+      return c.json({
+        locked: false,
+        excludedExpenseIds: [],
+        excludedIncomeIds: [],
+        isDeductionExcluded: false,
+      });
+    }
+    
+    return c.json(excludeState);
+  } catch (error) {
+    console.log(`Error getting exclude state: ${error}`);
+    return c.json({ error: `Failed to get exclude state: ${error.message}` }, 500);
+  }
+});
+
+// Save/update exclude state lock for specific month
+app.post("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const key = `exclude-state:${year}-${month}`;
+    
+    const body = await c.req.json();
+    const { locked, excludedExpenseIds, excludedIncomeIds, isDeductionExcluded } = body;
+    
+    const excludeStateData = {
+      locked: Boolean(locked),
+      excludedExpenseIds: excludedExpenseIds || [],
+      excludedIncomeIds: excludedIncomeIds || [],
+      isDeductionExcluded: Boolean(isDeductionExcluded),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    await kv.set(key, excludeStateData);
+    
+    return c.json({ success: true, data: excludeStateData });
+  } catch (error) {
+    console.log(`Error saving exclude state: ${error}`);
+    return c.json({ error: `Failed to save exclude state: ${error.message}` }, 500);
+  }
+});
+
+// Delete exclude state lock for specific month
+app.delete("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const key = `exclude-state:${year}-${month}`;
+    
+    await kv.del(key);
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.log(`Error deleting exclude state: ${error}`);
+    return c.json({ error: `Failed to delete exclude state: ${error.message}` }, 500);
+  }
+});
+
 Deno.serve(app.fetch);

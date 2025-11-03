@@ -126,6 +126,7 @@ export default function App() {
   const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
   const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
+  const [isExcludeLocked, setIsExcludeLocked] = useState(false);
 
   // Client-side cache for month data
   const [cache, setCache] = useState<Record<string, MonthCache>>({});
@@ -182,14 +183,49 @@ export default function App() {
     });
   };
 
+  // Load exclude state from backend
+  const loadExcludeState = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/exclude-state/${selectedYear}/${selectedMonth}`,
+        {
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load exclude state");
+      }
+
+      const data = await response.json();
+      
+      console.log('Loaded exclude state from backend:', data);
+      
+      if (data.locked) {
+        setIsExcludeLocked(true);
+        setExcludedExpenseIds(new Set(data.excludedExpenseIds || []));
+        setExcludedIncomeIds(new Set(data.excludedIncomeIds || []));
+        setIsDeductionExcluded(data.isDeductionExcluded || false);
+        console.log('Applied exclude state - excludedExpenseIds:', data.excludedExpenseIds);
+      } else {
+        console.log('Exclude state not locked, resetting to defaults');
+      }
+    } catch (error) {
+      console.log(`Error loading exclude state: ${error}`);
+    }
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey]);
+
   useEffect(() => {
     const cacheKey = getCacheKey(selectedYear, selectedMonth);
     const cachedData = cache[cacheKey];
 
-    // Reset excluded expenses and incomes when month changes
+    // Reset excluded expenses and incomes when month changes (will be overridden by loadExcludeState if locked)
     setExcludedExpenseIds(new Set());
     setExcludedIncomeIds(new Set());
     setIsDeductionExcluded(false);
+    setIsExcludeLocked(false);
 
     if (cachedData) {
       // Use cached data - instant load!
@@ -204,6 +240,9 @@ export default function App() {
       if (templates.length === 0) {
         loadTemplates();
       }
+      
+      // Load exclude state (might override reset above if locked)
+      loadExcludeState();
     } else {
       // No cache - fetch from server
       loadBudgetData();
@@ -211,8 +250,9 @@ export default function App() {
       loadAdditionalIncomes();
       loadPreviousMonthData();
       loadTemplates();
+      loadExcludeState();
     }
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, loadExcludeState]);
 
   const loadBudgetData = async () => {
     try {
@@ -394,6 +434,125 @@ export default function App() {
       console.log(`Error loading templates: ${error}`);
     }
   };
+
+  const saveExcludeState = useCallback(async () => {
+    if (!isExcludeLocked) return;
+    
+    try {
+      const response = await fetch(
+        `${baseUrl}/exclude-state/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({
+            locked: true,
+            excludedExpenseIds: Array.from(excludedExpenseIds),
+            excludedIncomeIds: Array.from(excludedIncomeIds),
+            isDeductionExcluded,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Failed to save exclude state: ${errorData.error || response.statusText}`);
+      }
+    } catch (error) {
+      console.log(`Error saving exclude state: ${error}`);
+      console.error("Full error details:", error);
+    }
+  }, [isExcludeLocked, selectedYear, selectedMonth, excludedExpenseIds, excludedIncomeIds, isDeductionExcluded, baseUrl, publicAnonKey]);
+
+  const handleToggleExcludeLock = async () => {
+    try {
+      console.log('Toggle exclude lock - isExcludeLocked:', isExcludeLocked);
+      console.log('URL:', `${baseUrl}/exclude-state/${selectedYear}/${selectedMonth}`);
+      
+      if (!isExcludeLocked) {
+        // Lock: Save current state
+        console.log('Locking with data:', {
+          locked: true,
+          excludedExpenseIds: Array.from(excludedExpenseIds),
+          excludedIncomeIds: Array.from(excludedIncomeIds),
+          isDeductionExcluded,
+        });
+        
+        const response = await fetch(
+          `${baseUrl}/exclude-state/${selectedYear}/${selectedMonth}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+            body: JSON.stringify({
+              locked: true,
+              excludedExpenseIds: Array.from(excludedExpenseIds),
+              excludedIncomeIds: Array.from(excludedIncomeIds),
+              isDeductionExcluded,
+            }),
+          }
+        );
+
+        console.log('Lock response status:', response.status);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Lock error data:', errorData);
+          throw new Error(`Failed to lock exclude state: ${errorData.error || response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Lock success:', result);
+
+        setIsExcludeLocked(true);
+        toast.success("Exclude state di-lock - perubahan akan tersimpan");
+      } else {
+        // Unlock: Delete saved state and reset
+        console.log('Unlocking...');
+        
+        const response = await fetch(
+          `${baseUrl}/exclude-state/${selectedYear}/${selectedMonth}`,
+          {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+          }
+        );
+
+        console.log('Unlock response status:', response.status);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Unlock error data:', errorData);
+          throw new Error(`Failed to unlock exclude state: ${errorData.error || response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Unlock success:', result);
+
+        setIsExcludeLocked(false);
+        setExcludedExpenseIds(new Set());
+        setExcludedIncomeIds(new Set());
+        setIsDeductionExcluded(false);
+        toast.success("Exclude state di-unlock - reset ke default");
+      }
+    } catch (error) {
+      console.log(`Error toggling exclude lock: ${error}`);
+      toast.error(`Gagal toggle exclude lock: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  // Auto-save exclude state when it changes (only if locked)
+  useEffect(() => {
+    if (isExcludeLocked) {
+      saveExcludeState();
+    }
+  }, [excludedExpenseIds, excludedIncomeIds, isDeductionExcluded, isExcludeLocked, saveExcludeState]);
 
   const handleAddTemplate = async (name: string, items: Array<{name: string, amount: number}>, color?: string) => {
     try {
@@ -1114,8 +1273,11 @@ export default function App() {
                   onDeleteExpense={handleDeleteExpense} 
                   onEditExpense={handleEditExpense}
                   onBulkDeleteExpenses={handleBulkDeleteExpenses}
+                  excludedExpenseIds={excludedExpenseIds}
                   onExcludedIdsChange={setExcludedExpenseIds}
                   onMoveToIncome={handleMoveExpenseToIncome}
+                  isExcludeLocked={isExcludeLocked}
+                  onToggleExcludeLock={handleToggleExcludeLock}
                 />
               </TabsContent>
 
@@ -1134,10 +1296,13 @@ export default function App() {
                   onUpdateIncome={handleUpdateIncome} 
                   globalDeduction={budget.incomeDeduction || 0}
                   onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
+                  excludedIncomeIds={excludedIncomeIds}
                   onExcludedIdsChange={setExcludedIncomeIds}
                   isDeductionExcluded={isDeductionExcluded}
                   onDeductionExcludedChange={setIsDeductionExcluded}
                   onMoveToExpense={handleMoveIncomeToExpense}
+                  isExcludeLocked={isExcludeLocked}
+                  onToggleExcludeLock={handleToggleExcludeLock}
                 />
               </TabsContent>
             </Tabs>
