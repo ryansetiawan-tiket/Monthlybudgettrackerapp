@@ -357,7 +357,7 @@ export function AdditionalIncomeList({
                     return (
                       <div
                         key={income.id}
-                        className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent transition-colors ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                        className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
                       >
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">

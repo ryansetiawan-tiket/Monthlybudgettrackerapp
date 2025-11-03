@@ -700,9 +700,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
           });
         }}
       >
-        <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(date) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+        <div className={`border rounded-lg ${isToday(date) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
           <CollapsibleTrigger asChild>
-            <div className="flex items-center justify-between p-3 cursor-pointer">
+            <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg">
               <div className="flex-1 flex items-center gap-2 min-w-0">
                 {isBulkSelectMode && (
                   <Checkbox
@@ -765,7 +765,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       const isItemExpanded = expandedItems.has(expense.id);
       return (
         <Collapsible key={expense.id} open={isItemExpanded} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`border rounded-md hover:bg-accent/50 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-md' : ''} ${isExcluded ? 'opacity-50' : ''}`}>
             <CollapsibleTrigger asChild>
               <div className="flex items-center justify-between p-2 cursor-pointer">
                 <div className="flex-1 flex items-center gap-2">
@@ -875,7 +875,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       return (
         <div
           key={expense.id}
-          className={`flex items-center justify-between p-2 border rounded-md hover:bg-accent/50 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+          className={`flex items-center justify-between p-2 ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-md' : ''} ${isExcluded ? 'opacity-50' : ''}`}
         >
           <div className="flex-1 flex items-center gap-2">
             {isBulkSelectMode && (
@@ -980,9 +980,9 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
     if (expense.items && expense.items.length > 0) {
       return (
         <Collapsible key={expense.id} open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+          <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
             <CollapsibleTrigger asChild>
-              <div className="flex items-center justify-between p-3 cursor-pointer">
+              <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg">
                 <div className="flex-1 flex items-center gap-2 min-w-0">
                   {isBulkSelectMode && (
                     <Checkbox
@@ -1098,7 +1098,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       return (
         <div
           key={expense.id}
-          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent transition-colors ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
         >
           <div className="flex-1 flex items-center gap-2 min-w-0">
             {isBulkSelectMode && (
