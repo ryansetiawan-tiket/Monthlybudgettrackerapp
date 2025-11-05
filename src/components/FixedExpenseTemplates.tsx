@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -25,7 +25,7 @@ interface FixedExpenseTemplatesProps {
   onDeleteTemplate: (id: string) => void;
 }
 
-export function FixedExpenseTemplates({
+function FixedExpenseTemplatesComponent({
   templates,
   onAddTemplate,
   onUpdateTemplate,
@@ -347,3 +347,6 @@ export function FixedExpenseTemplates({
     </>
   );
 }
+
+// Export memoized component for performance
+export const FixedExpenseTemplates = memo(FixedExpenseTemplatesComponent);

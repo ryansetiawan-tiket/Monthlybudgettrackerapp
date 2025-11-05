@@ -936,31 +936,70 @@ app.get("/make-server-3adbeaf1/health", (c) => {
   return c.json({ status: "ok" });
 });
 
-// Get budget for specific month
+// Get budget for specific month (with all related data)
 app.get("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
   try {
     const year = c.req.param("year");
     const month = c.req.param("month");
-    const key = `budget:${year}-${month}`;
+    const monthKey = `${year}-${month}`;
     
-    const budget = await kv.get(key);
+    // Fetch all data in parallel for better performance
+    const [budget, expenses, additionalIncomes, previousMonthRemaining] = await Promise.all([
+      kv.get(`budget:${monthKey}`),
+      kv.getByPrefix(`expense:${monthKey}:`),
+      kv.getByPrefix(`income:${monthKey}:`),
+      calculatePreviousMonthRemaining(year, month)
+    ]);
     
-    if (!budget) {
-      return c.json({
+    return c.json({
+      budget: budget || {
         initialBudget: 0,
         carryover: 0,
-        additionalIncome: 0,
         notes: "",
         incomeDeduction: 0,
-      });
-    }
-    
-    return c.json(budget);
-  } catch (error) {
-    console.log(`Error getting budget: ${error}`);
+      },
+      expenses: expenses || [],
+      additionalIncomes: additionalIncomes || [],
+      previousMonthRemaining: previousMonthRemaining ?? null
+    });
+  } catch (error: any) {
+    console.log(`Error fetching budget data: ${error.message}`);
     return c.json({ error: `Failed to get budget: ${error.message}` }, 500);
   }
 });
+
+// Helper function to calculate previous month remaining
+async function calculatePreviousMonthRemaining(year: string, month: string): Promise<number | null> {
+  try {
+    // Calculate previous month and year
+    let prevMonth = parseInt(month) - 1;
+    let prevYear = parseInt(year);
+    
+    if (prevMonth === 0) {
+      prevMonth = 12;
+      prevYear = prevYear - 1;
+    }
+    
+    const prevMonthKey = `${prevYear}-${prevMonth.toString().padStart(2, '0')}`;
+    
+    // Fetch previous month data
+    const prevBudget = await kv.get(`budget:${prevMonthKey}`) || { initialBudget: 0, carryover: 0, incomeDeduction: 0 };
+    const prevExpenses = await kv.getByPrefix(`expense:${prevMonthKey}:`) || [];
+    const prevIncomes = await kv.getByPrefix(`income:${prevMonthKey}:`) || [];
+    
+    // Calculate previous month remaining
+    const prevGrossIncome = prevIncomes.reduce((sum: number, income: any) => sum + (income.amountIDR || 0), 0);
+    const prevTotalAdditionalIncome = prevGrossIncome - (prevBudget.incomeDeduction || 0);
+    const prevTotalIncome = Number(prevBudget.initialBudget || 0) + Number(prevBudget.carryover || 0) + prevTotalAdditionalIncome;
+    const prevTotalExpenses = prevExpenses.reduce((sum: number, expense: any) => sum + (expense.amount || 0), 0);
+    const remaining = prevTotalIncome - prevTotalExpenses;
+    
+    return remaining;
+  } catch (error) {
+    console.log(`Error calculating previous month remaining: ${error}`);
+    return null;
+  }
+}
 
 // Save/update budget for specific month
 app.post("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
@@ -983,8 +1022,7 @@ app.post("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
     await kv.set(key, budgetData);
     
     return c.json({ success: true, data: budgetData });
-  } catch (error) {
-    console.log(`Error saving budget: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to save budget: ${error.message}` }, 500);
   }
 });
@@ -999,8 +1037,7 @@ app.get("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const expenses = await kv.getByPrefix(prefix);
     
     return c.json(expenses || []);
-  } catch (error) {
-    console.log(`Error getting expenses: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get expenses: ${error.message}` }, 500);
   }
 });
@@ -1013,8 +1050,6 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const body = await c.req.json();
     
     const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId } = body;
-    
-    console.log('POST expense - Received body:', body);
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -1059,13 +1094,10 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       createdAt: new Date().toISOString(),
     };
     
-    console.log('POST expense - Saving to DB:', expenseData);
-    
     await kv.set(key, expenseData);
     
     return c.json({ success: true, data: expenseData });
-  } catch (error) {
-    console.log(`Error adding expense: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to add expense: ${error.message}` }, 500);
   }
 });
@@ -1081,8 +1113,7 @@ app.delete("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     await kv.del(key);
     
     return c.json({ success: true });
-  } catch (error) {
-    console.log(`Error deleting expense: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to delete expense: ${error.message}` }, 500);
   }
 });
@@ -1151,8 +1182,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     await kv.set(key, expenseData);
     
     return c.json({ success: true, data: expenseData });
-  } catch (error) {
-    console.log(`Error updating expense: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to update expense: ${error.message}` }, 500);
   }
 });
@@ -1167,8 +1197,7 @@ app.get("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     const incomes = await kv.getByPrefix(prefix);
     
     return c.json(incomes || []);
-  } catch (error) {
-    console.log(`Error getting additional incomes: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get additional incomes: ${error.message}` }, 500);
   }
 });
@@ -1182,7 +1211,7 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     
     const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction } = body;
     
-    console.log('POST income - Received body:', body);
+
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -1223,8 +1252,6 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
       createdAt: new Date().toISOString(),
     };
     
-    console.log('POST income - Saving to DB:', incomeData);
-    
     await kv.set(key, incomeData);
     
     // Store income name for autocomplete suggestions
@@ -1232,8 +1259,7 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     await kv.set(nameKey, { name, lastUsed: new Date().toISOString() });
     
     return c.json({ success: true, data: incomeData });
-  } catch (error) {
-    console.log(`Error adding additional income: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to add additional income: ${error.message}` }, 500);
   }
 });
@@ -1249,8 +1275,7 @@ app.delete("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c)
     await kv.del(key);
     
     return c.json({ success: true });
-  } catch (error) {
-    console.log(`Error deleting additional income: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to delete additional income: ${error.message}` }, 500);
   }
 });
@@ -1325,8 +1350,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
     await kv.set(nameKey, { name, lastUsed: new Date().toISOString() });
     
     return c.json({ success: true, data: incomeData });
-  } catch (error) {
-    console.log(`Error updating additional income: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to update additional income: ${error.message}` }, 500);
   }
 });
@@ -1343,8 +1367,7 @@ app.get("/make-server-3adbeaf1/income-names", async (c) => {
       .map(item => item.name);
     
     return c.json(sortedNames);
-  } catch (error) {
-    console.log(`Error getting income names: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get income names: ${error.message}` }, 500);
   }
 });
@@ -1376,8 +1399,7 @@ app.get("/make-server-3adbeaf1/exchange-rate", async (c) => {
       rate: data.conversion_rate,
       lastUpdated: data.time_last_update_utc 
     });
-  } catch (error) {
-    console.log(`Error getting exchange rate: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get exchange rate: ${error.message}` }, 500);
   }
 });
@@ -1389,8 +1411,7 @@ app.get("/make-server-3adbeaf1/templates", async (c) => {
     const templates = await kv.getByPrefix(prefix);
     
     return c.json(templates || []);
-  } catch (error) {
-    console.log(`Error getting templates: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get templates: ${error.message}` }, 500);
   }
 });
@@ -1419,8 +1440,7 @@ app.post("/make-server-3adbeaf1/templates", async (c) => {
     await kv.set(key, templateData);
     
     return c.json({ success: true, data: templateData });
-  } catch (error) {
-    console.log(`Error adding template: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to add template: ${error.message}` }, 500);
   }
 });
@@ -1449,8 +1469,7 @@ app.put("/make-server-3adbeaf1/templates/:id", async (c) => {
     await kv.set(key, templateData);
     
     return c.json({ success: true, data: templateData });
-  } catch (error) {
-    console.log(`Error updating template: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to update template: ${error.message}` }, 500);
   }
 });
@@ -1464,8 +1483,7 @@ app.delete("/make-server-3adbeaf1/templates/:id", async (c) => {
     await kv.del(key);
     
     return c.json({ success: true });
-  } catch (error) {
-    console.log(`Error deleting template: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to delete template: ${error.message}` }, 500);
   }
 });
@@ -1489,8 +1507,7 @@ app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
     }
     
     return c.json(excludeState);
-  } catch (error) {
-    console.log(`Error getting exclude state: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to get exclude state: ${error.message}` }, 500);
   }
 });
@@ -1516,8 +1533,7 @@ app.post("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
     await kv.set(key, excludeStateData);
     
     return c.json({ success: true, data: excludeStateData });
-  } catch (error) {
-    console.log(`Error saving exclude state: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to save exclude state: ${error.message}` }, 500);
   }
 });
@@ -1532,8 +1548,7 @@ app.delete("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
     await kv.del(key);
     
     return c.json({ success: true });
-  } catch (error) {
-    console.log(`Error deleting exclude state: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to delete exclude state: ${error.message}` }, 500);
   }
 });
@@ -1549,14 +1564,9 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
     const month = c.req.param("month");
     const monthKey = `${year}-${month}`;
     
-    console.log(`[POCKETS] Fetching pockets for ${monthKey}`);
-    const startTime = Date.now();
-    
     const pockets = await getPockets(monthKey);
-    console.log(`[POCKETS] Got ${pockets.length} pockets in ${Date.now() - startTime}ms`);
     
     // Fetch shared data once instead of per-pocket
-    const sharedDataStartTime = Date.now();
     const [budget, expensesData, additionalIncome, transfers, excludeState] = await Promise.all([
       kv.get(`budget:${monthKey}`),
       kv.getByPrefix(`expense:${monthKey}:`),
@@ -1564,7 +1574,6 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
       kv.get(`transfers:${monthKey}`),
       kv.get(`exclude-state:${monthKey}`)
     ]);
-    console.log(`[POCKETS] Fetched shared data in ${Date.now() - sharedDataStartTime}ms`);
     
     const sharedData = {
       budget: budget || { initialBudget: 0, carryover: 0 },
@@ -1575,13 +1584,9 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
     };
     
     // Calculate balances for all pockets using shared data
-    const balanceStartTime = Date.now();
     const balances = await Promise.all(
       pockets.map(pocket => calculatePocketBalance(pocket.id, monthKey, sharedData))
     );
-    console.log(`[POCKETS] Calculated balances in ${Date.now() - balanceStartTime}ms`);
-    
-    console.log(`[POCKETS] Total request time: ${Date.now() - startTime}ms`);
     
     return c.json({
       success: true,
@@ -1590,8 +1595,7 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
         balances
       }
     });
-  } catch (error) {
-    console.log(`Error fetching pockets: ${error}`);
+  } catch (error: any) {
     return c.json({ error: `Failed to fetch pockets: ${error.message}` }, 500);
   }
 });
@@ -1641,8 +1645,7 @@ app.post("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
       success: true,
       data: newPocket
     });
-  } catch (error) {
-    console.log(`Error creating pocket: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1698,8 +1701,7 @@ app.put("/make-server-3adbeaf1/pockets/:year/:month/:pocketId/wishlist-setting",
       success: true,
       data: allPockets[pocketIndex]
     });
-  } catch (error) {
-    console.log(`Error updating wishlist setting: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1768,8 +1770,7 @@ app.post("/make-server-3adbeaf1/transfer/:year/:month", async (c) => {
         }
       }
     });
-  } catch (error) {
-    console.log(`Error creating transfer: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1813,8 +1814,7 @@ app.delete("/make-server-3adbeaf1/transfer/:year/:month/:id", async (c) => {
         }
       }
     });
-  } catch (error) {
-    console.log(`Error deleting transfer: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1832,11 +1832,7 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       return c.json({ success: false, error: 'Missing pocket ID' }, 400);
     }
     
-    console.log(`[TIMELINE] Fetching timeline for pocket ${pocketId} in ${monthKey}`);
-    const startTime = Date.now();
-    
     // Fetch shared data once (same optimization as pockets endpoint)
-    const sharedDataStartTime = Date.now();
     const [budget, expenses, additionalIncome, transfers, excludeState, pockets, carryOvers] = await Promise.all([
       kv.get(`budget:${monthKey}`),
       kv.getByPrefix(`expense:${monthKey}:`),
@@ -1846,7 +1842,6 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       getPockets(monthKey),
       getCarryOvers(monthKey)
     ]);
-    console.log(`[TIMELINE] Fetched shared data in ${Date.now() - sharedDataStartTime}ms`);
     
     const sharedData = {
       budget: budget || { initialBudget: 0, carryover: 0 },
@@ -1859,9 +1854,7 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
     };
     
     // Generate timeline with shared data
-    const timelineStartTime = Date.now();
     const entries = await generatePocketTimeline(pocketId, monthKey, sortOrder, sharedData);
-    console.log(`[TIMELINE] Generated timeline in ${Date.now() - timelineStartTime}ms`);
     
     // Calculate summary
     const summary = {
@@ -1871,14 +1864,11 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       finalBalance: entries.length > 0 ? entries[0].balanceAfter : 0
     };
     
-    console.log(`[TIMELINE] Total request time: ${Date.now() - startTime}ms (${entries.length} entries)`);
-    
     return c.json({
       success: true,
       data: { entries, summary }
     });
-  } catch (error) {
-    console.log(`Error fetching timeline: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1920,8 +1910,7 @@ app.get("/make-server-3adbeaf1/carryover/:year/:month", async (c) => {
         summary
       }
     });
-  } catch (error) {
-    console.log(`Error fetching carry overs: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -1949,8 +1938,7 @@ app.post("/make-server-3adbeaf1/carryover/generate", async (c) => {
         message: `Generated ${carryOvers.length} carry over entries from ${fromMonth} to ${toMonth}`
       }
     });
-  } catch (error) {
-    console.log(`Error generating carry overs: ${error}`);
+  } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -2975,5 +2963,61 @@ async function generateSavingsPlan(
     weeksNeeded
   };
 }
+
+// ============================================
+// EXCLUDE STATE ENDPOINTS
+// ============================================
+
+// Get exclude state for a specific month
+app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const key = `exclude-state:${year}-${month}`;
+    
+    const excludeState = await kv.get(key);
+    
+    if (!excludeState) {
+      return c.json({
+        isLocked: false,
+        excludedExpenseIds: [],
+        excludedIncomeIds: [],
+        isDeductionExcluded: false
+      });
+    }
+    
+    return c.json(excludeState);
+  } catch (error: any) {
+    console.log(`Error loading exclude state: ${error.message}`);
+    return c.json({ error: `Failed to load exclude state: ${error.message}` }, 500);
+  }
+});
+
+// Save exclude state for a specific month
+app.post("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const key = `exclude-state:${year}-${month}`;
+    
+    const body = await c.req.json();
+    const { isLocked, excludedExpenseIds, excludedIncomeIds, isDeductionExcluded } = body;
+    
+    const excludeState = {
+      isLocked: isLocked || false,
+      excludedExpenseIds: excludedExpenseIds || [],
+      excludedIncomeIds: excludedIncomeIds || [],
+      isDeductionExcluded: isDeductionExcluded || false,
+      updatedAt: new Date().toISOString(),
+    };
+    
+    await kv.set(key, excludeState);
+    
+    return c.json({ success: true, data: excludeState });
+  } catch (error: any) {
+    console.log(`Error saving exclude state: ${error.message}`);
+    return c.json({ error: `Failed to save exclude state: ${error.message}` }, 500);
+  }
+});
 
 Deno.serve(app.fetch);

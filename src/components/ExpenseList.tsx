@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, DollarSign, Minus, Lock, Unlock } from "lucide-react";
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { 
@@ -54,7 +54,7 @@ interface ExpenseListProps {
   pockets?: Array<{id: string; name: string}>;
 }
 
-export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
+function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -433,7 +433,6 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       
       toast.success(`${idsToDelete.length} pengeluaran berhasil dihapus`);
     } catch (error) {
-      console.log(`Error in bulk delete: ${error}`);
       toast.error("Gagal menghapus beberapa pengeluaran");
     } finally {
       setIsBulkDeleting(false);
@@ -990,18 +989,6 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
     const isExcluded = excludedExpenseIds.has(expense.id);
-    
-    // Debug: Log fromIncome expenses with deduction data
-    if (expense.fromIncome) {
-      console.log('Rendering fromIncome expense:', {
-        name: expense.name,
-        amount: expense.amount,
-        deduction: expense.deduction,
-        currency: expense.currency,
-        originalAmount: expense.originalAmount,
-        exchangeRate: expense.exchangeRate
-      });
-    }
     
     if (expense.items && expense.items.length > 0) {
       return (
@@ -1624,3 +1611,6 @@ const formatUSD = (amount: number): string => {
     maximumFractionDigits: 2,
   }).format(amount);
 };
+
+// Export memoized component for performance
+export const ExpenseList = memo(ExpenseListComponent);

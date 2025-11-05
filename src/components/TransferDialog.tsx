@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import { useState, useEffect } from "react";
 import { cn } from "./ui/utils";
 import { useIsMobile } from "./ui/use-mobile";
+import { formatCurrency } from "../utils/currency";
 
 interface Pocket {
   id: string;
@@ -118,15 +119,6 @@ export function TransferDialog({
     const result = evaluateExpression(amount);
     setCalculatedAmount(result);
   }, [amount]);
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
 
   const selectedFromBalance = fromPocketId ? balances.get(fromPocketId) : null;
   const amountNum = calculatedAmount || 0;

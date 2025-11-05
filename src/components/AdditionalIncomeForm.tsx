@@ -11,6 +11,7 @@ import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
 import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { getBaseUrl, createAuthHeaders } from "../utils/api";
 
 interface Pocket {
   id: string;
@@ -59,7 +60,7 @@ export function AdditionalIncomeForm({
   const [deduction, setDeduction] = useState("");
   const [targetPocketId, setTargetPocketId] = useState("");
 
-  const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
+  const baseUrl = getBaseUrl(projectId);
 
   // Set default target pocket when prop changes
   useEffect(() => {
@@ -94,7 +95,7 @@ export function AdditionalIncomeForm({
         setSuggestions(data);
       }
     } catch (error) {
-      console.log(`Error loading name suggestions: ${error}`);
+      // Error loading suggestions - silently fail
     }
   };
 
@@ -115,7 +116,6 @@ export function AdditionalIncomeForm({
       setExchangeRate(data.rate);
       toast.success(`Kurs berhasil diperbarui: ${formatCurrency(data.rate)}`);
     } catch (error) {
-      console.log(`Error fetching exchange rate: ${error}`);
       toast.error("Gagal memuat kurs. Silakan gunakan manual.");
       setConversionType("manual");
     } finally {

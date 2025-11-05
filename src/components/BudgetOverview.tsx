@@ -1,7 +1,9 @@
+import { memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Wallet } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { formatCurrency } from "../utils/currency";
 
 interface BudgetOverviewProps {
   totalIncome: number;
@@ -11,15 +13,7 @@ interface BudgetOverviewProps {
   onTogglePockets?: () => void;
 }
 
-export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, showPockets = true, onTogglePockets }: BudgetOverviewProps) {
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+export const BudgetOverview = memo(function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, showPockets = true, onTogglePockets }: BudgetOverviewProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -79,4 +73,4 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, sh
       </Card>
     </div>
   );
-}
+});

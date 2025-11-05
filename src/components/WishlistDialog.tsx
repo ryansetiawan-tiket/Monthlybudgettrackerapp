@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import { Button } from "./ui/button";
@@ -46,16 +46,44 @@ export function WishlistDialog({
   onSave
 }: WishlistDialogProps) {
   const [formData, setFormData] = useState<Partial<WishlistItem>>({
-    name: item?.name || '',
-    amount: item?.amount || 0,
-    priority: item?.priority || 2,
-    description: item?.description || '',
-    url: item?.url || '',
-    targetDate: item?.targetDate?.split('T')[0] || '',
-    notes: item?.notes || ''
+    name: '',
+    amount: 0,
+    priority: 2,
+    description: '',
+    url: '',
+    targetDate: '',
+    notes: ''
   });
   const [isSaving, setIsSaving] = useState(false);
   const isMobile = useIsMobile();
+
+  // Update form data when item prop changes (for edit mode)
+  useEffect(() => {
+    if (open) {
+      if (item) {
+        setFormData({
+          name: item.name || '',
+          amount: item.amount || 0,
+          priority: item.priority || 2,
+          description: item.description || '',
+          url: item.url || '',
+          targetDate: item.targetDate?.split('T')[0] || '',
+          notes: item.notes || ''
+        });
+      } else {
+        // Reset form when no item (add mode)
+        setFormData({
+          name: '',
+          amount: 0,
+          priority: 2,
+          description: '',
+          url: '',
+          targetDate: '',
+          notes: ''
+        });
+      }
+    }
+  }, [item, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,16 +96,7 @@ export function WishlistDialog({
         priority: formData.priority || 2
       });
       onOpenChange(false);
-      // Reset form
-      setFormData({
-        name: '',
-        amount: 0,
-        priority: 2,
-        description: '',
-        url: '',
-        targetDate: '',
-        notes: ''
-      });
+      // Form will be reset by useEffect when dialog closes and item becomes null
     } catch (error) {
       console.error('Error saving wishlist item:', error);
     } finally {

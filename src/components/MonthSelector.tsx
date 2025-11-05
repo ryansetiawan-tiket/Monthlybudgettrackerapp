@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -13,7 +14,7 @@ const MONTH_NAMES = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember"
 ];
 
-export function MonthSelector({ selectedMonth, selectedYear, onMonthChange }: MonthSelectorProps) {
+export const MonthSelector = memo(function MonthSelector({ selectedMonth, selectedYear, onMonthChange }: MonthSelectorProps) {
   const handlePrevious = () => {
     if (selectedMonth === 1) {
       onMonthChange(12, selectedYear - 1);
@@ -78,4 +79,4 @@ export function MonthSelector({ selectedMonth, selectedYear, onMonthChange }: Mo
       </Button>
     </div>
   );
-}
+});

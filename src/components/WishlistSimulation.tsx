@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -21,9 +21,15 @@ import {
   ExternalLink,
   DollarSign
 } from "lucide-react";
-import { WishlistDialog } from "./WishlistDialog";
+
+// Lazy load wishlist dialog for better performance
+const WishlistDialog = lazy(() => 
+  import("./WishlistDialog").then(m => ({ default: m.WishlistDialog }))
+);
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
+import { getBaseUrl, createAuthHeaders } from "../utils/api";
+import { formatCurrency } from "../utils/currency";
 
 interface WishlistItem {
   id: string;
@@ -97,15 +103,14 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   const [editingItem, setEditingItem] = useState<WishlistItem | null>(null);
 
   const [year, month] = monthKey.split('-');
+  const baseUrl = getBaseUrl(projectId);
 
   const fetchWishlist = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}`,
         {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers: createAuthHeaders(publicAnonKey)
         }
       );
       
@@ -122,13 +127,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   const fetchSimulation = async () => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}/simulate`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}/simulate`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          }
+          headers: createAuthHeaders(publicAnonKey)
         }
       );
       
@@ -155,13 +157,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   const handleAddItem = async (itemData: Partial<WishlistItem>) => {
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
+          headers: createAuthHeaders(publicAnonKey),
           body: JSON.stringify(itemData)
         }
       );
@@ -182,13 +181,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}/${editingItem.id}`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}/${editingItem.id}`,
         {
           method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
+          headers: createAuthHeaders(publicAnonKey),
           body: JSON.stringify(itemData)
         }
       );
@@ -210,12 +206,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}/${itemId}`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}/${itemId}`,
         {
           method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers: createAuthHeaders(publicAnonKey)
         }
       );
 
@@ -234,13 +228,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
     try {
       const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/wishlist/${year}/${month}/${pocketId}/${itemId}/purchase`,
+        `${baseUrl}/wishlist/${year}/${month}/${pocketId}/${itemId}/purchase`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
+          headers: createAuthHeaders(publicAnonKey),
           body: JSON.stringify({
             purchaseDate: new Date().toISOString()
           })
@@ -628,17 +619,21 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
           </div>
       </div>
 
-      <WishlistDialog
-        open={showDialog}
-        onOpenChange={(open) => {
-          setShowDialog(open);
-          if (!open) setEditingItem(null);
-        }}
-        pocketId={pocketId}
-        pocketName={pocketName}
-        item={editingItem}
-        onSave={editingItem ? handleUpdateItem : handleAddItem}
-      />
+      <Suspense fallback={null}>
+        {showDialog && (
+          <WishlistDialog
+            open={showDialog}
+            onOpenChange={(open) => {
+              setShowDialog(open);
+              if (!open) setEditingItem(null);
+            }}
+            pocketId={pocketId}
+            pocketName={pocketName}
+            item={editingItem}
+            onSave={editingItem ? handleUpdateItem : handleAddItem}
+          />
+        )}
+      </Suspense>
     </>
   );
 }

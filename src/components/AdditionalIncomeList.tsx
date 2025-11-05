@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -12,6 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
 import { cn } from "./ui/utils";
+import { formatCurrency } from "../utils/currency";
+import { getBaseUrl, createAuthHeaders } from "../utils/api";
 
 
 interface AdditionalIncome {
@@ -51,7 +53,7 @@ interface AdditionalIncomeListProps {
   onToggleExcludeLock?: () => void;
 }
 
-export function AdditionalIncomeList({ 
+function AdditionalIncomeListComponent({ 
   incomes, 
   onDeleteIncome, 
   onUpdateIncome, 
@@ -82,16 +84,7 @@ export function AdditionalIncomeList({
   const [sortBy, setSortBy] = useState<'date' | 'createdAt'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+  const baseUrl = getBaseUrl(projectId);
 
   const formatUSD = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -130,7 +123,6 @@ export function AdditionalIncomeList({
       setEditExchangeRate(data.rate);
       toast.success(`Kurs berhasil diperbarui: ${formatCurrency(data.rate)}`);
     } catch (error) {
-      console.log(`Error fetching exchange rate: ${error}`);
       toast.error("Gagal memuat kurs. Silakan gunakan manual.");
       setEditConversionType("manual");
     } finally {
@@ -719,3 +711,6 @@ export function AdditionalIncomeList({
     </>
   );
 }
+
+// Export memoized component for performance
+export const AdditionalIncomeList = memo(AdditionalIncomeListComponent);

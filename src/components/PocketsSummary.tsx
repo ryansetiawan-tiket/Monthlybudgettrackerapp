@@ -82,12 +82,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   };
 
   const fetchPockets = async () => {
-    const fetchStartTime = Date.now();
     try {
       setLoading(true);
       const [year, month] = monthKey.split('-');
-      
-      console.log(`[PocketsSummary] Fetching pockets for ${monthKey}...`);
       
       // Add timeout to fetch request
       const controller = new AbortController();
@@ -107,7 +104,6 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       }
       
       const data = await response.json();
-      console.log(`[PocketsSummary] Received data in ${Date.now() - fetchStartTime}ms:`, data);
       
       if (data.success) {
         setPockets(data.data.pockets);
@@ -115,12 +111,10 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           data.data.balances.map((b: PocketBalance) => [b.pocketId, b])
         );
         setBalances(balanceMap);
-        console.log(`[PocketsSummary] Successfully loaded ${data.data.pockets.length} pockets`);
       } else {
         throw new Error(data.error || 'Unknown error');
       }
-    } catch (error) {
-      console.error(`[PocketsSummary] Error fetching pockets (took ${Date.now() - fetchStartTime}ms):`, error);
+    } catch (error: any) {
       if (error.name === 'AbortError') {
         toast.error('Request timeout - silakan refresh halaman');
       } else {
@@ -131,7 +125,6 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       setBalances(new Map());
     } finally {
       setLoading(false);
-      console.log(`[PocketsSummary] Total fetch time: ${Date.now() - fetchStartTime}ms`);
     }
   };
 

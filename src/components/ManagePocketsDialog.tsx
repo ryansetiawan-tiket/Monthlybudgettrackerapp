@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
 import { Button } from "./ui/button";
@@ -7,10 +7,13 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Wallet, Sparkles, Plus, Trash2, Archive, ArchiveRestore, AlertCircle, Pencil } from "lucide-react";
+import { Wallet, Sparkles, Plus, Trash2, Archive, ArchiveRestore, AlertCircle, Pencil, Smile } from "lucide-react";
 import { Alert, AlertDescription } from "./ui/alert";
-import EmojiPicker, { Theme, EmojiClickData } from 'emoji-picker-react';
+import { Theme, EmojiClickData } from 'emoji-picker-react';
 import { useIsMobile } from "./ui/use-mobile";
+
+// Lazy load emoji picker for better performance (~100KB reduction)
+const EmojiPicker = lazy(() => import('emoji-picker-react'));
 
 interface Pocket {
   id: string;
@@ -445,19 +448,28 @@ export function ManagePocketsDialog({
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-full p-0 border-0" align="start">
-                    <EmojiPicker
-                      onEmojiClick={(emojiData: EmojiClickData) => {
-                        setNewPocketIcon(emojiData.emoji);
-                        setEmojiPickerOpen(false);
-                      }}
-                      width={350}
-                      height={400}
-                      theme={Theme.DARK}
-                      searchPlaceHolder="Cari emoji..."
-                      previewConfig={{
-                        showPreview: false
-                      }}
-                    />
+                    <Suspense fallback={
+                      <div className="flex items-center justify-center w-[350px] h-[400px] bg-background border rounded-lg">
+                        <div className="text-center space-y-2">
+                          <Smile className="size-8 mx-auto text-muted-foreground animate-pulse" />
+                          <p className="text-sm text-muted-foreground">Memuat emoji picker...</p>
+                        </div>
+                      </div>
+                    }>
+                      <EmojiPicker
+                        onEmojiClick={(emojiData: EmojiClickData) => {
+                          setNewPocketIcon(emojiData.emoji);
+                          setEmojiPickerOpen(false);
+                        }}
+                        width={350}
+                        height={400}
+                        theme={Theme.DARK}
+                        searchPlaceHolder="Cari emoji..."
+                        previewConfig={{
+                          showPreview: false
+                        }}
+                      />
+                    </Suspense>
                   </PopoverContent>
                 </Popover>
               </div>

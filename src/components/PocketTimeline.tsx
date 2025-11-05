@@ -104,9 +104,6 @@ export function PocketTimeline({
     
     if (!open) return;
     
-    const fetchStartTime = Date.now();
-    console.log(`[PocketTimeline] Fetching timeline for ${pocketId} in ${monthKey}...`);
-    
     setLoading(true);
     try {
       const [year, month] = monthKey.split('-');
@@ -129,22 +126,18 @@ export function PocketTimeline({
       }
       
       const data = await response.json();
-      console.log(`[PocketTimeline] Received timeline data in ${Date.now() - fetchStartTime}ms:`, data);
       
       if (data.success) {
         setEntries(data.data.entries);
-        console.log(`[PocketTimeline] Loaded ${data.data.entries.length} timeline entries`);
       } else {
         throw new Error(data.error || 'Unknown error');
       }
     } catch (error) {
-      console.error(`[PocketTimeline] Error fetching timeline (took ${Date.now() - fetchStartTime}ms):`, error);
       // Don't show error toast here as it might be disruptive
       // Just set empty entries
       setEntries([]);
     } finally {
       setLoading(false);
-      console.log(`[PocketTimeline] Total fetch time: ${Date.now() - fetchStartTime}ms`);
     }
   };
 
