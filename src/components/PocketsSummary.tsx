@@ -1,12 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings } from "lucide-react";
+import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings, Calendar, BarChart3 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
 import { WishlistSimulation } from "./WishlistSimulation";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
+import { Badge } from "./ui/badge";
 import { toast } from "sonner@2.0.3";
 import { PocketTimeline } from "./PocketTimeline";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
@@ -71,6 +72,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   
   // Timeline prefetch cache
   const [timelineCache, setTimelineCache] = useState<Map<string, TimelineEntry[]>>(new Map());
+  
+  // Realtime mode state (per pocket) - default ON
+  const [realtimeMode, setRealtimeMode] = useState<Map<string, boolean>>(new Map());
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -79,6 +83,56 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount);
+  };
+
+  // Load realtime mode from localStorage
+  useEffect(() => {
+    const loadRealtimeMode = () => {
+      const newMap = new Map<string, boolean>();
+      pockets.forEach(pocket => {
+        const saved = localStorage.getItem(`realtime-mode-${pocket.id}`);
+        // Default to true (ON) if not set
+        newMap.set(pocket.id, saved !== null ? saved === 'true' : true);
+      });
+      setRealtimeMode(newMap);
+    };
+    
+    if (pockets.length > 0) {
+      loadRealtimeMode();
+    }
+  }, [pockets]);
+
+  // Toggle realtime mode
+  const handleToggleRealtimeMode = (pocketId: string, currentValue: boolean) => {
+    const newValue = !currentValue;
+    setRealtimeMode(prev => new Map(prev).set(pocketId, newValue));
+    localStorage.setItem(`realtime-mode-${pocketId}`, String(newValue));
+    toast.success(newValue ? 'Mode Realtime diaktifkan' : 'Mode Proyeksi diaktifkan');
+  };
+
+  // Calculate realtime balance based on timeline
+  const calculateRealtimeBalance = (pocketId: string, isRealtime: boolean): number | null => {
+    if (!isRealtime) return null; // Return null to use server balance
+    
+    const timeline = timelineCache.get(pocketId);
+    if (!timeline || timeline.length === 0) return null; // No timeline data yet
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Filter timeline items up to today
+    const pastItems = timeline.filter(item => {
+      const itemDate = new Date(item.date);
+      itemDate.setHours(0, 0, 0, 0);
+      return itemDate <= today;
+    });
+    
+    // If no past items, return 0
+    if (pastItems.length === 0) return 0;
+    
+    // Return the balance after the most recent past item
+    // Timeline is sorted desc, so first past item has the latest balanceAfter for past dates
+    return pastItems[0].balanceAfter;
   };
 
   const fetchPockets = async () => {
@@ -408,14 +462,64 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                     )}
                   </div>
 
+                  {/* Realtime Toggle */}
+                  <div className="flex items-center justify-between py-2 border-b" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor={`realtime-${pocket.id}`} className="text-xs cursor-pointer flex items-center gap-1.5">
+                        {realtimeMode.get(pocket.id) ? (
+                          <>
+                            <Calendar className="size-3.5" />
+                            Realtime
+                          </>
+                        ) : (
+                          <>
+                            <BarChart3 className="size-3.5" />
+                            Proyeksi
+                          </>
+                        )}
+                      </Label>
+                      {realtimeMode.get(pocket.id) ? (
+                        <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                          Hari Ini
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          Total
+                        </Badge>
+                      )}
+                    </div>
+                    <Switch
+                      id={`realtime-${pocket.id}`}
+                      checked={realtimeMode.get(pocket.id) || false}
+                      onCheckedChange={() => handleToggleRealtimeMode(pocket.id, realtimeMode.get(pocket.id) || false)}
+                    />
+                  </div>
+
                   {/* Balance */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-baseline">
-                      <span className="text-xs text-muted-foreground">Saldo Tersedia</span>
+                      <span className="text-xs text-muted-foreground">
+                        {realtimeMode.get(pocket.id) ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
+                      </span>
                       <span className={`text-lg font-semibold ${balanceColor}`}>
-                        {formatCurrency(balance.availableBalance)}
+                        {(() => {
+                          const isRealtime = realtimeMode.get(pocket.id);
+                          const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
+                          const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
+                          const displayColor = displayBalance >= 0 ? 'text-green-600' : 'text-red-600';
+                          return (
+                            <span className={displayColor}>
+                              {formatCurrency(displayBalance)}
+                            </span>
+                          );
+                        })()}
                       </span>
                     </div>
+                    {realtimeMode.get(pocket.id) && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    )}
                   </div>
 
                   {/* Breakdown */}
@@ -570,6 +674,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           open={showTimeline}
           onOpenChange={setShowTimeline}
           prefetchedEntries={timelineCache.get(timelinePocket.id)}
+          isRealtimeMode={realtimeMode.get(timelinePocket.id) || false}
         />
       )}
 

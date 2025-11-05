@@ -30,6 +30,7 @@ interface PocketTimelineProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   prefetchedEntries?: TimelineEntry[];
+  isRealtimeMode?: boolean;
 }
 
 export function PocketTimeline({ 
@@ -40,7 +41,8 @@ export function PocketTimeline({
   publicAnonKey,
   open,
   onOpenChange,
-  prefetchedEntries 
+  prefetchedEntries,
+  isRealtimeMode = false
 }: PocketTimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>(prefetchedEntries || []);
   const [loading, setLoading] = useState(false);
@@ -94,6 +96,17 @@ export function PocketTimeline({
     } catch {
       return dateStr;
     }
+  };
+
+  // Check if entry date is in the past (for realtime mode)
+  const isEntryInPast = (dateStr: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const entryDate = new Date(dateStr);
+    entryDate.setHours(0, 0, 0, 0);
+    
+    return entryDate <= today;
   };
 
   const fetchTimeline = async () => {
@@ -275,40 +288,52 @@ export function PocketTimeline({
               </div>
 
               {/* Entries for this date */}
-              {groupedEntries[dateKey].map((entry) => (
-                <div 
-                  key={entry.id}
-                  className="flex gap-3 pb-3 border-b last:border-b-0"
-                >
-                  {/* Icon */}
-                  <div className={`rounded-full p-2 h-fit flex-shrink-0 ${getColorClass(entry.color)}`}>
-                    {getIcon(entry.icon)}
-                  </div>
+              {groupedEntries[dateKey].map((entry) => {
+                const isPast = isEntryInPast(entry.date);
+                const showFutureStyle = isRealtimeMode && !isPast;
+                
+                return (
+                  <div 
+                    key={entry.id}
+                    className={`flex gap-3 pb-3 border-b last:border-b-0 ${showFutureStyle ? 'opacity-50' : ''}`}
+                  >
+                    {/* Icon */}
+                    <div className={`rounded-full p-2 h-fit flex-shrink-0 ${getColorClass(entry.color)}`}>
+                      {getIcon(entry.icon)}
+                    </div>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium break-words">{entry.description}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(entry.date)}</p>
-                        {entry.metadata?.note && (
-                          <p className="text-xs text-muted-foreground italic mt-1 break-words">
-                            {entry.metadata.note}
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium break-words">{entry.description}</p>
+                            {showFutureStyle && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                Akan Datang
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{formatDate(entry.date)}</p>
+                          {entry.metadata?.note && (
+                            <p className="text-xs text-muted-foreground italic mt-1 break-words">
+                              {entry.metadata.note}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className={`font-semibold whitespace-nowrap ${getColorClass(entry.color, true)}`}>
+                            {entry.amount > 0 ? '+' : ''}{formatCurrency(entry.amount)}
                           </p>
-                        )}
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className={`font-semibold whitespace-nowrap ${getColorClass(entry.color, true)}`}>
-                          {entry.amount > 0 ? '+' : ''}{formatCurrency(entry.amount)}
-                        </p>
-                        <p className="text-xs text-muted-foreground whitespace-nowrap">
-                          Saldo: {formatCurrency(entry.balanceAfter)}
-                        </p>
+                          <p className="text-xs text-muted-foreground whitespace-nowrap">
+                            Saldo: {formatCurrency(entry.balanceAfter)}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>

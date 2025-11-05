@@ -1398,9 +1398,11 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="space-y-2 mt-3">
-                      {Array.from(historyGrouped.entries()).map(([date, expenses]) => 
-                        renderGroupedExpenseItem(date, expenses)
-                      )}
+                      {Array.from(historyGrouped.entries())
+                        .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+                        .map(([date, expenses]) => 
+                          renderGroupedExpenseItem(date, expenses)
+                        )}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
