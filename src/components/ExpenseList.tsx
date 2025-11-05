@@ -38,6 +38,7 @@ interface Expense {
   exchangeRate?: number;
   conversionType?: string;
   deduction?: number;
+  pocketId?: string;
 }
 
 interface ExpenseListProps {
@@ -50,9 +51,10 @@ interface ExpenseListProps {
   onMoveToIncome?: (expense: Expense) => void;
   isExcludeLocked?: boolean;
   onToggleExcludeLock?: () => void;
+  pockets?: Array<{id: string; name: string}>;
 }
 
-export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock }: ExpenseListProps) {
+export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -67,7 +69,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
     originalAmount: undefined,
     exchangeRate: undefined,
     conversionType: undefined,
-    deduction: undefined
+    deduction: undefined,
+    pocketId: undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -96,6 +99,13 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
     const date = new Date(dateString);
     const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     return days[date.getDay()];
+  };
+
+  // Helper function to get pocket name
+  const getPocketName = (pocketId?: string): string => {
+    if (!pocketId) return '';
+    const pocket = pockets.find(p => p.id === pocketId);
+    return pocket?.name || '';
   };
 
   // Helper function to get date number
@@ -452,11 +462,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         expenses.some(exp => exp.id === id)
       )
     );
-    if (validExcludedIds.size !== excludedExpenseIds.size) {
-      setExcludedExpenseIds(validExcludedIds);
-      if (onExcludedIdsChange) {
-        onExcludedIdsChange(validExcludedIds);
-      }
+    if (validExcludedIds.size !== excludedExpenseIds.size && onExcludedIdsChange) {
+      onExcludedIdsChange(validExcludedIds);
     }
   }, [expenses, excludedExpenseIds, onExcludedIdsChange]);
 
@@ -476,10 +483,12 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
     const expense = expenses.find(e => e.id === id);
     if (expense) {
       setEditingExpenseId(id);
+      // Extract date only (YYYY-MM-DD) from timestamp to display correctly in date input
+      const dateOnly = expense.date ? expense.date.split('T')[0] : expense.date;
       setEditingExpense({ 
         name: expense.name, 
         amount: expense.amount, 
-        date: expense.date, 
+        date: dateOnly, 
         items: expense.items ? [...expense.items] : [], 
         color: expense.color || '',
         fromIncome: expense.fromIncome,
@@ -487,7 +496,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         originalAmount: expense.originalAmount,
         exchangeRate: expense.exchangeRate,
         conversionType: expense.conversionType,
-        deduction: expense.deduction
+        deduction: expense.deduction,
+        pocketId: expense.pocketId
       });
       // Initialize input strings for items
       const initialInputs: { [index: number]: string } = {};
@@ -519,7 +529,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         originalAmount: undefined,
         exchangeRate: undefined,
         conversionType: undefined,
-        deduction: undefined
+        deduction: undefined,
+        pocketId: undefined
       });
     }
   };
@@ -537,7 +548,8 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
       originalAmount: undefined,
       exchangeRate: undefined,
       conversionType: undefined,
-      deduction: undefined
+      deduction: undefined,
+      pocketId: undefined
     });
     setItemAmountInputs({});
   };
@@ -781,6 +793,11 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
                     {expense.name}
                   </p>
+                  {expense.pocketId && getPocketName(expense.pocketId) && (
+                    <Badge variant="secondary" className="text-xs">
+                      {getPocketName(expense.pocketId)}
+                    </Badge>
+                  )}
                   {isItemExpanded ? (
                     <ChevronUp className="size-3" />
                   ) : (
@@ -887,7 +904,14 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
               />
             )}
             <div>
-              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+              <div className="flex items-center gap-2">
+                <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+                {expense.pocketId && getPocketName(expense.pocketId) && (
+                  <Badge variant="secondary" className="text-xs">
+                    {getPocketName(expense.pocketId)}
+                  </Badge>
+                )}
+              </div>
               {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
                 <div className={`flex items-center gap-2 text-xs text-green-600 ${isExcluded ? 'line-through' : ''}`}>
                   <DollarSign className="size-3" />
@@ -1003,6 +1027,11 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                     {formatDateShort(expense.date)}
                   </span>
                   <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
+                  {expense.pocketId && getPocketName(expense.pocketId) && (
+                    <Badge variant="secondary" className="text-xs">
+                      {getPocketName(expense.pocketId)}
+                    </Badge>
+                  )}
                   {expandedItems.has(expense.id) ? (
                     <ChevronUp className="size-4 shrink-0" />
                   ) : (
@@ -1113,7 +1142,14 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
             )}
             <div className="min-w-0 flex-1">
-              <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
+              <div className="flex items-center gap-2">
+                <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
+                {expense.pocketId && getPocketName(expense.pocketId) && (
+                  <Badge variant="secondary" className="text-xs">
+                    {getPocketName(expense.pocketId)}
+                  </Badge>
+                )}
+              </div>
               {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
                 <div className={`flex items-center gap-2 text-sm text-green-600 ${isExcluded ? 'line-through' : ''}`}>
                   <DollarSign className="size-3" />
@@ -1205,7 +1241,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                   <Button
                     variant={isExcludeLocked ? "default" : "outline"}
                     size="sm"
-                    onClick={onToggleExcludeLock}
+                    onClick={() => onToggleExcludeLock()}
                     className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
                     title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
                   >
@@ -1387,7 +1423,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         )}
       </CardContent>
       <Dialog open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Pengeluaran</DialogTitle>
           </DialogHeader>
@@ -1422,6 +1458,25 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
                 onChange={(e) => setEditingExpense({ ...editingExpense, date: e.target.value })}
               />
             </div>
+
+            {pockets.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-pocket">Sumber Dana (Kantong)</Label>
+                <select
+                  id="edit-pocket"
+                  value={editingExpense.pocketId || ''}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, pocketId: e.target.value || undefined })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Pilih Kantong</option>
+                  {pockets.map(pocket => (
+                    <option key={pocket.id} value={pocket.id}>
+                      {pocket.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             
             {editingExpense.items && editingExpense.items.length > 0 && (
               <div className="space-y-2">
@@ -1482,7 +1537,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
         </DialogContent>
       </Dialog>
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Hapus Pengeluaran</AlertDialogTitle>
             <AlertDialogDescription>
@@ -1510,7 +1565,7 @@ export function ExpenseList({ expenses, onDeleteExpense, onEditExpense, onBulkDe
 
       {/* Bulk Delete Confirmation Dialog */}
       <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
-        <AlertDialogContent className="max-h-[80vh] overflow-y-auto">
+        <AlertDialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>Hapus {selectedExpenseIds.size} Pengeluaran</AlertDialogTitle>
             <AlertDialogDescription asChild>

@@ -10,6 +10,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
 import { cn } from "./ui/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+
+interface Pocket {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+}
 
 interface AdditionalIncomeFormProps {
   onAddIncome: (income: {
@@ -21,10 +29,13 @@ interface AdditionalIncomeFormProps {
     conversionType: string;
     date: string;
     deduction: number;
+    pocketId: string;
   }) => void;
   isAdding: boolean;
   onSuccess?: () => void;
   inDialog?: boolean;
+  pockets?: Pocket[];
+  defaultTargetPocket?: string;
 }
 
 export function AdditionalIncomeForm({
@@ -32,6 +43,8 @@ export function AdditionalIncomeForm({
   isAdding,
   onSuccess,
   inDialog = false,
+  pockets = [],
+  defaultTargetPocket,
 }: AdditionalIncomeFormProps) {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
@@ -44,8 +57,19 @@ export function AdditionalIncomeForm({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [deduction, setDeduction] = useState("");
+  const [targetPocketId, setTargetPocketId] = useState("");
 
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1`;
+
+  // Set default target pocket when prop changes
+  useEffect(() => {
+    if (defaultTargetPocket) {
+      setTargetPocketId(defaultTargetPocket);
+    } else if (pockets.length > 0) {
+      // Default to first pocket if no default specified
+      setTargetPocketId(pockets[0].id);
+    }
+  }, [defaultTargetPocket, pockets]);
 
   useEffect(() => {
     loadNameSuggestions();
@@ -126,6 +150,11 @@ export function AdditionalIncomeForm({
       return;
     }
 
+    if (!targetPocketId) {
+      toast.error("Kantong tujuan harus dipilih");
+      return;
+    }
+
     if (currency === "USD" && conversionType === "manual" && !manualRate) {
       toast.error("Kurs manual harus diisi");
       return;
@@ -149,6 +178,7 @@ export function AdditionalIncomeForm({
       conversionType: currency === "USD" ? conversionType : "manual",
       date,
       deduction: Number(deduction) || 0,
+      pocketId: targetPocketId,
     });
 
     // Reset form
@@ -158,6 +188,7 @@ export function AdditionalIncomeForm({
     setConversionType("auto");
     setManualRate("");
     setDeduction("");
+    setTargetPocketId(defaultTargetPocket || (pockets.length > 0 ? pockets[0].id : ""));
     
     // Call onSuccess callback if provided (for dialog)
     if (onSuccess) {
@@ -308,6 +339,24 @@ export function AdditionalIncomeForm({
               <p className="text-green-600">{formatCurrency(amountIDR)}</p>
             </div>
           </>
+        )}
+
+        {pockets.length > 0 && (
+          <div className="space-y-2">
+            <Label>Ke Kantong</Label>
+            <Select value={targetPocketId} onValueChange={setTargetPocketId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Pilih kantong tujuan" />
+              </SelectTrigger>
+              <SelectContent>
+                {pockets.map(pocket => (
+                  <SelectItem key={pocket.id} value={pocket.id}>
+                    {pocket.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
 
         <div className="space-y-2">

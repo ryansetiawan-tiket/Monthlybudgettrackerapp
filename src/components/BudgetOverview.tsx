@@ -1,15 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Settings } from "lucide-react";
+import { Wallet } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
 interface BudgetOverviewProps {
   totalIncome: number;
   totalExpenses: number;
   remainingBudget: number;
-  onOpenBudgetSettings: () => void;
+  showPockets?: boolean;
+  onTogglePockets?: () => void;
 }
 
-export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, onOpenBudgetSettings }: BudgetOverviewProps) {
+export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, showPockets = true, onTogglePockets }: BudgetOverviewProps) {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -45,14 +47,25 @@ export function BudgetOverview({ totalIncome, totalExpenses, remainingBudget, on
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">Sisa Budget</CardTitle>
-            <Button 
-              variant="ghost" 
-              size="icon"
-              className="size-7 hover:bg-background/50"
-              onClick={onOpenBudgetSettings}
-            >
-              <Settings className="size-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      className={`size-7 hover:bg-background/50 ${showPockets ? 'bg-background/30' : ''}`}
+                      onClick={() => onTogglePockets?.()}
+                    >
+                      <Wallet className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{showPockets ? 'Sembunyikan' : 'Tampilkan'} Ringkasan Kantong</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-0">

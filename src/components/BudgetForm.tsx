@@ -4,6 +4,8 @@ import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { ArrowDownToLine } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+import { useIsMobile } from "./ui/use-mobile";
 
 interface BudgetFormProps {
   open: boolean;
@@ -30,6 +32,8 @@ export function BudgetForm({
   suggestedCarryover,
   isLoadingCarryover,
 }: BudgetFormProps) {
+  const isMobile = useIsMobile();
+  
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -50,16 +54,8 @@ export function BudgetForm({
     onOpenChange(false);
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>Budget Bulanan</DialogTitle>
-          <DialogDescription>
-            Atur budget awal, carryover, dan catatan untuk bulan ini
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
+  const formContent = (
+    <div className="space-y-4 py-4">
           <div className="space-y-2">
             <Label htmlFor="initialBudget">Budget Awal</Label>
             <Input
@@ -126,6 +122,39 @@ export function BudgetForm({
             {isSaving ? "Menyimpan..." : "Simpan Budget"}
           </Button>
         </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent 
+          side="bottom" 
+          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
+        >
+          <SheetHeader className="px-4 pt-6 pb-4 border-b">
+            <SheetTitle>Budget Bulanan</SheetTitle>
+            <SheetDescription>
+              Atur budget awal, carryover, dan catatan untuk bulan ini
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4">
+            {formContent}
+          </div>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>Budget Bulanan</DialogTitle>
+          <DialogDescription>
+            Atur budget awal, carryover, dan catatan untuk bulan ini
+          </DialogDescription>
+        </DialogHeader>
+        {formContent}
       </DialogContent>
     </Dialog>
   );

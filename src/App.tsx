@@ -8,7 +8,11 @@ import { ExpenseList } from "./components/ExpenseList";
 import { AdditionalIncomeList } from "./components/AdditionalIncomeList";
 import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { PocketsSummary } from "./components/PocketsSummary";
+import { TransferDialog } from "./components/TransferDialog";
+import { ManagePocketsDialog } from "./components/ManagePocketsDialog";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
+import { useRealtimeSubscription } from "./utils/supabase/useRealtimeSubscription";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
 import { Plus, DollarSign } from "lucide-react";
@@ -42,6 +46,27 @@ interface Expense {
   exchangeRate?: number;
   conversionType?: string;
   deduction?: number;
+  pocketId?: string;
+}
+
+interface Pocket {
+  id: string;
+  name: string;
+  type: 'primary' | 'custom';
+  description?: string;
+  icon?: string;
+  color?: string;
+  order: number;
+  enableWishlist?: boolean;
+}
+
+interface PocketBalance {
+  pocketId: string;
+  originalAmount: number;
+  transferIn: number;
+  transferOut: number;
+  expenses: number;
+  availableBalance: number;
 }
 
 interface AdditionalIncome {
@@ -127,6 +152,24 @@ export default function App() {
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
   const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
   const [isExcludeLocked, setIsExcludeLocked] = useState(false);
+
+  // Pockets System states
+  const [pockets, setPockets] = useState<Pocket[]>([]);
+  const [balances, setBalances] = useState<Map<string, PocketBalance>>(new Map());
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [isManagePocketsDialogOpen, setIsManagePocketsDialogOpen] = useState(false);
+  const [defaultFromPocket, setDefaultFromPocket] = useState<string | undefined>(undefined);
+  const [defaultToPocket, setDefaultToPocket] = useState<string | undefined>(undefined);
+  const [defaultTargetPocket, setDefaultTargetPocket] = useState<string | undefined>(undefined);
+  const [editingPocket, setEditingPocket] = useState<Pocket | null>(null);
+  const [archivedPockets, setArchivedPockets] = useState<Pocket[]>([]);
+  const [pocketsRefreshKey, setPocketsRefreshKey] = useState(0);
+  
+  // Show/Hide Pockets state (persistent)
+  const [showPockets, setShowPockets] = useState(() => {
+    const saved = localStorage.getItem('showPockets');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
 
   // Client-side cache for month data
   const [cache, setCache] = useState<Record<string, MonthCache>>({});
@@ -217,6 +260,280 @@ export default function App() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey]);
 
+  // Load pockets and balances
+  const loadPockets = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/pockets/${selectedYear}/${selectedMonth}`,
+        {
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load pockets");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setPockets(data.data.pockets);
+        const balanceMap = new Map(
+          data.data.balances.map((b: PocketBalance) => [b.pocketId, b])
+        );
+        setBalances(balanceMap);
+      }
+    } catch (error) {
+      console.log(`Error loading pockets: ${error}`);
+    }
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey]);
+
+  // Handle transfer between pockets
+  const handleTransfer = async (transfer: {
+    fromPocketId: string;
+    toPocketId: string;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/transfer/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify(transfer),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to create transfer");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success("Transfer berhasil!");
+        
+        // Update balances
+        const balanceMap = new Map(balances);
+        Object.entries(data.data.updatedBalances).forEach(([pocketId, balance]) => {
+          balanceMap.set(pocketId, balance as PocketBalance);
+        });
+        setBalances(balanceMap);
+        
+        // Invalidate cache
+        invalidateCache(selectedYear, selectedMonth);
+        
+        // Trigger refresh for PocketsSummary and timeline
+        setPocketsRefreshKey(prev => prev + 1);
+      }
+    } catch (error: any) {
+      console.log(`Error creating transfer: ${error}`);
+      toast.error(error.message || "Gagal melakukan transfer");
+      throw error;
+    }
+  };
+
+  // Load archived pockets
+  const loadArchivedPockets = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/archived`,
+        {
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load archived pockets");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setArchivedPockets(data.data.archived);
+      }
+    } catch (error) {
+      console.log(`Error loading archived pockets: ${error}`);
+    }
+  }, [baseUrl, publicAnonKey]);
+
+  // Create custom pocket
+  const handleCreatePocket = async (pocket: {
+    name: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    enableWishlist?: boolean;
+  }) => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/pockets/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify(pocket),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to create pocket");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(`Kantong "${pocket.name}" berhasil dibuat!`);
+        
+        // Reload pockets
+        await loadPockets();
+        
+        // Invalidate cache
+        invalidateCache(selectedYear, selectedMonth);
+      }
+    } catch (error: any) {
+      console.log(`Error creating pocket: ${error}`);
+      toast.error(error.message || "Gagal membuat kantong");
+      throw error;
+    }
+  };
+
+  // Edit custom pocket
+  const handleEditPocket = async (pocketId: string, pocket: {
+    name: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+  }) => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/pockets/${selectedYear}/${selectedMonth}/${pocketId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify(pocket),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to edit pocket");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(`Kantong "${pocket.name}" berhasil diperbarui!`);
+        
+        // Reload pockets
+        await loadPockets();
+        
+        // Invalidate cache
+        invalidateCache(selectedYear, selectedMonth);
+        
+        // Close edit mode
+        setEditingPocket(null);
+        setIsManagePocketsDialogOpen(false);
+      }
+    } catch (error: any) {
+      console.log(`Error editing pocket: ${error}`);
+      toast.error(error.message || "Gagal mengedit kantong");
+      throw error;
+    }
+  };
+
+  // Archive pocket
+  const handleArchivePocket = async (pocketId: string, reason?: string) => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/archive/${selectedYear}/${selectedMonth}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({ pocketId, reason }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to archive pocket");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(data.message);
+        
+        // Reload pockets and archived pockets
+        await loadPockets();
+        await loadArchivedPockets();
+        
+        // Invalidate cache
+        invalidateCache(selectedYear, selectedMonth);
+      }
+    } catch (error: any) {
+      console.log(`Error archiving pocket: ${error}`);
+      toast.error(error.message || "Gagal mengarsipkan kantong");
+      throw error;
+    }
+  };
+
+  // Unarchive pocket
+  const handleUnarchivePocket = async (pocketId: string) => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/archive/${pocketId}/${selectedYear}/${selectedMonth}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to unarchive pocket");
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(data.message);
+        
+        // Reload pockets and archived pockets
+        await loadPockets();
+        await loadArchivedPockets();
+        
+        // Invalidate cache
+        invalidateCache(selectedYear, selectedMonth);
+      }
+    } catch (error: any) {
+      console.log(`Error unarchiving pocket: ${error}`);
+      toast.error(error.message || "Gagal memulihkan kantong");
+      throw error;
+    }
+  };
+
   useEffect(() => {
     const cacheKey = getCacheKey(selectedYear, selectedMonth);
     const cachedData = cache[cacheKey];
@@ -243,6 +560,10 @@ export default function App() {
       
       // Load exclude state (might override reset above if locked)
       loadExcludeState();
+      
+      // Load pockets
+      loadPockets();
+      loadArchivedPockets();
     } else {
       // No cache - fetch from server
       loadBudgetData();
@@ -251,8 +572,84 @@ export default function App() {
       loadPreviousMonthData();
       loadTemplates();
       loadExcludeState();
+      loadPockets();
+      loadArchivedPockets();
     }
-  }, [selectedMonth, selectedYear, loadExcludeState]);
+  }, [selectedMonth, selectedYear, loadExcludeState, loadPockets, loadArchivedPockets]);
+
+  // ============================================
+  // REALTIME SUBSCRIPTIONS
+  // ============================================
+  
+  // Subscribe to KV store changes for the current month
+  const monthKey = getCacheKey(selectedYear, selectedMonth);
+  
+  useRealtimeSubscription({
+    table: 'kv_store_3adbeaf1',
+    filter: `key=like.%${monthKey}%`,
+    onUpdate: (payload) => {
+      console.log('🔄 Realtime update detected:', payload.new.key);
+      
+      // Invalidate cache and reload data
+      invalidateCache(selectedYear, selectedMonth);
+      
+      const key = payload.new.key as string;
+      
+      // Determine what data to reload based on the key
+      if (key.includes('budget_')) {
+        loadBudgetData();
+      } else if (key.includes('expenses_')) {
+        loadExpenses();
+      } else if (key.includes('additional_income_')) {
+        loadAdditionalIncomes();
+      } else if (key.includes('pockets_')) {
+        loadPockets();
+      } else if (key.includes('exclude_state_')) {
+        loadExcludeState();
+      }
+    },
+    onInsert: (payload) => {
+      console.log('🆕 Realtime insert detected:', payload.new.key);
+      
+      // Same logic as update
+      invalidateCache(selectedYear, selectedMonth);
+      
+      const key = payload.new.key as string;
+      
+      if (key.includes('budget_')) {
+        loadBudgetData();
+      } else if (key.includes('expenses_')) {
+        loadExpenses();
+      } else if (key.includes('additional_income_')) {
+        loadAdditionalIncomes();
+      } else if (key.includes('pockets_')) {
+        loadPockets();
+      } else if (key.includes('exclude_state_')) {
+        loadExcludeState();
+      }
+    },
+    onDelete: (payload) => {
+      console.log('🗑️ Realtime delete detected:', payload.old.key);
+      
+      // Reload relevant data
+      invalidateCache(selectedYear, selectedMonth);
+      
+      const key = payload.old.key as string;
+      
+      if (key.includes('budget_')) {
+        loadBudgetData();
+      } else if (key.includes('expenses_')) {
+        loadExpenses();
+      } else if (key.includes('additional_income_')) {
+        loadAdditionalIncomes();
+      } else if (key.includes('pockets_')) {
+        loadPockets();
+      } else if (key.includes('exclude_state_')) {
+        loadExcludeState();
+      }
+    },
+    enabled: true
+  });
 
   const loadBudgetData = async () => {
     try {
@@ -704,7 +1101,7 @@ export default function App() {
     }
   };
 
-  const handleAddExpense = async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string) => {
+  const handleAddExpense = async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string) => {
     setIsAdding(true);
     try {
       const response = await fetch(
@@ -715,7 +1112,7 @@ export default function App() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, amount, date, items, color }),
+          body: JSON.stringify({ name, amount, date, items, color, pocketId }),
         }
       );
 
@@ -731,6 +1128,12 @@ export default function App() {
       updateCachePartial('expenses', newExpenses);
       // Invalidate next month's cache (carryover changes)
       invalidateCache(selectedYear, selectedMonth);
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
       
       toast.success("Pengeluaran berhasil ditambahkan");
     } catch (error) {
@@ -764,6 +1167,12 @@ export default function App() {
       updateCachePartial('expenses', newExpenses);
       // Invalidate next month's cache (carryover changes)
       invalidateCache(selectedYear, selectedMonth);
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
       
       toast.success("Pengeluaran berhasil dihapus");
     } catch (error) {
@@ -801,6 +1210,12 @@ export default function App() {
       // Invalidate next month's cache (carryover changes)
       invalidateCache(selectedYear, selectedMonth);
       
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success("Pengeluaran berhasil diupdate");
     } catch (error) {
       console.log(`Error editing expense: ${error}`);
@@ -817,6 +1232,7 @@ export default function App() {
     conversionType: string;
     date: string;
     deduction: number;
+    pocketId: string;
   }) => {
     setIsAddingIncome(true);
     try {
@@ -838,6 +1254,13 @@ export default function App() {
 
       const result = await response.json();
       setAdditionalIncomes((prev) => [...prev, result.data]);
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success("Pemasukan tambahan berhasil ditambahkan");
     } catch (error) {
       console.log(`Error adding additional income: ${error}`);
@@ -845,6 +1268,11 @@ export default function App() {
     } finally {
       setIsAddingIncome(false);
     }
+  };
+
+  const handleOpenIncomeDialog = (targetPocketId?: string) => {
+    setDefaultTargetPocket(targetPocketId);
+    setIsIncomeDialogOpen(true);
   };
 
   const handleDeleteIncome = async (id: string) => {
@@ -864,6 +1292,13 @@ export default function App() {
       }
 
       setAdditionalIncomes((prev) => prev.filter((income) => income.id !== id));
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success("Pemasukan tambahan berhasil dihapus");
     } catch (error) {
       console.log(`Error deleting additional income: ${error}`);
@@ -938,6 +1373,12 @@ export default function App() {
       // Invalidate cache (both income and expense changed)
       invalidateCache(selectedYear, selectedMonth);
       
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success(`"${income.name}" dipindahkan ke pengeluaran`);
     } catch (error) {
       console.log(`Error moving income to expense: ${error}`);
@@ -999,6 +1440,12 @@ export default function App() {
       // Invalidate cache
       invalidateCache(selectedYear, selectedMonth);
       
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success(`"${expense.name}" dikembalikan ke pemasukan tambahan`);
     } catch (error) {
       console.log(`Error moving expense to income: ${error}`);
@@ -1037,6 +1484,13 @@ export default function App() {
       setAdditionalIncomes((prev) =>
         prev.map((item) => (item.id === id ? result.data : item))
       );
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
+      
       toast.success("Pemasukan tambahan berhasil diupdate");
       
       // Reload previous month data if this might affect next month's carryover
@@ -1081,6 +1535,12 @@ export default function App() {
       
       // Invalidate next month's cache (carryover changes)
       invalidateCache(selectedYear, selectedMonth);
+      
+      // Reload pockets to update balances
+      loadPockets();
+      
+      // Trigger refresh for PocketsSummary timeline
+      setPocketsRefreshKey(prev => prev + 1);
 
       if (failures.length > 0 && successes.length > 0) {
         toast.warning(`${successes.length} dari ${ids.length} pengeluaran berhasil dihapus`);
@@ -1097,6 +1557,14 @@ export default function App() {
     setSelectedMonth(month);
     setSelectedYear(year);
     setIsLoading(true);
+  };
+
+  const handleTogglePockets = () => {
+    setShowPockets(prev => {
+      const newValue = !prev;
+      localStorage.setItem('showPockets', JSON.stringify(newValue));
+      return newValue;
+    });
   };
 
   const handleUpdateGlobalDeduction = async (deduction: number) => {
@@ -1203,9 +1671,74 @@ export default function App() {
               totalIncome={totalIncome}
               totalExpenses={totalExpenses}
               remainingBudget={remainingBudget}
-              onOpenBudgetSettings={() => setIsBudgetDialogOpen(true)}
+              showPockets={showPockets}
+              onTogglePockets={handleTogglePockets}
             />
           </motion.div>
+
+          {showPockets && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ delay: 0.25 }}
+            >
+              <PocketsSummary
+              key={`pockets-${selectedYear}-${selectedMonth}-${pocketsRefreshKey}`}
+              monthKey={`${selectedYear}-${selectedMonth.toString().padStart(2, '0')}`}
+              onTransferClick={(fromPocket, toPocket) => {
+                setDefaultFromPocket(fromPocket);
+                setDefaultToPocket(toPocket);
+                setIsTransferDialogOpen(true);
+              }}
+              onAddIncomeClick={handleOpenIncomeDialog}
+              onManagePocketsClick={() => {
+                setEditingPocket(null);
+                setIsManagePocketsDialogOpen(true);
+              }}
+              onEditPocketClick={(pocket) => {
+                setEditingPocket(pocket);
+                setIsManagePocketsDialogOpen(true);
+              }}
+              onOpenBudgetSettings={() => setIsBudgetDialogOpen(true)}
+              baseUrl={baseUrl}
+              publicAnonKey={publicAnonKey}
+            />
+            </motion.div>
+          )}
+
+          <TransferDialog
+            open={isTransferDialogOpen}
+            onOpenChange={(open) => {
+              setIsTransferDialogOpen(open);
+              if (!open) {
+                // Reset defaults when closing
+                setDefaultFromPocket(undefined);
+                setDefaultToPocket(undefined);
+              }
+            }}
+            pockets={pockets}
+            balances={balances}
+            onTransfer={handleTransfer}
+            defaultFromPocket={defaultFromPocket}
+            defaultToPocket={defaultToPocket}
+          />
+
+          <ManagePocketsDialog
+            open={isManagePocketsDialogOpen}
+            onOpenChange={(open) => {
+              setIsManagePocketsDialogOpen(open);
+              if (!open) setEditingPocket(null);
+            }}
+            pockets={pockets}
+            balances={balances}
+            onCreatePocket={handleCreatePocket}
+            onEditPocket={handleEditPocket}
+            onArchivePocket={handleArchivePocket}
+            onUnarchivePocket={handleUnarchivePocket}
+            archivedPockets={archivedPockets}
+            editPocket={editingPocket}
+          />
 
           <BudgetForm
             open={isBudgetDialogOpen}
@@ -1229,13 +1762,20 @@ export default function App() {
             onAddTemplate={handleAddTemplate}
             onUpdateTemplate={handleUpdateTemplate}
             onDeleteTemplate={handleDeleteTemplate}
+            pockets={pockets}
+            balances={balances}
           />
 
           <AddAdditionalIncomeDialog 
             open={isIncomeDialogOpen}
-            onOpenChange={setIsIncomeDialogOpen}
+            onOpenChange={(open) => {
+              setIsIncomeDialogOpen(open);
+              if (!open) setDefaultTargetPocket(undefined);
+            }}
             onAddIncome={handleAddIncome}
             isAdding={isAddingIncome}
+            defaultTargetPocket={defaultTargetPocket}
+            pockets={pockets}
           />
 
           <motion.div
@@ -1278,6 +1818,7 @@ export default function App() {
                   onMoveToIncome={handleMoveExpenseToIncome}
                   isExcludeLocked={isExcludeLocked}
                   onToggleExcludeLock={handleToggleExcludeLock}
+                  pockets={pockets}
                 />
               </TabsContent>
 

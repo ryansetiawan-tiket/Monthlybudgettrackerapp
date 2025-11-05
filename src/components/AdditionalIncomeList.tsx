@@ -146,9 +146,10 @@ export function AdditionalIncomeList({
     setEditConversionType(income.conversionType as "auto" | "manual");
     setEditExchangeRate(income.exchangeRate);
     setEditManualRate(income.exchangeRate?.toString() || "");
-    setEditDate(income.date || new Date().toISOString().split('T')[0]);
+    // Extract date only (YYYY-MM-DD) from timestamp to display correctly in date input
+    const dateOnly = income.date ? income.date.split('T')[0] : new Date().toISOString().split('T')[0];
+    setEditDate(dateOnly);
     setEditDeduction((income.deduction || 0).toString());
-    setIsOpen(true);
   };
 
   const calculateIDR = () => {
@@ -195,7 +196,6 @@ export function AdditionalIncomeList({
     });
 
     setEditingIncome(null);
-    setIsOpen(false);
   };
 
   // Toggle exclude income from calculation
@@ -313,7 +313,7 @@ export function AdditionalIncomeList({
                 <Button
                   variant={isExcludeLocked ? "default" : "outline"}
                   size="sm"
-                  onClick={onToggleExcludeLock}
+                  onClick={() => onToggleExcludeLock()}
                   className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
                   title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
                 >
@@ -535,7 +535,7 @@ export function AdditionalIncomeList({
         </Card>
 
       <Dialog open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Edit Pemasukan Tambahan</DialogTitle>
           </DialogHeader>
@@ -674,7 +674,7 @@ export function AdditionalIncomeList({
                     selected={editDate ? new Date(editDate) : undefined}
                     onSelect={(date) => setEditDate(date ? format(date, "yyyy-MM-dd") : "")}
                     disabled={(date) =>
-                      date > new Date() || date < new Date("1900-01-01")
+                      date < new Date("1900-01-01")
                     }
                     className="p-2"
                   />

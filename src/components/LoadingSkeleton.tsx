@@ -8,15 +8,15 @@ export function LoadingSkeleton() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="min-h-screen bg-background p-4 md:p-8"
+      className="min-h-screen bg-background p-4 md:p-6 lg:p-8"
     >
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-8">
         {/* Header */}
         <motion.div 
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="text-center space-y-2"
+          className="text-center space-y-2 pt-2"
         >
           <Skeleton className="h-10 w-64 mx-auto" />
           <Skeleton className="h-5 w-96 mx-auto" />
@@ -86,158 +86,130 @@ export function LoadingSkeleton() {
           </motion.div>
         </motion.div>
 
-        {/* Budget Form Collapsible - Removed, now in dialog */}
-
-        {/* Additional Income Section */}
+        {/* Pockets Summary Section */}
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.4 }}
+          transition={{ delay: 0.25 }}
         >
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <Skeleton className="h-6 w-48" />
-                <div className="flex items-center gap-2">
-                  <Skeleton className="size-7 rounded-md" />
-                  <Skeleton className="size-7 rounded-md" />
-                </div>
+                <Skeleton className="h-6 w-32" />
+                <Skeleton className="size-8 rounded-md" />
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {[1, 2].map((i) => (
+            <CardContent className="space-y-4">
+              {/* Pocket Cards */}
+              {[1, 2, 3].map((i) => (
                 <motion.div
                   key={i}
                   initial={{ x: -20, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.4 + i * 0.05 }}
-                  className="flex items-center justify-between p-2"
+                  transition={{ delay: 0.25 + i * 0.05 }}
                 >
-                  <div className="flex-1 space-y-1">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-3 w-48" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Skeleton className="h-5 w-24" />
-                    <Skeleton className="size-6 rounded-md" />
-                    <Skeleton className="size-6 rounded-md" />
-                    <Skeleton className="size-6 rounded-md" />
-                    <Skeleton className="size-6 rounded-md" />
-                  </div>
+                  <Card className="border border-border/50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="size-8 rounded-md" />
+                          <div className="space-y-1">
+                            <Skeleton className="h-4 w-32" />
+                            <Skeleton className="h-3 w-24" />
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <Skeleton className="size-7 rounded-md" />
+                          <Skeleton className="size-7 rounded-md" />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <Skeleton className="h-3 w-24" />
+                          <Skeleton className="h-3 w-20" />
+                        </div>
+                        <div className="flex justify-between">
+                          <Skeleton className="h-3 w-20" />
+                          <Skeleton className="h-3 w-16" />
+                        </div>
+                        <Skeleton className="h-px w-full" />
+                        <div className="flex justify-between">
+                          <Skeleton className="h-4 w-28" />
+                          <Skeleton className="h-4 w-24" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </motion.div>
               ))}
-              <Skeleton className="h-px w-full" />
-              <div className="flex items-center justify-between p-2">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-5 w-24" />
-              </div>
             </CardContent>
           </Card>
         </motion.div>
 
-        {/* Template Section */}
+        {/* Tabs Section */}
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.5 }}
+          transition={{ delay: 0.35 }}
         >
-          <Skeleton className="h-12 w-full rounded-md" />
-        </motion.div>
-
-        {/* Add Expense Button */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.6 }}
-        >
-          <Skeleton className="h-14 w-full rounded-md" />
-        </motion.div>
-
-        {/* Expense List */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.7 }}
-          className="space-y-4"
-        >
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-6 w-48" />
-                <div className="flex items-center gap-2">
-                  <Skeleton className="size-7 rounded-md" />
-                  <Skeleton className="size-7 rounded-md" />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Date Group 1 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="h-5 w-5" />
-                    <Skeleton className="h-5 w-32" />
+          <div className="space-y-3">
+            {/* Tab List */}
+            <Skeleton className="h-10 w-full rounded-md" />
+            
+            {/* Add Button */}
+            <Skeleton className="h-10 w-full rounded-md" />
+            
+            {/* List Content */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-6 w-48" />
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="size-7 rounded-md" />
+                    <Skeleton className="size-7 rounded-md" />
                   </div>
-                  <Skeleton className="h-5 w-24" />
                 </div>
-                {[1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: 0.7 + i * 0.05 }}
-                    className="flex items-center justify-between p-2"
-                  >
-                    <div className="flex-1 space-y-1">
-                      <Skeleton className="h-4 w-40" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Date Group */}
+                {[1, 2].map((groupIdx) => (
+                  <div key={groupIdx} className="space-y-2">
+                    <div className="flex items-center justify-between p-2">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="h-5 w-5" />
+                        <Skeleton className="h-5 w-32" />
+                      </div>
+                      <Skeleton className="h-5 w-24" />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="size-6 rounded-md" />
-                      <Skeleton className="size-6 rounded-md" />
-                      <Skeleton className="size-6 rounded-md" />
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
-              {/* Date Group 2 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="h-5 w-5" />
-                    <Skeleton className="h-5 w-32" />
+                    {[1, 2].map((i) => (
+                      <motion.div
+                        key={`${groupIdx}-${i}`}
+                        initial={{ x: -20, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: 0.35 + (groupIdx * 2 + i) * 0.03 }}
+                        className="flex items-center justify-between p-2"
+                      >
+                        <div className="flex-1 space-y-1">
+                          <Skeleton className="h-4 w-40" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="size-6 rounded-md" />
+                          <Skeleton className="size-6 rounded-md" />
+                          <Skeleton className="size-6 rounded-md" />
+                        </div>
+                      </motion.div>
+                    ))}
                   </div>
-                  <Skeleton className="h-5 w-24" />
-                </div>
-                {[1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: 0.8 + i * 0.05 }}
-                    className="flex items-center justify-between p-2"
-                  >
-                    <div className="flex-1 space-y-1">
-                      <Skeleton className="h-4 w-40" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="size-6 rounded-md" />
-                      <Skeleton className="size-6 rounded-md" />
-                      <Skeleton className="size-6 rounded-md" />
-                    </div>
-                  </motion.div>
                 ))}
-              </div>
-
-              <Skeleton className="h-px w-full" />
-              <div className="flex justify-between p-2">
-                <Skeleton className="h-5 w-32" />
-                <Skeleton className="h-5 w-32" />
-              </div>
-            </CardContent>
-          </Card>
+                <Skeleton className="h-px w-full" />
+                <div className="flex justify-between p-2">
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-5 w-32" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </motion.div>
 
         {/* Loading indicator with pulse animation */}

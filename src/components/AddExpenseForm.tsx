@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
-import { Plus, CalendarIcon, FileText, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, CalendarIcon, FileText, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
@@ -10,21 +10,51 @@ import { id } from "date-fns/locale";
 import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import type { FixedExpenseTemplate } from "./FixedExpenseTemplates";
+import { Card } from "./ui/card";
+import { Separator } from "./ui/separator";
 
 interface AddExpenseFormProps {
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string) => void;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string) => void;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onSuccess?: () => void;
+  pockets?: Array<{id: string; name: string}>;
+  balances?: Map<string, {availableBalance: number}>;
 }
 
-export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }: AddExpenseFormProps) {
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
+interface ExpenseEntry {
+  id: string;
+  name: string;
+  amount: string;
+  calculatedAmount: number | null;
+  pocketId: string;
+}
+
+export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances }: AddExpenseFormProps) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [calculatedAmount, setCalculatedAmount] = useState<number | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [templateItems, setTemplateItems] = useState<Array<{name: string, amount: number, editable?: boolean}>>([]);
+  
+  // Multiple entries state
+  const [entries, setEntries] = useState<ExpenseEntry[]>([{
+    id: crypto.randomUUID(),
+    name: "",
+    amount: "",
+    calculatedAmount: null,
+    pocketId: 'pocket_daily'
+  }]);
+  
+  // Update selected pocket when pockets load
+  useEffect(() => {
+    if (pockets.length > 0) {
+      setEntries(prev => prev.map(entry => {
+        if (!pockets.find(p => p.id === entry.pocketId)) {
+          return { ...entry, pocketId: pockets[0].id };
+        }
+        return entry;
+      }));
+    }
+  }, [pockets]);
 
   const formatDateToIndonesian = (dateString: string): string => {
     const [year, month, day] = dateString.split('-').map(Number);
@@ -51,13 +81,11 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
       }
 
       // Handle percentage calculations
-      // Convert expressions like "100-20%" to "100-(100*0.20)"
       let processed = cleaned;
       
       // Match pattern: number followed by operator followed by number followed by %
       const percentPattern = /([0-9.]+)([\+\-\*\/])([0-9.]+)%/g;
       processed = processed.replace(percentPattern, (match, base, operator, percent) => {
-        // Calculate the percentage of the base value
         return `${base}${operator}(${base}*${percent}/100)`;
       });
       
@@ -67,11 +95,11 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
         return `(${num}/100)`;
       });
 
-      // Safely evaluate using Function constructor (safer than eval)
+      // Safely evaluate using Function constructor
       const result = new Function('return ' + processed)();
       
       if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-        return Math.round(result); // Round to nearest integer
+        return Math.round(result);
       }
       
       return null;
@@ -80,10 +108,39 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
     }
   };
 
-  useEffect(() => {
+  const updateEntryCalculation = (entryId: string, amount: string) => {
     const result = evaluateExpression(amount);
-    setCalculatedAmount(result);
-  }, [amount]);
+    setEntries(prev => prev.map(entry => 
+      entry.id === entryId 
+        ? { ...entry, amount, calculatedAmount: result }
+        : entry
+    ));
+  };
+
+  const updateEntryField = (entryId: string, field: keyof ExpenseEntry, value: string) => {
+    setEntries(prev => prev.map(entry => 
+      entry.id === entryId 
+        ? { ...entry, [field]: value }
+        : entry
+    ));
+  };
+
+  const addNewEntry = () => {
+    const defaultPocket = pockets.length > 0 ? pockets[0].id : 'pocket_daily';
+    setEntries(prev => [...prev, {
+      id: crypto.randomUUID(),
+      name: "",
+      amount: "",
+      calculatedAmount: null,
+      pocketId: defaultPocket
+    }]);
+  };
+
+  const removeEntry = (entryId: string) => {
+    if (entries.length > 1) {
+      setEntries(prev => prev.filter(entry => entry.id !== entryId));
+    }
+  };
 
   const handleTemplateSelect = (templateId: string) => {
     setSelectedTemplate(templateId);
@@ -91,10 +148,6 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
       const template = templates.find(t => t.id === templateId);
       if (template) {
         setTemplateItems(template.items.map(item => ({ ...item, editable: false })));
-        // Clear manual inputs when template is selected
-        setName("");
-        setAmount("");
-        setCalculatedAmount(null);
       }
     } else {
       setTemplateItems([]);
@@ -130,13 +183,16 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
     const templateName = template?.name || "Template";
     const templateColor = template?.color;
     
+    // Use first entry's pocket or default
+    const pocketId = entries[0]?.pocketId || 'pocket_daily';
+    
     // Calculate total amount
     const totalAmount = getTotalTemplateAmount();
     
     // Send as single expense with items and color
     if (totalAmount > 0) {
       const items = templateItems.map(item => ({ name: item.name, amount: item.amount }));
-      onAddExpense(templateName, totalAmount, currentDate, items, templateColor);
+      onAddExpense(templateName, totalAmount, currentDate, items, templateColor, pocketId);
       if (onSuccess) onSuccess();
     }
 
@@ -144,29 +200,52 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
     setSelectedTemplate("");
     setTemplateItems([]);
     setDate(new Date().toISOString().split('T')[0]);
+    resetEntries();
   };
 
   const getTotalTemplateAmount = () => {
     return templateItems.reduce((sum, item) => sum + item.amount, 0);
   };
 
-  const handleSubmit = () => {
-    const finalAmount = calculatedAmount !== null ? calculatedAmount : Number(amount);
-    const finalName = name.trim() || formatDateToIndonesian(date);
-    
-    if (finalAmount > 0) {
-      onAddExpense(finalName, finalAmount, date);
-      if (onSuccess) onSuccess();
-      setName("");
-      setAmount("");
-      setDate(new Date().toISOString().split('T')[0]);
-      setCalculatedAmount(null);
+  const handleSubmitMultiple = async () => {
+    // Filter valid entries
+    const validEntries = entries.filter(entry => {
+      const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+      return finalAmount > 0;
+    });
+
+    if (validEntries.length === 0) return;
+
+    // Submit each entry
+    for (const entry of validEntries) {
+      const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+      const finalName = entry.name.trim() || formatDateToIndonesian(date);
+      
+      onAddExpense(finalName, finalAmount, date, undefined, undefined, entry.pocketId);
     }
+
+    if (onSuccess) onSuccess();
+    resetEntries();
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (calculatedAmount !== null || Number(amount) > 0)) {
-      handleSubmit();
+  const resetEntries = () => {
+    const defaultPocket = pockets.length > 0 ? pockets[0].id : 'pocket_daily';
+    setEntries([{
+      id: crypto.randomUUID(),
+      name: "",
+      amount: "",
+      calculatedAmount: null,
+      pocketId: defaultPocket
+    }]);
+    setDate(new Date().toISOString().split('T')[0]);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent, entryId: string) => {
+    if (e.key === 'Enter') {
+      const entry = entries.find(e => e.id === entryId);
+      if (entry && (entry.calculatedAmount !== null || Number(entry.amount) > 0)) {
+        handleSubmitMultiple();
+      }
     }
   };
 
@@ -199,21 +278,21 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
     }).format(amount);
   };
 
-  const showCalculation = amount && amount !== calculatedAmount?.toString() && calculatedAmount !== null;
+  const getTotalAmount = () => {
+    return entries.reduce((sum, entry) => {
+      const amount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount) || 0;
+      return sum + amount;
+    }, 0);
+  };
+
+  const hasValidEntries = entries.some(entry => {
+    const amount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+    return amount > 0;
+  });
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="expenseName">Nama Pengeluaran (Opsional)</Label>
-        <Input
-          id="expenseName"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Kosongkan untuk otomatis menggunakan tanggal"
-        />
-      </div>
-
+      {/* Date Picker - Shared for all entries */}
       <div className="space-y-2">
         <Label htmlFor="expenseDate">Tanggal</Label>
         <div className="flex gap-2 items-center">
@@ -231,7 +310,6 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
                 id="expenseDate"
                 type="text"
                 value={format(new Date(date), "EEEE, dd MMM yyyy", { locale: id })}
-                onChange={(e) => setDate(e.target.value)}
                 className="cursor-pointer"
                 readOnly
               />
@@ -266,33 +344,129 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess }:
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="expenseAmount">Nominal</Label>
-        <Input
-          id="expenseAmount"
-          type="text"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="0 atau 50000+4000-20%"
-        />
-        {showCalculation && (
-          <div className="p-2 bg-accent rounded-md">
-            <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
-            <p className="text-primary">{formatCurrency(calculatedAmount)}</p>
-          </div>
-        )}
+      <Separator />
+
+      {/* Multiple Entries Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Label>Pengeluaran ({entries.length})</Label>
+          {entries.length > 1 && (
+            <span className="text-sm text-muted-foreground">
+              Total: {formatCurrency(getTotalAmount())}
+            </span>
+          )}
+        </div>
+
+        {entries.map((entry, index) => {
+          const showCalculation = entry.amount && entry.amount !== entry.calculatedAmount?.toString() && entry.calculatedAmount !== null;
+          
+          return (
+            <Card key={entry.id} className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Entry {index + 1}</span>
+                {entries.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeEntry(entry.id)}
+                  >
+                    <X className="size-4 text-destructive" />
+                  </Button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nama (Opsional)</Label>
+                <Input
+                  value={entry.name}
+                  onChange={(e) => updateEntryField(entry.id, 'name', e.target.value)}
+                  onKeyPress={(e) => handleKeyPress(e, entry.id)}
+                  placeholder="Kosongkan untuk otomatis menggunakan tanggal"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nominal</Label>
+                <Input
+                  type="text"
+                  value={entry.amount}
+                  onChange={(e) => updateEntryCalculation(entry.id, e.target.value)}
+                  onKeyPress={(e) => handleKeyPress(e, entry.id)}
+                  placeholder="0 atau 50000+4000-20%"
+                />
+                {showCalculation && (
+                  <div className="p-2 bg-accent rounded-md">
+                    <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
+                    <p className="text-primary">{formatCurrency(entry.calculatedAmount!)}</p>
+                  </div>
+                )}
+              </div>
+
+              {pockets.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Ambil dari Kantong</Label>
+                  <Select 
+                    value={entry.pocketId} 
+                    onValueChange={(value) => updateEntryField(entry.id, 'pocketId', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {pockets.map(pocket => {
+                        const balance = balances?.get(pocket.id);
+                        return (
+                          <SelectItem key={pocket.id} value={pocket.id}>
+                            <div className="flex items-center justify-between w-full gap-4">
+                              <span>{pocket.name}</span>
+                              {balance && (
+                                <span className="text-xs text-muted-foreground">
+                                  {formatCurrency(balance.availableBalance)}
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {balances && balances.get(entry.pocketId) && (
+                    <p className="text-xs text-muted-foreground">
+                      Saldo tersedia: {formatCurrency(balances.get(entry.pocketId)!.availableBalance)}
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+
+        {/* Add New Entry Button */}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={addNewEntry}
+          className="w-full"
+        >
+          <Plus className="size-4 mr-2" />
+          Tambah Entry Baru
+        </Button>
+
+        {/* Submit Multiple Entries */}
+        <Button 
+          onClick={handleSubmitMultiple} 
+          disabled={!hasValidEntries || isAdding}
+          className="w-full"
+        >
+          <Plus className="size-4 mr-2" />
+          {isAdding ? "Menambahkan..." : `Tambah ${entries.length} Pengeluaran`}
+        </Button>
       </div>
 
-      <Button 
-        onClick={handleSubmit} 
-        disabled={(!calculatedAmount && !Number(amount)) || isAdding}
-        className="w-full"
-      >
-        <Plus className="size-4 mr-2" />
-        {isAdding ? "Menambahkan..." : "Tambah Pengeluaran"}
-      </Button>
+      <Separator />
 
+      {/* Template Section */}
       <div className="space-y-2">
         <Label htmlFor="expenseTemplate">Pilih Template</Label>
         <Select onValueChange={handleTemplateSelect} value={selectedTemplate}>

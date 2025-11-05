@@ -230,7 +230,7 @@ export function FixedExpenseTemplates({
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>
               {editingTemplate ? "Edit Template" : "Buat Template Baru"}
