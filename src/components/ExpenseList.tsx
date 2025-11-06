@@ -636,12 +636,15 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
     setItemAmountInputs(newInputs);
   };
 
-  // Group expenses by groupId and date
+  // Group expenses by date only (YYYY-MM-DD)
+  // GroupId is preserved for metadata/tracking, but grouping is always by date
   const groupExpensesByDate = (expenses: Expense[]): Map<string, Expense[]> => {
     const grouped = new Map<string, Expense[]>();
     expenses.forEach(expense => {
-      // Use groupId as the primary key if it exists, otherwise use date
-      const groupKey = expense.groupId || expense.date;
+      // Always group by date (YYYY-MM-DD only), not by groupId
+      // This ensures all expenses on the same date are grouped together
+      const dateOnly = expense.date.split('T')[0]; // Extract date part only
+      const groupKey = dateOnly;
       if (!grouped.has(groupKey)) {
         grouped.set(groupKey, []);
       }

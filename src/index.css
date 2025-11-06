@@ -592,6 +592,18 @@
     z-index: 50;
   }
 
+  .z-\[101\] {
+    z-index: 101;
+  }
+
+  .z-\[102\] {
+    z-index: 102;
+  }
+
+  .z-\[103\] {
+    z-index: 103;
+  }
+
   .col-start-2 {
     grid-column-start: 2;
   }
@@ -701,6 +713,10 @@
 
   .block {
     display: block;
+  }
+
+  .contents {
+    display: contents;
   }
 
   .flex {

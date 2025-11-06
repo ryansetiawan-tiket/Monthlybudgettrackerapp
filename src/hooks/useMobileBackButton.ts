@@ -7,6 +7,41 @@ import { useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { useDialogStack } from '../contexts/DialogStackContext';
 import { triggerHaptic, isCapacitor } from '../utils/capacitor-helpers';
+import { toast } from 'sonner';
+
+/**
+ * Helper function to close top drawer
+ */
+async function closeTopDrawer() {
+  const drawers = Array.from(document.querySelectorAll('[role="dialog"][data-state="open"]'));
+  
+  if (drawers.length > 0) {
+    // Find drawer contents and their z-indices
+    const drawerContents = drawers.map(drawer => {
+      const content = drawer.querySelector('[data-slot="drawer-content"]');
+      const zIndex = content ? parseInt(window.getComputedStyle(content).zIndex) || 0 : 0;
+      return { drawer, zIndex };
+    });
+    
+    // Sort by z-index, highest first
+    drawerContents.sort((a, b) => b.zIndex - a.zIndex);
+    
+    // Close the top-most drawer
+    const escapeEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true
+    });
+    drawerContents[0].drawer.dispatchEvent(escapeEvent);
+    console.log('[BackButton] Drawer closed (z-index:', drawerContents[0].zIndex, ')');
+    await triggerHaptic('light').catch(() => {});
+    return true;
+  }
+  return false;
+}
 
 /**
  * Hook to handle Android hardware back button
@@ -35,50 +70,41 @@ export function useMobileBackButton() {
 
     let isMounted = true;
 
-    // Setup listener (async)
+    // Setup back button listener
     const setupListener = async () => {
       try {
-        const handle = await App.addListener('backButton', async (event) => {
-          console.log('[BackButton] Back button pressed', event);
+        const handle = await App.addListener('backButton', async () => {
+          console.log('[BackButton] Back button pressed');
 
-          // Try to close dialog first
-          let dialogClosed = false;
-          try {
-            dialogClosed = closeTopDialog();
-          } catch (error) {
-            console.warn('[BackButton] Error closing dialog:', error);
-            dialogClosed = false;
+          // Try to close drawers first
+          const drawerCloseResult = await closeTopDrawer();
+          if (drawerCloseResult) {
+            return; // Successfully closed a drawer
           }
-          
-          if (dialogClosed) {
+
+          // Try to close dialogs next
+          if (closeTopDialog()) {
             console.log('[BackButton] Dialog closed');
             await triggerHaptic('light').catch(() => {});
             return;
           }
 
-          // No dialogs open - handle app exit
+          // If no drawers or dialogs, handle app exit
           const now = Date.now();
-          const timeSinceLastBack = now - lastBackPress.current;
-
-          if (timeSinceLastBack < 2000) {
-            // Double back press within 2 seconds - exit app
+          if (now - lastBackPress.current < 2000) {
             console.log('[BackButton] Exiting app (double back press)');
             App.exitApp();
           } else {
-            // First back press - show toast
             console.log('[BackButton] Showing exit confirmation');
             lastBackPress.current = now;
-            
-            // Show toast: "Press back again to exit"
-            const { toast } = await import('sonner@2.0.3');
             toast.info('Tekan sekali lagi untuk keluar', {
               duration: 2000
             });
             await triggerHaptic('light').catch(() => {});
           }
         });
-        
-        // Only store if still mounted
+
+        // Save listener reference
         if (isMounted) {
           listenerHandleRef.current = handle;
           console.log('[BackButton] Listener setup complete');
@@ -94,7 +120,9 @@ export function useMobileBackButton() {
       }
     };
 
-    setupListener();
+    setupListener().catch(error => {
+      console.error('[BackButton] Error setting up listener:', error);
+    });
 
     return () => {
       console.log('[BackButton] Cleaning up back button handler');

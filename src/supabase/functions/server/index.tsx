@@ -246,7 +246,7 @@ async function calculatePocketBalance(
   const budget = sharedData?.budget || await kv.get(`budget:${monthKey}`) || { initialBudget: 0, carryover: 0 };
   const expensesData = sharedData?.expensesData || await kv.getByPrefix(`expense:${monthKey}:`) || [];
   const additionalIncome = sharedData?.additionalIncome || await kv.getByPrefix(`income:${monthKey}:`) || [];
-  const transfers = sharedData?.transfers || await kv.get(`transfers:${monthKey}`) || [];
+  const transfers = sharedData?.transfers || await kv.getByPrefix(`transfer:${monthKey}:`) || [];
   const excludeState = sharedData?.excludeState || await kv.get(`exclude-state:${monthKey}`) || { excludedExpenseIds: [], excludedIncomeIds: [] };
   
   const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
@@ -594,6 +594,188 @@ async function calculateBudgetHealth(monthKey: string): Promise<BudgetHealth> {
 }
 
 // ============================================
+// TIMELINE SYSTEM - HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Generate timeline entries for a pocket
+ * Includes: initial balance, income, expenses, and transfers
+ */
+function generatePocketTimeline(
+  pocketId: string,
+  monthKey: string,
+  sortOrder: 'asc' | 'desc',
+  sharedData: any
+): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  const { expenses, additionalIncome, transfers, excludeState, pockets, carryOvers } = sharedData;
+  
+  const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
+  const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
+  
+  // Get pocket info
+  const pocket = pockets.find((p: Pocket) => p.id === pocketId);
+  const pocketName = pocket?.name || 'Unknown Pocket';
+  
+  // Calculate running balance
+  let runningBalance = 0;
+  
+  // 1. Initial balance from carry over (for custom pockets)
+  if (pocketId !== POCKET_IDS.DAILY && pocketId !== POCKET_IDS.COLD_MONEY) {
+    const carryOver = carryOvers.find((co: any) => co.pocketId === pocketId);
+    if (carryOver && carryOver.amount !== 0) {
+      runningBalance = carryOver.amount;
+      entries.push({
+        id: `initial_${pocketId}`,
+        type: 'income',
+        date: `${monthKey}-01T00:00:00.000Z`,
+        description: 'Saldo Awal (Carry Over)',
+        amount: carryOver.amount,
+        balanceAfter: runningBalance,
+        icon: 'TrendingUp',
+        color: 'green',
+        metadata: {
+          fromMonth: carryOver.fromMonth,
+          breakdown: carryOver.breakdown
+        }
+      });
+    }
+  }
+  
+  // 2. Expenses for this pocket
+  const pocketExpenses = expenses
+    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id))
+    .map((e: any) => ({
+      id: e.id,
+      type: 'expense' as TransactionType,
+      date: e.date,
+      description: e.name,
+      amount: -e.amount,
+      icon: e.categoryIcon || 'ShoppingBag',
+      color: 'red',
+      metadata: {
+        category: e.category,
+        notes: e.notes,
+        groupId: e.groupId
+      }
+    }));
+  
+  // 3. Additional income (for Cold Money pocket)
+  // Backward compatibility: if pocketId is undefined, default to Cold Money pocket
+  const pocketIncome = additionalIncome
+    .filter((i: any) => {
+      const incomePoketId = i.pocketId || POCKET_IDS.COLD_MONEY;
+      return incomePoketId === pocketId && !excludedIncomeIds.has(i.id);
+    })
+    .map((i: any) => ({
+      id: i.id,
+      type: 'income' as TransactionType,
+      date: i.date,
+      description: i.name,
+      amount: i.amountIDR - i.deduction,
+      icon: 'DollarSign',
+      color: 'green',
+      metadata: {
+        amountUSD: i.amountUSD,
+        exchangeRate: i.exchangeRate,
+        deduction: i.deduction
+      }
+    }));
+  
+  // 4. Transfers - show both incoming and outgoing
+  const pocketTransfers: any[] = [];
+  
+  transfers.forEach((t: any) => {
+    // Transfer OUT (from this pocket)
+    if (t.fromPocketId === pocketId) {
+      const toPocket = pockets.find((p: Pocket) => p.id === t.toPocketId);
+      pocketTransfers.push({
+        id: `${t.id}_out`,
+        type: 'transfer' as TransactionType,
+        date: t.date,
+        description: `Transfer ke ${toPocket?.name || 'Unknown'}`,
+        amount: -t.amount,
+        icon: 'ArrowRight',
+        color: 'blue',
+        metadata: {
+          transferId: t.id,
+          direction: 'out',
+          fromPocketId: t.fromPocketId,
+          toPocketId: t.toPocketId,
+          note: t.note
+        }
+      });
+    }
+    
+    // Transfer IN (to this pocket)
+    if (t.toPocketId === pocketId) {
+      const fromPocket = pockets.find((p: Pocket) => p.id === t.fromPocketId);
+      pocketTransfers.push({
+        id: `${t.id}_in`,
+        type: 'transfer' as TransactionType,
+        date: t.date,
+        description: `Transfer dari ${fromPocket?.name || 'Unknown'}`,
+        amount: t.amount,
+        icon: 'ArrowLeft',
+        color: 'green',
+        metadata: {
+          transferId: t.id,
+          direction: 'in',
+          fromPocketId: t.fromPocketId,
+          toPocketId: t.toPocketId,
+          note: t.note
+        }
+      });
+    }
+  });
+  
+  // Combine all transactions
+  const allTransactions = [
+    ...pocketExpenses,
+    ...pocketIncome,
+    ...pocketTransfers
+  ];
+  
+  // Sort by date
+  allTransactions.sort((a, b) => {
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
+    return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+  });
+  
+  // Calculate balance after each transaction
+  if (sortOrder === 'asc') {
+    // For ascending order, start from initial balance
+    allTransactions.forEach(txn => {
+      runningBalance += txn.amount;
+      entries.push({
+        ...txn,
+        balanceAfter: runningBalance
+      });
+    });
+  } else {
+    // For descending order (default), calculate from end
+    // First, calculate final balance
+    let finalBalance = runningBalance;
+    allTransactions.forEach(txn => {
+      finalBalance += txn.amount;
+    });
+    
+    // Then work backwards
+    runningBalance = finalBalance;
+    allTransactions.forEach(txn => {
+      entries.push({
+        ...txn,
+        balanceAfter: runningBalance
+      });
+      runningBalance -= txn.amount;
+    });
+  }
+  
+  return entries;
+}
+
+// ============================================
 // ARCHIVE SYSTEM - HELPER FUNCTIONS
 // ============================================
 
@@ -713,181 +895,7 @@ async function getArchiveHistory(): Promise<ArchiveHistoryEntry[]> {
   return await kv.get(historyKey) || [];
 }
 
-/**
- * Generate timeline for a pocket
- * @param sharedData - Optional shared data to avoid redundant fetches
- */
-async function generatePocketTimeline(
-  pocketId: string,
-  monthKey: string,
-  sortOrder: 'asc' | 'desc' = 'desc',
-  sharedData?: {
-    budget?: any;
-    expenses?: any[];
-    additionalIncome?: any[];
-    transfers?: any[];
-    excludeState?: any;
-    pockets?: Pocket[];
-    carryOvers?: CarryOverEntry[];
-  }
-): Promise<TimelineEntry[]> {
-  // Use shared data if provided, otherwise fetch
-  const budget = sharedData?.budget || await kv.get(`budget:${monthKey}`) || { initialBudget: 0, carryover: 0 };
-  const expenses = sharedData?.expenses || await kv.getByPrefix(`expense:${monthKey}:`) || [];
-  const additionalIncome = sharedData?.additionalIncome || await kv.getByPrefix(`income:${monthKey}:`) || [];
-  const transfers = sharedData?.transfers || await kv.get(`transfers:${monthKey}`) || [];
-  const excludeState = sharedData?.excludeState || await kv.get(`exclude-state:${monthKey}`) || { excludedExpenseIds: [], excludedIncomeIds: [] };
-  const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
-  const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
-  
-  const entries: TimelineEntry[] = [];
-  
-  // Get pocket names for transfer descriptions (use shared data if available)
-  const pockets = sharedData?.pockets || await getPockets(monthKey);
-  const otherPocket = pockets.find((p: Pocket) => p.id !== pocketId);
-  const otherPocketName = otherPocket?.name || 'Unknown';
-  
-  // 1. Add carry over entry FIRST (NEW) - use shared data if available
-  const carryOvers = sharedData?.carryOvers || await getCarryOvers(monthKey);
-  const carryOver = carryOvers.find((co: CarryOverEntry) => co.pocketId === pocketId);
-  
-  if (carryOver && carryOver.amount !== 0) {
-    entries.push({
-      id: carryOver.id,
-      type: 'income',
-      date: `${monthKey}-01T00:00:00Z`,
-      description: carryOver.amount >= 0 
-        ? `Carry Over dari ${formatMonth(carryOver.fromMonth)}`
-        : `Carry Over (Defisit) dari ${formatMonth(carryOver.fromMonth)}`,
-      amount: carryOver.amount,
-      balanceAfter: 0,
-      icon: 'TrendingUp',
-      color: carryOver.amount >= 0 ? 'green' : 'red',
-      metadata: {
-        carryOver: true,
-        breakdown: carryOver.breakdown,
-        fromMonth: carryOver.fromMonth
-      }
-    });
-  }
-  
-  // 2. Add income entries
-  if (pocketId === POCKET_IDS.DAILY) {
-    if (budget.initialBudget > 0) {
-      entries.push({
-        id: `income_budget_${monthKey}`,
-        type: 'income',
-        date: `${monthKey}-01T00:00:01Z`, // After carry over
-        description: 'Budget Awal',
-        amount: budget.initialBudget,
-        balanceAfter: 0,
-        icon: 'Wallet',
-        color: 'green'
-      });
-    }
-    
-    // Old carryover (for backward compatibility) - only show if no new carry over entry
-    if (budget.carryover > 0 && !carryOver) {
-      entries.push({
-        id: `income_carryover_old_${monthKey}`,
-        type: 'income',
-        date: `${monthKey}-01T00:00:00Z`,
-        description: 'Carryover (Lama)',
-        amount: budget.carryover,
-        balanceAfter: 0,
-        icon: 'TrendingUp',
-        color: 'green'
-      });
-    }
-  } else if (pocketId === POCKET_IDS.COLD_MONEY) {
-    additionalIncome
-      .filter((income: any) => !excludedIncomeIds.has(income.id))
-      .forEach((income: any) => {
-        const netAmount = income.amountIDR - income.deduction;
-        entries.push({
-          id: `income_${income.id}`,
-          type: 'income',
-          date: income.date,
-          description: income.name,
-          amount: netAmount,
-          balanceAfter: 0,
-          icon: 'DollarSign',
-          color: 'green',
-          metadata: { incomeId: income.id }
-        });
-      });
-  }
-  
-  // Add expense entries
-  expenses
-    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id))
-    .forEach((expense: any) => {
-      entries.push({
-        id: `expense_${expense.id}`,
-        type: 'expense',
-        date: expense.date,
-        description: expense.name,
-        amount: -expense.amount,
-        balanceAfter: 0,
-        icon: 'ShoppingBag',
-        color: 'red',
-        metadata: { expenseId: expense.id }
-      });
-    });
-  
-  // Add transfer entries
-  transfers.forEach((transfer: TransferTransaction) => {
-    if (transfer.fromPocketId === pocketId) {
-      entries.push({
-        id: `transfer_out_${transfer.id}`,
-        type: 'transfer',
-        date: transfer.date,
-        description: `Transfer ke ${otherPocketName}`,
-        amount: -transfer.amount,
-        balanceAfter: 0,
-        icon: 'ArrowRight',
-        color: 'blue',
-        metadata: { transferId: transfer.id, note: transfer.note }
-      });
-    }
-    
-    if (transfer.toPocketId === pocketId) {
-      entries.push({
-        id: `transfer_in_${transfer.id}`,
-        type: 'transfer',
-        date: transfer.date,
-        description: `Transfer dari ${otherPocketName}`,
-        amount: transfer.amount,
-        balanceAfter: 0,
-        icon: 'ArrowLeft',
-        color: 'blue',
-        metadata: { transferId: transfer.id, note: transfer.note }
-      });
-    }
-  });
-  
-  // Sort by date
-  entries.sort((a, b) => {
-    const dateA = new Date(a.date).getTime();
-    const dateB = new Date(b.date).getTime();
-    return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
-  });
-  
-  // Calculate running balance
-  let runningBalance = 0;
-  const orderedEntries = sortOrder === 'asc' ? entries : [...entries].reverse();
-  
-  orderedEntries.forEach(entry => {
-    runningBalance += entry.amount;
-    entry.balanceAfter = runningBalance;
-  });
-  
-  if (sortOrder === 'desc') {
-    entries.reverse();
-  }
-  
-  return entries;
-}
+// REMOVED: Duplicate generatePocketTimeline function (kept the first one at line 604)
 
 /**
  * Validate transfer
@@ -1058,24 +1066,25 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const expenseId = crypto.randomUUID();
     const key = `expense:${year}-${month}:${expenseId}`;
     
-    // Parse date: if date is in YYYY-MM-DD format, add current time
+    console.log(`[Add Single Expense] Received date: ${date} | Name: ${name}`);
+    
+    // Parse date: if date is in YYYY-MM-DD format, add time at noon to avoid timezone issues
     let expenseDate;
     if (date) {
       if (date.includes('T')) {
         // Already has time component
         expenseDate = date;
       } else {
-        // Just a date, add current time
-        const currentTime = new Date();
-        const dateObj = new Date(date);
-        dateObj.setHours(currentTime.getHours());
-        dateObj.setMinutes(currentTime.getMinutes());
-        dateObj.setSeconds(currentTime.getSeconds());
-        expenseDate = dateObj.toISOString();
+        // Just a date (YYYY-MM-DD)
+        // CRITICAL FIX: Use noon (12:00) instead of current time to avoid timezone shift
+        // This ensures the date stays consistent regardless of timezone
+        expenseDate = `${date}T12:00:00.000Z`;
       }
     } else {
       expenseDate = new Date().toISOString();
     }
+    
+    console.log(`[Add Single Expense] Final date stored: ${expenseDate}`);
     
     const expenseData = {
       id: expenseId,
@@ -1119,6 +1128,8 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
     const addedExpenses = [];
     const currentTime = new Date();
     
+    console.log(`[Add Batch Expenses] Processing ${expenses.length} expenses`);
+    
     for (const expense of expenses) {
       const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = expense;
       
@@ -1129,18 +1140,17 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
       const expenseId = crypto.randomUUID();
       const key = `expense:${year}-${month}:${expenseId}`;
       
-      // Parse date: if date is in YYYY-MM-DD format, add current time
+      console.log(`[Batch Item] Received date: ${date} | Name: ${name}`);
+      
+      // Parse date: if date is in YYYY-MM-DD format, add time at noon to avoid timezone issues
       let expenseDate;
       if (date) {
         if (date.includes('T')) {
           expenseDate = date;
         } else {
-          const dateObj = new Date(date);
-          dateObj.setHours(currentTime.getHours());
-          dateObj.setMinutes(currentTime.getMinutes());
-          dateObj.setSeconds(currentTime.getSeconds());
-          dateObj.setMilliseconds(currentTime.getMilliseconds());
-          expenseDate = dateObj.toISOString();
+          // CRITICAL FIX: Use noon (12:00) instead of current time to avoid timezone shift
+          // This ensures the date stays consistent regardless of timezone
+          expenseDate = `${date}T12:00:00.000Z`;
         }
       } else {
         expenseDate = currentTime.toISOString();
@@ -1208,21 +1218,46 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     // Get existing expense to preserve createdAt, pocketId, and groupId if not provided
     const existingExpense = await kv.get(key);
     
+    console.log(`[Edit Expense ${id}] Received date:`, date, '| Existing date:', existingExpense?.date);
+    
     // Parse date: if date is in YYYY-MM-DD format, preserve the original time or add current time
     let expenseDate;
+    let dateChanged = false;
     if (date) {
       if (date.includes('T')) {
         // Already has time component
         expenseDate = date;
+        // Check if date changed (compare date part only)
+        if (existingExpense?.date) {
+          const oldDateOnly = existingExpense.date.split('T')[0];
+          const newDateOnly = date.split('T')[0];
+          dateChanged = oldDateOnly !== newDateOnly;
+        }
       } else {
-        // Just a date, keep existing time if available, otherwise add current time
+        // Just a date (YYYY-MM-DD), use the new date but preserve time component from existing expense if available
+        // Check if date changed
+        if (existingExpense?.date) {
+          const oldDateOnly = existingExpense.date.split('T')[0];
+          dateChanged = oldDateOnly !== date;
+        }
+        
         if (existingExpense?.date && existingExpense.date.includes('T')) {
-          // Preserve the original time
-          expenseDate = existingExpense.date;
+          // Extract time from existing expense, apply to new date
+          const existingDate = new Date(existingExpense.date);
+          // Parse the new date as YYYY-MM-DD and combine with existing time
+          // Use UTC parsing to avoid timezone shifts: "2024-11-06" -> parse as local date at midnight
+          const [year, month, day] = date.split('-').map(Number);
+          const newDateObj = new Date(year, month - 1, day); // Local timezone date at midnight
+          newDateObj.setHours(existingDate.getHours());
+          newDateObj.setMinutes(existingDate.getMinutes());
+          newDateObj.setSeconds(existingDate.getSeconds());
+          newDateObj.setMilliseconds(existingDate.getMilliseconds());
+          expenseDate = newDateObj.toISOString();
         } else {
-          // Add current time
+          // Add current time to the new date
           const currentTime = new Date();
-          const dateObj = new Date(date);
+          const [year, month, day] = date.split('-').map(Number);
+          const dateObj = new Date(year, month - 1, day); // Local timezone date at midnight
           dateObj.setHours(currentTime.getHours());
           dateObj.setMinutes(currentTime.getMinutes());
           dateObj.setSeconds(currentTime.getSeconds());
@@ -1232,6 +1267,23 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     } else {
       expenseDate = existingExpense?.date || new Date().toISOString();
     }
+    
+    // If date changed, remove groupId to ungroup this expense from others
+    // Otherwise preserve groupId if it exists
+    let finalGroupId;
+    if (groupId !== undefined) {
+      // Explicitly setting groupId (from frontend)
+      finalGroupId = groupId;
+    } else if (dateChanged) {
+      // Date changed - remove groupId to ungroup
+      console.log(`[Edit Expense ${id}] Date changed! Removing groupId. Old groupId:`, existingExpense?.groupId);
+      finalGroupId = undefined;
+    } else {
+      // Date didn't change - preserve existing groupId
+      finalGroupId = existingExpense?.groupId;
+    }
+    
+    console.log(`[Edit Expense ${id}] Final expense date:`, expenseDate, '| Date changed:', dateChanged, '| GroupId:', finalGroupId);
     
     const expenseData = {
       id,
@@ -1247,7 +1299,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
       ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
-      ...(groupId !== undefined ? { groupId } : existingExpense?.groupId ? { groupId: existingExpense.groupId } : {}),
+      ...(finalGroupId ? { groupId: finalGroupId } : {}),
       createdAt: existingExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1282,7 +1334,7 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction } = body;
+    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction, pocketId } = body;
     
 
     
@@ -1290,23 +1342,22 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
       return c.json({ error: "Name and amount are required" }, 400);
     }
     
+    if (!pocketId) {
+      return c.json({ error: "Pocket ID is required" }, 400);
+    }
+    
     const incomeId = crypto.randomUUID();
     const key = `income:${year}-${month}:${incomeId}`;
     
-    // Parse date: if date is in YYYY-MM-DD format, add current time
+    // Parse date: if date is in YYYY-MM-DD format, use UTC noon standard
     let incomeDate;
     if (date) {
       if (date.includes('T')) {
         // Already has time component
         incomeDate = date;
       } else {
-        // Just a date, add current time
-        const currentTime = new Date();
-        const dateObj = new Date(date);
-        dateObj.setHours(currentTime.getHours());
-        dateObj.setMinutes(currentTime.getMinutes());
-        dateObj.setSeconds(currentTime.getSeconds());
-        incomeDate = dateObj.toISOString();
+        // Just a date (YYYY-MM-DD), use UTC noon to avoid timezone issues
+        incomeDate = `${date}T12:00:00.000Z`;
       }
     } else {
       incomeDate = new Date().toISOString();
@@ -1322,6 +1373,7 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
       conversionType: conversionType || "manual",
       date: incomeDate,
       deduction: Number(deduction) || 0,
+      pocketId,
       createdAt: new Date().toISOString(),
     };
     
@@ -1362,41 +1414,27 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
     const key = `income:${year}-${month}:${id}`;
     const body = await c.req.json();
     
-    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction } = body;
+    const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction, pocketId } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
     }
     
-    // Get existing data to preserve createdAt
+    // Get existing data to preserve createdAt and pocketId
     const existingIncome = await kv.get(key);
     
-    // Parse date: if date is in YYYY-MM-DD format, use new date but preserve the original time
+    // Use provided pocketId, or fallback to existing pocketId, or default to cold money
+    const finalPocketId = pocketId || existingIncome?.pocketId || POCKET_IDS.COLD_MONEY;
+    
+    // Parse date: if date is in YYYY-MM-DD format, use UTC noon standard
     let incomeDate;
     if (date) {
       if (date.includes('T')) {
         // Already has time component
         incomeDate = date;
       } else {
-        // Just a date (YYYY-MM-DD), combine new date with existing time
-        if (existingIncome?.date && existingIncome.date.includes('T')) {
-          // Extract time from existing date and apply to new date
-          const existingDateObj = new Date(existingIncome.date);
-          const newDateObj = new Date(date);
-          newDateObj.setHours(existingDateObj.getHours());
-          newDateObj.setMinutes(existingDateObj.getMinutes());
-          newDateObj.setSeconds(existingDateObj.getSeconds());
-          newDateObj.setMilliseconds(existingDateObj.getMilliseconds());
-          incomeDate = newDateObj.toISOString();
-        } else {
-          // No existing time, use current time
-          const currentTime = new Date();
-          const dateObj = new Date(date);
-          dateObj.setHours(currentTime.getHours());
-          dateObj.setMinutes(currentTime.getMinutes());
-          dateObj.setSeconds(currentTime.getSeconds());
-          incomeDate = dateObj.toISOString();
-        }
+        // Just a date (YYYY-MM-DD), use UTC noon to avoid timezone issues
+        incomeDate = `${date}T12:00:00.000Z`;
       }
     } else {
       incomeDate = existingIncome?.date || new Date().toISOString();
@@ -1412,6 +1450,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
       conversionType: conversionType || "manual",
       date: incomeDate,
       deduction: Number(deduction) || 0,
+      pocketId: finalPocketId,
       createdAt: existingIncome?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1561,7 +1600,7 @@ app.delete("/make-server-3adbeaf1/templates/:id", async (c) => {
   }
 });
 
-// Get exclude state lock for specific month
+// Get exclude state for a specific month
 app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
   try {
     const year = c.req.param("year");
@@ -1581,11 +1620,12 @@ app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
     
     return c.json(excludeState);
   } catch (error: any) {
+    console.log(`Error loading exclude state: ${error.message}`);
     return c.json({ error: `Failed to get exclude state: ${error.message}` }, 500);
   }
 });
 
-// Save/update exclude state lock for specific month
+// Save/update exclude state for a specific month
 app.post("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
   try {
     const year = c.req.param("year");
@@ -1644,7 +1684,7 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
       kv.get(`budget:${monthKey}`),
       kv.getByPrefix(`expense:${monthKey}:`),
       kv.getByPrefix(`income:${monthKey}:`),
-      kv.get(`transfers:${monthKey}`),
+      kv.getByPrefix(`transfer:${monthKey}:`),
       kv.get(`exclude-state:${monthKey}`)
     ]);
     
@@ -1812,22 +1852,35 @@ app.post("/make-server-3adbeaf1/transfer/:year/:month", async (c) => {
     }
     
     // Create transfer
+    const transferId = `transfer_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
+    
+    // CRITICAL FIX: Parse date to use UTC noon standard to avoid timezone issues
+    let transferDate;
+    if (date) {
+      if (date.includes('T')) {
+        transferDate = date;
+      } else {
+        // Just a date (YYYY-MM-DD), use noon UTC
+        transferDate = `${date}T12:00:00.000Z`;
+      }
+    } else {
+      transferDate = new Date().toISOString();
+    }
+    
     const transfer: TransferTransaction = {
-      id: `transfer_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`,
+      id: transferId,
       type: 'transfer',
       amount: Number(amount),
       fromPocketId,
       toPocketId,
-      date: date || new Date().toISOString(),
+      date: transferDate,
       note,
       createdAt: new Date().toISOString()
     };
     
-    // Save to KV
-    const transfersKey = `transfers:${monthKey}`;
-    const transfers = await kv.get(transfersKey) || [];
-    transfers.push(transfer);
-    await kv.set(transfersKey, transfers);
+    // Save to KV using prefix pattern (FIXED)
+    const transferKey = `transfer:${monthKey}:${transferId}`;
+    await kv.set(transferKey, transfer);
     
     // Recalculate balances
     const updatedFromBalance = await calculatePocketBalance(fromPocketId, monthKey);
@@ -1860,18 +1913,16 @@ app.delete("/make-server-3adbeaf1/transfer/:year/:month/:id", async (c) => {
       return c.json({ success: false, error: 'Missing transfer ID' }, 400);
     }
     
-    // Get transfers
-    const transfersKey = `transfers:${monthKey}`;
-    const transfers = await kv.get(transfersKey) || [];
-    const transferToDelete = transfers.find((t: TransferTransaction) => t.id === transferId);
+    // Get transfer using prefix pattern (FIXED)
+    const transferKey = `transfer:${monthKey}:${transferId}`;
+    const transferToDelete = await kv.get(transferKey);
     
     if (!transferToDelete) {
       return c.json({ success: false, error: 'Transfer not found' }, 404);
     }
     
     // Delete transfer
-    const updatedTransfers = transfers.filter((t: TransferTransaction) => t.id !== transferId);
-    await kv.set(transfersKey, updatedTransfers);
+    await kv.del(transferKey);
     
     // Recalculate balances
     const updatedFromBalance = await calculatePocketBalance(transferToDelete.fromPocketId, monthKey);
@@ -1910,7 +1961,7 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       kv.get(`budget:${monthKey}`),
       kv.getByPrefix(`expense:${monthKey}:`),
       kv.getByPrefix(`income:${monthKey}:`),
-      kv.get(`transfers:${monthKey}`),
+      kv.getByPrefix(`transfer:${monthKey}:`),
       kv.get(`exclude-state:${monthKey}`),
       getPockets(monthKey),
       getCarryOvers(monthKey)
@@ -1927,7 +1978,7 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
     };
     
     // Generate timeline with shared data
-    const entries = await generatePocketTimeline(pocketId, monthKey, sortOrder, sharedData);
+    const entries = generatePocketTimeline(pocketId, monthKey, sortOrder, sharedData);
     
     // Calculate summary
     const summary = {
@@ -2063,6 +2114,132 @@ app.get("/make-server-3adbeaf1/carryover/history/:pocketId", async (c) => {
   } catch (error) {
     console.log(`Error fetching carry over history: ${error}`);
     return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// ============================================
+// TRANSFER ENDPOINTS
+// ============================================
+
+// Transfer between pockets
+app.post("/make-server-3adbeaf1/transfers/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    const body = await c.req.json();
+    
+    const { fromPocketId, toPocketId, amount, date, note } = body;
+    
+    if (!fromPocketId || !toPocketId || !amount) {
+      return c.json({ 
+        success: false, 
+        error: "fromPocketId, toPocketId, and amount are required" 
+      }, 400);
+    }
+    
+    if (fromPocketId === toPocketId) {
+      return c.json({ 
+        success: false, 
+        error: "Cannot transfer to the same pocket" 
+      }, 400);
+    }
+    
+    if (amount <= 0) {
+      return c.json({ 
+        success: false, 
+        error: "Transfer amount must be positive" 
+      }, 400);
+    }
+    
+    console.log(`[Transfer] ${fromPocketId} → ${toPocketId}: ${amount} on ${date}`);
+    
+    // Parse date: if date is in YYYY-MM-DD format, add time at noon
+    let transferDate;
+    if (date) {
+      if (date.includes('T')) {
+        transferDate = date;
+      } else {
+        // Use noon (12:00 UTC) to avoid timezone issues
+        transferDate = `${date}T12:00:00.000Z`;
+      }
+    } else {
+      transferDate = new Date().toISOString();
+    }
+    
+    // Create transfer record
+    const transferId = crypto.randomUUID();
+    const transfer = {
+      id: transferId,
+      fromPocketId,
+      toPocketId,
+      amount: Number(amount),
+      date: transferDate,
+      note: note || null,
+      createdAt: new Date().toISOString()
+    };
+    
+    // Save transfer
+    const transferKey = `transfer:${monthKey}:${transferId}`;
+    await kv.set(transferKey, transfer);
+    
+    console.log(`[Transfer] Saved: ${transferKey}`);
+    
+    return c.json({
+      success: true,
+      data: transfer
+    });
+  } catch (error: any) {
+    console.error(`[Transfer Error]`, error);
+    return c.json({ 
+      success: false, 
+      error: `Failed to create transfer: ${error.message}` 
+    }, 500);
+  }
+});
+
+// Get all transfers for a month
+app.get("/make-server-3adbeaf1/transfers/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    
+    const transferKeys = await kv.getByPrefix(`transfer:${monthKey}:`);
+    const transfers = transferKeys || [];
+    
+    return c.json({
+      success: true,
+      data: transfers
+    });
+  } catch (error: any) {
+    return c.json({ 
+      success: false, 
+      error: `Failed to fetch transfers: ${error.message}` 
+    }, 500);
+  }
+});
+
+// Delete transfer
+app.delete("/make-server-3adbeaf1/transfers/:year/:month/:id", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const id = c.req.param("id");
+    const monthKey = `${year}-${month}`;
+    const transferKey = `transfer:${monthKey}:${id}`;
+    
+    await kv.del(transferKey);
+    
+    return c.json({
+      success: true,
+      message: "Transfer deleted successfully"
+    });
+  } catch (error: any) {
+    return c.json({ 
+      success: false, 
+      error: `Failed to delete transfer: ${error.message}` 
+    }, 500);
   }
 });
 
@@ -3041,56 +3218,6 @@ async function generateSavingsPlan(
 // EXCLUDE STATE ENDPOINTS
 // ============================================
 
-// Get exclude state for a specific month
-app.get("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
-  try {
-    const year = c.req.param("year");
-    const month = c.req.param("month");
-    const key = `exclude-state:${year}-${month}`;
-    
-    const excludeState = await kv.get(key);
-    
-    if (!excludeState) {
-      return c.json({
-        isLocked: false,
-        excludedExpenseIds: [],
-        excludedIncomeIds: [],
-        isDeductionExcluded: false
-      });
-    }
-    
-    return c.json(excludeState);
-  } catch (error: any) {
-    console.log(`Error loading exclude state: ${error.message}`);
-    return c.json({ error: `Failed to load exclude state: ${error.message}` }, 500);
-  }
-});
-
-// Save exclude state for a specific month
-app.post("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
-  try {
-    const year = c.req.param("year");
-    const month = c.req.param("month");
-    const key = `exclude-state:${year}-${month}`;
-    
-    const body = await c.req.json();
-    const { isLocked, excludedExpenseIds, excludedIncomeIds, isDeductionExcluded } = body;
-    
-    const excludeState = {
-      isLocked: isLocked || false,
-      excludedExpenseIds: excludedExpenseIds || [],
-      excludedIncomeIds: excludedIncomeIds || [],
-      isDeductionExcluded: isDeductionExcluded || false,
-      updatedAt: new Date().toISOString(),
-    };
-    
-    await kv.set(key, excludeState);
-    
-    return c.json({ success: true, data: excludeState });
-  } catch (error: any) {
-    console.log(`Error saving exclude state: ${error.message}`);
-    return c.json({ error: `Failed to save exclude state: ${error.message}` }, 500);
-  }
-});
+// REMOVED: Duplicate exclude-state endpoints (kept at line 1786-1833)
 
 Deno.serve(app.fetch);

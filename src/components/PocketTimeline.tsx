@@ -31,6 +31,7 @@ interface PocketTimelineProps {
   onOpenChange: (open: boolean) => void;
   prefetchedEntries?: TimelineEntry[];
   isRealtimeMode?: boolean;
+  drawerClassName?: string;
 }
 
 export function PocketTimeline({ 
@@ -42,7 +43,8 @@ export function PocketTimeline({
   open,
   onOpenChange,
   prefetchedEntries,
-  isRealtimeMode = false
+  isRealtimeMode = false,
+  drawerClassName
 }: PocketTimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>(prefetchedEntries || []);
   const [loading, setLoading] = useState(false);
@@ -347,7 +349,7 @@ export function PocketTimeline({
     return (
       <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
         <DrawerContent 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0" 
+          className="h-[75vh] flex flex-col rounded-t-2xl p-0 z-[101]" 
           aria-describedby={undefined}
         >
           <DrawerHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">

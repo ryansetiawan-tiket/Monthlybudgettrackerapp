@@ -329,7 +329,12 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
               <Input
                 id="expenseDate"
                 type="text"
-                value={format(new Date(date), "EEEE, dd MMM yyyy", { locale: id })}
+                value={(() => {
+                  // Parse date string safely to avoid timezone issues
+                  const [year, month, day] = date.split('-').map(Number);
+                  const dateObj = new Date(year, month - 1, day);
+                  return format(dateObj, "EEEE, dd MMM yyyy", { locale: id });
+                })()}
                 className="cursor-pointer"
                 readOnly
               />

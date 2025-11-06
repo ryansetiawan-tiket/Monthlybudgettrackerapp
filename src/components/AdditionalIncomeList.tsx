@@ -17,6 +17,11 @@ import { formatCurrency } from "../utils/currency";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
 import { useIsMobile } from "./ui/use-mobile";
 
+// Default pocket IDs
+const POCKET_IDS = {
+  DAILY: 'pocket_daily',
+  COLD_MONEY: 'pocket_cold_money'
+} as const;
 
 interface AdditionalIncome {
   id: string;
@@ -28,6 +33,7 @@ interface AdditionalIncome {
   conversionType: string;
   date: string;
   deduction: number;
+  pocketId?: string;
   createdAt?: string;
 }
 
@@ -43,6 +49,7 @@ interface AdditionalIncomeListProps {
     conversionType: string;
     date: string;
     deduction: number;
+    pocketId: string;
   }) => void;
   globalDeduction: number;
   onUpdateGlobalDeduction: (deduction: number) => void;
@@ -188,6 +195,7 @@ function AdditionalIncomeListComponent({
       conversionType: editCurrency === "USD" ? editConversionType : "manual",
       date: editDate,
       deduction: Number(editDeduction) || 0,
+      pocketId: editingIncome!.pocketId || POCKET_IDS.COLD_MONEY, // Preserve existing pocketId or default to cold money
     });
 
     setEditingIncome(null);

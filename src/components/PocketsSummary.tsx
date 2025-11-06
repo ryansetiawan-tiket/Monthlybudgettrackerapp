@@ -622,7 +622,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       {isMobile ? (
         <Drawer open={showWishlist} onOpenChange={setShowWishlist} dismissible={true}>
           <DrawerContent 
-            className="h-[75vh] flex flex-col rounded-t-2xl p-0"
+            className="h-[75vh] flex flex-col rounded-t-2xl p-0 z-[102]"
             aria-describedby={undefined}
           >
             <DrawerHeader className="px-4 pt-6 pb-4 border-b">
@@ -674,6 +674,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           onOpenChange={setShowTimeline}
           prefetchedEntries={timelineCache.get(timelinePocket.id)}
           isRealtimeMode={realtimeMode.get(timelinePocket.id) || false}
+          drawerClassName="z-[101]" // Add higher z-index for nested drawer
         />
       )}
 
@@ -681,7 +682,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       {isMobile ? (
         <Drawer open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm} dismissible={true}>
           <DrawerContent 
-            className="rounded-t-2xl p-4"
+            className="rounded-t-2xl p-4 z-[103]"
             aria-describedby={undefined}
           >
             <DrawerHeader className="text-left px-0">

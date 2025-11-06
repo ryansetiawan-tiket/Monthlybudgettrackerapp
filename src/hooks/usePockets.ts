@@ -227,19 +227,20 @@ export function usePockets() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to transfer");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to transfer");
       }
 
       toast.success("Transfer berhasil!");
-      await fetchBalances(year, month);
+      await fetchPockets(year, month); // Fetch full pockets data (includes balances)
       setPocketsRefreshKey(prev => prev + 1);
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error transferring:", error);
-      toast.error("Gagal melakukan transfer");
-      return false;
+      toast.error(error.message || "Gagal melakukan transfer");
+      throw error; // Re-throw to let dialog handle it
     }
-  }, [baseUrl, fetchBalances]);
+  }, [baseUrl, fetchPockets]);
 
   // Refresh pockets data
   const refreshPockets = useCallback(() => {

@@ -99,6 +99,7 @@ interface AdditionalIncome {
   conversionType: string;
   date: string;
   deduction: number;
+  pocketId?: string;
   createdAt?: string;
 }
 
@@ -1061,6 +1062,7 @@ function AppContent() {
     conversionType: string;
     date: string;
     deduction: number;
+    pocketId: string;
   }) => {
     try {
       const response = await fetch(
@@ -1355,7 +1357,7 @@ function AppContent() {
                 }}
                 pockets={pockets}
                 balances={balances}
-                onTransfer={handleTransfer}
+                onTransfer={(transfer) => transferBetweenPockets(selectedYear, selectedMonth, transfer)}
                 defaultFromPocket={defaultFromPocket}
                 defaultToPocket={defaultToPocket}
               />
