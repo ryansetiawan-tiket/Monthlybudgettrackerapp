@@ -39,6 +39,9 @@ import { usePockets } from "./hooks/usePockets";
 import { useExcludeState } from "./hooks/useExcludeState";
 import { DialogStackProvider } from "./contexts/DialogStackContext";
 import { useMobileBackButton } from "./hooks/useMobileBackButton";
+import { usePullToRefresh } from "./hooks/usePullToRefresh";
+import { PullToRefreshIndicator } from "./components/PullToRefreshIndicator";
+import { useIsMobile } from "./components/ui/use-mobile";
 
 interface BudgetData {
   initialBudget: number;
@@ -232,8 +235,39 @@ function AppContent() {
   });
 
   const baseUrl = getBaseUrl(projectId);
+  const isMobile = useIsMobile();
 
+  // Pull to Refresh handler - refresh all data
+  const handlePullToRefresh = useCallback(async () => {
+    try {
+      // Fetch all data in parallel for better performance
+      await Promise.all([
+        fetchBudgetData(selectedYear, selectedMonth),
+        fetchPockets(selectedYear, selectedMonth),
+        loadExcludeState(selectedYear, selectedMonth),
+      ]);
+      
+      // Trigger pockets refresh to update timelines
+      refreshPockets();
+      
+      // Show success feedback
+      toast.success('Data berhasil diperbarui', {
+        duration: 2000,
+      });
+    } catch (error) {
+      console.error('Pull to refresh error:', error);
+      toast.error('Gagal memperbarui data');
+    }
+  }, [selectedYear, selectedMonth, fetchBudgetData, fetchPockets, loadExcludeState, refreshPockets]);
 
+  // Pull to Refresh hook (mobile only)
+  const pullToRefreshState = usePullToRefresh({
+    onRefresh: handlePullToRefresh,
+    enabled: isMobile,
+    threshold: 80,
+    maxPullDistance: 120,
+    resistance: 0.5,
+  });
 
   // Handle transfer between pockets (wrapper for hook function + cache invalidation)
   const handleTransfer = async (transfer: {
@@ -1266,9 +1300,20 @@ function AppContent() {
         transition={{ duration: 0.3, ease: "easeInOut" }}
         className="min-h-screen bg-background pb-4 pt-0 px-4 md:p-6 lg:p-8"
       >
+        {/* Pull to Refresh Indicator (Mobile Only) */}
+        {isMobile && (
+          <PullToRefreshIndicator
+            isPulling={pullToRefreshState.isPulling}
+            isRefreshing={pullToRefreshState.isRefreshing}
+            pullDistance={pullToRefreshState.pullDistance}
+            progress={pullToRefreshState.progress}
+            shouldTriggerRefresh={pullToRefreshState.shouldTriggerRefresh}
+          />
+        )}
+
         <div className="max-w-5xl mx-auto space-y-8">
           {/* Sticky Header for Mobile with Native App Space */}
-          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[30px] pr-[16px] pb-[16px] pl-[16px]">
+          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[36px] pr-[16px] pb-[16px] pl-[16px]">
             <motion.div 
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}

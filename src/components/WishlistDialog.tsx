@@ -1,13 +1,11 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Badge } from "./ui/badge";
-import { useIsMobile } from "./ui/use-mobile";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
 
@@ -57,7 +55,6 @@ export function WishlistDialog({
     notes: ''
   });
   const [isSaving, setIsSaving] = useState(false);
-  const isMobile = useIsMobile();
 
   // Register dialog for back button handling
   useDialogRegistration(
@@ -211,45 +208,28 @@ export function WishlistDialog({
             </div>
           </div>
 
-          <div className={isMobile ? "flex gap-2 pt-4" : ""}>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={isSaving}
-              className={isMobile ? "flex-1" : ""}
             >
               Batal
             </Button>
-            <Button type="submit" disabled={isSaving} className={isMobile ? "flex-1" : ""}>
+            <Button type="submit" disabled={isSaving}>
               {isSaving ? 'Menyimpan...' : item ? 'Update' : 'Tambah'}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
   );
 
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
-        <DrawerContent 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
-          aria-describedby={undefined}
-        >
-          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
-            <DrawerTitle>{dialogTitle}</DrawerTitle>
-            <DrawerDescription>{dialogDescription}</DrawerDescription>
-          </DrawerHeader>
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {formFields}
-          </div>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={true}>
+      <DialogContent 
+        className="max-w-[calc(100%-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto z-[150]" 
+        aria-describedby={undefined}
+      >
         <DialogHeader>
           <DialogTitle className="text-xl">{dialogTitle}</DialogTitle>
           <DialogDescription>{dialogDescription}</DialogDescription>

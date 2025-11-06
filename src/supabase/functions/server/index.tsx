@@ -70,6 +70,8 @@ interface TransferTransaction {
   amount: number;
   fromPocketId: string;
   toPocketId: string;
+  fromPocketName?: string; // Stored for history preservation (added for backward compatibility)
+  toPocketName?: string;   // Stored for history preservation (added for backward compatibility)
   date: string;
   note?: string;
   createdAt: string;
@@ -688,12 +690,15 @@ function generatePocketTimeline(
   transfers.forEach((t: any) => {
     // Transfer OUT (from this pocket)
     if (t.fromPocketId === pocketId) {
+      // BACKWARD COMPATIBILITY: Use stored name if available, otherwise lookup from pockets array
       const toPocket = pockets.find((p: Pocket) => p.id === t.toPocketId);
+      const toPocketName = t.toPocketName || toPocket?.name || 'Unknown Pocket';
+      
       pocketTransfers.push({
         id: `${t.id}_out`,
         type: 'transfer' as TransactionType,
         date: t.date,
-        description: `Transfer ke ${toPocket?.name || 'Unknown'}`,
+        description: `Transfer ke ${toPocketName}`,
         amount: -t.amount,
         icon: 'ArrowRight',
         color: 'blue',
@@ -702,6 +707,7 @@ function generatePocketTimeline(
           direction: 'out',
           fromPocketId: t.fromPocketId,
           toPocketId: t.toPocketId,
+          toPocketName: toPocketName,
           note: t.note
         }
       });
@@ -709,12 +715,15 @@ function generatePocketTimeline(
     
     // Transfer IN (to this pocket)
     if (t.toPocketId === pocketId) {
+      // BACKWARD COMPATIBILITY: Use stored name if available, otherwise lookup from pockets array
       const fromPocket = pockets.find((p: Pocket) => p.id === t.fromPocketId);
+      const fromPocketName = t.fromPocketName || fromPocket?.name || 'Unknown Pocket';
+      
       pocketTransfers.push({
         id: `${t.id}_in`,
         type: 'transfer' as TransactionType,
         date: t.date,
-        description: `Transfer dari ${fromPocket?.name || 'Unknown'}`,
+        description: `Transfer dari ${fromPocketName}`,
         amount: t.amount,
         icon: 'ArrowLeft',
         color: 'green',
@@ -723,6 +732,7 @@ function generatePocketTimeline(
           direction: 'in',
           fromPocketId: t.fromPocketId,
           toPocketId: t.toPocketId,
+          fromPocketName: fromPocketName,
           note: t.note
         }
       });
@@ -1851,6 +1861,11 @@ app.post("/make-server-3adbeaf1/transfer/:year/:month", async (c) => {
       }, 400);
     }
     
+    // Get pockets to preserve pocket names for history (in case pocket gets deleted later)
+    const pockets = await getPockets(monthKey);
+    const fromPocket = pockets.find((p: Pocket) => p.id === fromPocketId);
+    const toPocket = pockets.find((p: Pocket) => p.id === toPocketId);
+    
     // Create transfer
     const transferId = `transfer_${Date.now()}_${crypto.randomUUID().substring(0, 8)}`;
     
@@ -1873,6 +1888,8 @@ app.post("/make-server-3adbeaf1/transfer/:year/:month", async (c) => {
       amount: Number(amount),
       fromPocketId,
       toPocketId,
+      fromPocketName: fromPocket?.name, // Preserve name for history
+      toPocketName: toPocket?.name,     // Preserve name for history
       date: transferDate,
       note,
       createdAt: new Date().toISOString()

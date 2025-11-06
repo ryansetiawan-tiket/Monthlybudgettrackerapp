@@ -149,7 +149,15 @@ function AdditionalIncomeListComponent({
     setEditExchangeRate(income.exchangeRate);
     setEditManualRate(income.exchangeRate?.toString() || "");
     // Extract date only (YYYY-MM-DD) from timestamp to display correctly in date input
-    const dateOnly = income.date ? income.date.split('T')[0] : new Date().toISOString().split('T')[0];
+    // Use local date as fallback instead of UTC
+    const getLocalDateString = () => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const dateOnly = income.date ? income.date.split('T')[0] : getLocalDateString();
     setEditDate(dateOnly);
     setEditDeduction((income.deduction || 0).toString());
   };

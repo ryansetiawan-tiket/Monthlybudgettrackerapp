@@ -31,7 +31,16 @@ interface ExpenseEntry {
 }
 
 export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances }: AddExpenseFormProps) {
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  // Get local date (not UTC) for default value
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  const [date, setDate] = useState(getLocalDateString());
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [templateItems, setTemplateItems] = useState<Array<{name: string, amount: number, editable?: boolean}>>([]);
   
@@ -178,7 +187,6 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
   const handleSubmitFromTemplate = () => {
     if (templateItems.length === 0) return;
     
-    const currentDate = date || new Date().toISOString().split('T')[0];
     const template = templates.find(t => t.id === selectedTemplate);
     const templateName = template?.name || "Template";
     const templateColor = template?.color;
@@ -189,17 +197,23 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     // Calculate total amount
     const totalAmount = getTotalTemplateAmount();
     
+    // Create full ISO timestamp with current local time
+    const [year, month, day] = date.split('-').map(Number);
+    const now = new Date();
+    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+    const fullTimestamp = dateWithTime.toISOString();
+    
     // Send as single expense with items and color
     if (totalAmount > 0) {
       const items = templateItems.map(item => ({ name: item.name, amount: item.amount }));
-      onAddExpense(templateName, totalAmount, currentDate, items, templateColor, pocketId);
+      onAddExpense(templateName, totalAmount, fullTimestamp, items, templateColor, pocketId);
       if (onSuccess) onSuccess();
     }
 
     // Reset
     setSelectedTemplate("");
     setTemplateItems([]);
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(getLocalDateString());
     resetEntries();
   };
 
@@ -219,6 +233,13 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     // Generate groupId for multiple entries added together
     const groupId = validEntries.length > 1 ? crypto.randomUUID() : undefined;
     const isBatch = validEntries.length > 1;
+    
+    // Create full ISO timestamp with current local time
+    // Parse the date string and add current time
+    const [year, month, day] = date.split('-').map(Number);
+    const now = new Date();
+    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+    const fullTimestamp = dateWithTime.toISOString();
 
     try {
       // Submit each entry individually with groupId
@@ -231,7 +252,7 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
         
         // Wait for each to complete before moving to next
         // Use silent mode for batch to avoid multiple toasts, except for the last one
-        await onAddExpense(finalName, finalAmount, date, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch);
+        await onAddExpense(finalName, finalAmount, fullTimestamp, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch);
       }
 
       // Show success toast for batch
@@ -257,7 +278,7 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
       calculatedAmount: null,
       pocketId: defaultPocket
     }]);
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(getLocalDateString());
   };
 
   const handleKeyPress = (e: React.KeyboardEvent, entryId: string) => {

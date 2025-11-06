@@ -74,9 +74,22 @@ export function FloatingActionButton({
 }: FloatingActionButtonProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isManuallyHidden, setIsManuallyHidden] = useState(false);
-  const [dragPosition, setDragPosition] = useState({ y: 0 });
+  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  const [fabSide, setFabSide] = useState<'left' | 'right'>(() => {
+    // Load saved preference from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('fab-side');
+      return (saved === 'left' || saved === 'right') ? saved : 'right';
+    }
+    return 'right';
+  });
   const [isDragging, setIsDragging] = useState(false);
   const isScrolling = useScrollDetection();
+  
+  // Save FAB side preference to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('fab-side', fabSide);
+  }, [fabSide]);
 
   // Determine visibility state
   const shouldHide = useMemo(() => {
@@ -118,31 +131,62 @@ export function FloatingActionButton({
     setIsDragging(true);
   }, []);
 
-  // Handle drag end - save position and reset dragging flag
+  // Handle drag - LIVE magnetic snap while dragging
+  const handleDrag = useCallback((event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const windowWidth = window.innerWidth;
+    const fabWidth = 64;
+    const margin = 24;
+    
+    // Calculate current FAB center X position
+    let fabCenterX;
+    if (fabSide === 'right') {
+      fabCenterX = windowWidth - margin - fabWidth / 2 + info.offset.x;
+    } else {
+      fabCenterX = margin + fabWidth / 2 + info.offset.x;
+    }
+    
+    // Magnetic snap threshold: 40% for left, 60% for right (with hysteresis)
+    const leftThreshold = windowWidth * 0.4;
+    const rightThreshold = windowWidth * 0.6;
+    
+    // Snap logic with hysteresis to prevent jittering
+    if (fabSide === 'right' && fabCenterX < leftThreshold) {
+      // Snap to left when dragged significantly to left
+      setFabSide('left');
+    } else if (fabSide === 'left' && fabCenterX > rightThreshold) {
+      // Snap to right when dragged significantly to right
+      setFabSide('right');
+    }
+  }, [fabSide]);
+
+  // Handle drag end - save vertical position, reset horizontal
   const handleDragEnd = useCallback((event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    // Calculate new vertical position
     const newY = dragPosition.y + info.offset.y;
     
-    // Constrain position: keep at least 100px from top, and original position at bottom
+    // Constrain vertical position: keep at least 100px from top, and original position at bottom
     const constrainedY = Math.max(Math.min(newY, 0), -400);
     
-    setDragPosition({ y: constrainedY });
+    // Reset X position to 0 (FAB snaps to edge)
+    setDragPosition({ x: 0, y: constrainedY });
     
     // Reset dragging flag after a short delay to prevent click
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [dragPosition.y]);
+  }, [dragPosition]);
 
-  // Action buttons configuration - CLOCK POSITIONS
-  // Jam 12 = top, Jam 10.30 = upper-left diagonal, Jam 9 = left
-  const actions = [
+  // Action buttons configuration - CLOCK POSITIONS (Dynamic based on FAB side)
+  // RIGHT side: Jam 12, 10.30, 9 (left positions)
+  // LEFT side: Jam 12, 1.30, 3 (right positions - mirrored)
+  const actions = useMemo(() => [
     {
       id: 'income',
       label: 'Tambah Pemasukan',
       icon: Plus,
       color: 'text-green-500', // Plus hijau
       bg: 'bg-gray-900',
-      position: { x: 0, y: -90 }, // JAM 12
+      position: { x: 0, y: -90 }, // JAM 12 (same for both sides)
       onClick: onAddIncome
     },
     {
@@ -151,7 +195,9 @@ export function FloatingActionButton({
       icon: Minus,
       color: 'text-red-500', // Minus merah
       bg: 'bg-gray-900',
-      position: { x: -64, y: -64 }, // JAM 10.30
+      position: fabSide === 'right' 
+        ? { x: -64, y: -64 }  // JAM 10.30 (upper-left)
+        : { x: 64, y: -64 },  // JAM 1.30 (upper-right)
       onClick: onAddExpense
     },
     {
@@ -160,51 +206,75 @@ export function FloatingActionButton({
       icon: Wallet,
       color: 'text-blue-500', // Wallet biru
       bg: 'bg-gray-900',
-      position: { x: -90, y: 0 }, // JAM 9
+      position: fabSide === 'right'
+        ? { x: -90, y: 0 }   // JAM 9 (left)
+        : { x: 90, y: 0 },   // JAM 3 (right)
       onClick: onToggleSummary
     }
-  ];
+  ], [fabSide, onAddIncome, onAddExpense, onToggleSummary]);
 
-  // Chevron position - JAM 10.30 with 2px FURTHER from original position
-  // Original: -35, -35 (gap ~5.5px)
-  // Desired: +2px further away = gap ~7.5px
+  // Chevron position - JAM 10.30 (right) or JAM 1.30 (left)
+  // Dynamic based on FAB side
   // Distance: 32 (FAB) + 7.5 (gap) + 12 (chevron) = 51.5px
   // For 45° diagonal: 51.5 / √2 ≈ 36.4px → use 37px
   const chevronPosition = useMemo(() => {
+    return fabSide === 'right'
+      ? { x: -37, y: -37 }  // JAM 10.30 (upper-left)
+      : { x: 37, y: -37 };   // JAM 1.30 (upper-right)
+  }, [fabSide]);
+  
+  // Chevron rotation - Dynamic based on FAB side and hide state
+  // RIGHT side: 0° (point right) when visible, 180° (point left) when manual hide
+  // LEFT side: 180° (point left) when visible, 0° (point right) when manual hide
+  const chevronRotation = useMemo(() => {
     if (shouldHide === 'manual') {
-      return { x: -37, y: -37 }; // 2px further away from original
+      return fabSide === 'right' ? 180 : 0;
     }
-    return { x: -37, y: -37 }; // JAM 10.30, 2px further
-  }, [shouldHide]);
+    return fabSide === 'right' ? 0 : 180;
+  }, [fabSide, shouldHide]);
 
   return (
     <motion.div
       className={cn(
         "fixed z-40",
-        "bottom-6 right-6",
+        "bottom-6",
         "md:hidden", // Hide on desktop - mobile only!
         className
       )}
-      drag="y"
-      dragConstraints={{ top: -400, bottom: 0 }}
-      dragElastic={0.05}
+      drag
+      dragConstraints={{ top: -400, bottom: 0, left: -100, right: 100 }}
+      dragElastic={0.1}
       dragMomentum={false}
       onDragStart={handleDragStart}
+      onDrag={handleDrag}
       onDragEnd={handleDragEnd}
       animate={{
+        // Horizontal positioning - smooth transition between sides
+        left: fabSide === 'left' ? 24 : 'auto',
+        right: fabSide === 'right' ? 24 : 'auto',
+        
+        // Hide behavior - offset from edge position
         x: shouldHide === 'manual' 
-          ? 'calc(100% - 8px)' 
+          ? (fabSide === 'right' ? 'calc(100% - 8px)' : 'calc(-100% + 8px)')
           : shouldHide === 'auto' 
-          ? '90%' 
+          ? (fabSide === 'right' ? '90%' : '-90%')
           : 0,
+          
         opacity: shouldHide === 'manual' 
           ? 0.5 
           : shouldHide === 'auto' 
           ? 0.7 
           : 1,
+          
         y: dragPosition.y
       }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
+      transition={{ 
+        left: { duration: 0.3, ease: 'easeOut' },
+        right: { duration: 0.3, ease: 'easeOut' },
+        x: { duration: 0.2, ease: 'easeOut' },
+        y: { duration: 0.2, ease: 'easeOut' },
+        opacity: { duration: 0.2 }
+      }}
       style={{ touchAction: 'none' }}
     >
       {/* Main FAB Container - For positioning action buttons */}
@@ -316,7 +386,7 @@ export function FloatingActionButton({
             y: chevronPosition.y,
             translateX: '-50%',
             translateY: '-50%',
-            rotate: shouldHide === 'manual' ? 180 : 0,
+            rotate: chevronRotation,
             opacity: isExpanded ? 0 : 1, // Hide when FAB expanded
             scale: isExpanded ? 0.5 : 1  // Shrink when hiding
           }}

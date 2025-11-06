@@ -251,38 +251,37 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-end">
-          <Skeleton className="h-9 w-32" />
-        </div>
-        
-        {/* Summary Skeleton */}
-        <div className="space-y-4">
+        {/* Summary Section */}
+        <div className="space-y-6">
+          {/* Saldo & Total Wishlist */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-8 w-32" />
+            <div className="space-y-1">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-6 w-32" />
             </div>
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-8 w-32" />
+            <div className="space-y-1">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-6 w-32" />
               <Skeleton className="h-3 w-16" />
             </div>
           </div>
           
           {/* Remaining Balance Skeleton */}
-          <div className="p-4 rounded-lg bg-muted/50 space-y-2">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-8 w-40" />
+          <div className="p-4 rounded-lg bg-muted/50 space-y-1">
+            <Skeleton className="h-3 w-48" />
+            <Skeleton className="h-7 w-40" />
           </div>
 
           {/* Health Bar Skeleton */}
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-4 w-12" />
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-10" />
+              </div>
+              <Skeleton className="h-4 w-28" />
             </div>
-            <Skeleton className="h-2 w-full" />
-            <Skeleton className="h-3 w-32 mx-auto" />
+            <Skeleton className="h-3 w-full" />
           </div>
 
           <Separator />
@@ -290,8 +289,8 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
           {/* Priority Breakdown Skeleton */}
           <div className="grid grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="space-y-2">
-                <Skeleton className="h-4 w-16" />
+              <div key={i} className="space-y-1">
+                <Skeleton className="h-3 w-16" />
                 <Skeleton className="h-5 w-14" />
                 <Skeleton className="h-3 w-24" />
               </div>
@@ -302,30 +301,34 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
         <Separator />
 
         {/* Wishlist Items Skeleton */}
-        <div className="space-y-3">
-          <Skeleton className="h-6 w-32" />
-          <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-10 w-32" />
+          </div>
+          <div className="space-y-4">
             {[1, 2, 3].map((i) => (
               <Card key={i}>
                 <CardContent className="pt-6">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-4">
+                    {/* Header: Name + Badge | Action Buttons */}
+                    <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center gap-2">
                           <Skeleton className="h-5 w-40" />
-                          <Skeleton className="h-5 w-16" />
+                          <Skeleton className="h-5 w-16 rounded-full" />
                         </div>
                         <Skeleton className="h-6 w-28" />
-                        <Skeleton className="h-4 w-64" />
+                        <Skeleton className="h-4 w-full max-w-xs" />
                       </div>
-                      <div className="flex gap-1">
-                        <Skeleton className="size-9 rounded-md" />
+                      <div className="flex gap-1 shrink-0">
                         <Skeleton className="size-9 rounded-md" />
                         <Skeleton className="size-9 rounded-md" />
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-48" />
+                    {/* Affordability Status */}
+                    <div className="space-y-3">
+                      <Skeleton className="h-5 w-48" />
                       <Skeleton className="h-3 w-36" />
                     </div>
                   </div>
@@ -358,41 +361,35 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   return (
     <>
       <div className="space-y-6">
-        <div className="flex items-center justify-end">
-          <Button onClick={() => setShowDialog(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Tambah Item
-          </Button>
-        </div>
           {/* Summary */}
           {simulation && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">Saldo Saat Ini</p>
-                  <p className="text-3xl">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Saldo Saat Ini</p>
+                  <p className="text-xl font-semibold break-words">
                     Rp {simulation.currentBalance.toLocaleString('id-ID')}
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">Total Wishlist</p>
-                  <p className="text-3xl">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Wishlist</p>
+                  <p className="text-xl font-semibold break-words">
                     Rp {simulation.wishlist.total.toLocaleString('id-ID')}
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {simulation.wishlist.count} items
                   </p>
                 </div>
               </div>
               
               {/* Sisa Saldo Setelah Wishlist */}
-              <div className="p-6 rounded-lg bg-muted/50">
-                <p className="text-muted-foreground mb-2">Sisa Saldo Setelah Wishlist</p>
-                <p className={`text-3xl ${getHealthColor()}`}>
+              <div className="p-4 rounded-lg bg-muted/50">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Sisa Saldo Setelah Wishlist</p>
+                <p className={`text-2xl font-semibold break-words ${getHealthColor()}`}>
                   {remainingBalance < 0 ? '-' : ''}Rp {Math.abs(remainingBalance).toLocaleString('id-ID')}
                 </p>
                 {remainingBalance < 0 && (
-                  <p className="text-red-500 mt-3 font-medium">
+                  <p className="text-red-500 mt-2 text-sm">
                     ⚠️ Kurang Rp {Math.abs(remainingBalance).toLocaleString('id-ID')} untuk beli semua items
                   </p>
                 )}
@@ -400,10 +397,18 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
               {/* Health Bar - Sisa Saldo */}
               <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span>Health Saldo</span>
-                  <span className={getHealthColor()}>
-                    {healthPercentage.toFixed(0)}%
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span>Health Saldo</span>
+                    <span className={getHealthColor()}>
+                      {healthPercentage.toFixed(0)}%
+                    </span>
+                  </div>
+                  <span className={`text-sm ${getHealthColor()}`}>
+                    {healthPercentage > 50 && '💚 Saldo sehat'}
+                    {healthPercentage > 20 && healthPercentage <= 50 && '⚠️ Saldo menipis'}
+                    {healthPercentage <= 20 && healthPercentage > 0 && '🔴 Saldo kritis!'}
+                    {healthPercentage === 0 && '❌ Saldo tidak cukup!'}
                   </span>
                 </div>
                 <div 
@@ -420,12 +425,6 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
                     className="h-3 [&>*]:bg-[var(--progress-color)]" 
                   />
                 </div>
-                <p className="text-sm text-muted-foreground text-center">
-                  {healthPercentage > 50 && '💚 Saldo sehat'}
-                  {healthPercentage > 20 && healthPercentage <= 50 && '⚠️ Saldo menipis'}
-                  {healthPercentage <= 20 && healthPercentage > 0 && '🔴 Saldo kritis!'}
-                  {healthPercentage === 0 && '❌ Saldo tidak cukup!'}
-                </p>
               </div>
 
               {/* Recommendations - Only show affordable/purchase related */}
@@ -448,31 +447,31 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
               <Separator />
 
               {/* Priority Breakdown */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">⭐ High</p>
-                  <p className="text-xl font-semibold">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">⭐ High</p>
+                  <p className="text-lg font-semibold">
                     {simulation.wishlist.byPriority.high.count} items
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground break-words">
                     Rp {simulation.wishlist.byPriority.high.total.toLocaleString('id-ID')}
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">🟡 Medium</p>
-                  <p className="text-xl font-semibold">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">🟡 Medium</p>
+                  <p className="text-lg font-semibold">
                     {simulation.wishlist.byPriority.medium.count} items
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground break-words">
                     Rp {simulation.wishlist.byPriority.medium.total.toLocaleString('id-ID')}
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">🔵 Low</p>
-                  <p className="text-xl font-semibold">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">🔵 Low</p>
+                  <p className="text-lg font-semibold">
                     {simulation.wishlist.byPriority.low.count} items
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground break-words">
                     Rp {simulation.wishlist.byPriority.low.total.toLocaleString('id-ID')}
                   </p>
                 </div>
@@ -484,7 +483,13 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
           {/* Wishlist Items */}
           <div className="space-y-4">
-            <h3 className="text-xl font-semibold">Items Wishlist</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-semibold">Items Wishlist</h3>
+              <Button onClick={() => setShowDialog(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Tambah Item
+              </Button>
+            </div>
             
             {wishlist.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
@@ -501,7 +506,7 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
             ) : (
               <ScrollArea className="h-[500px]">
                 <div className="space-y-4 pr-4">
-                  {wishlist.map((item) => {
+                  {wishlist.sort((a, b) => a.priority - b.priority).map((item) => {
                     const scenario = simulation?.scenarios.find(s => s.itemId === item.id);
                     const isAffordable = simulation?.affordableNow.includes(item.id);
                     const isSoon = simulation?.affordableSoon.find(s => s.itemId === item.id);

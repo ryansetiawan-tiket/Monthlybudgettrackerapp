@@ -66,9 +66,12 @@ export interface Transfer {
   id: string;
   fromPocketId: string;
   toPocketId: string;
+  fromPocketName?: string; // Preserved for history (backward compatibility)
+  toPocketName?: string;   // Preserved for history (backward compatibility)
   amount: number;
   description?: string;
   date: string;
+  note?: string;
 }
 
 export type TimelineEntryType = 'income' | 'expense' | 'transfer' | 'initial';

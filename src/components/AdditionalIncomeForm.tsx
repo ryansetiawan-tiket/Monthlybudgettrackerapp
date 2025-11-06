@@ -47,6 +47,15 @@ export function AdditionalIncomeForm({
   pockets = [],
   defaultTargetPocket,
 }: AdditionalIncomeFormProps) {
+  // Get local date (not UTC) for default value
+  const getLocalDateString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<"IDR" | "USD">("IDR");
@@ -56,7 +65,7 @@ export function AdditionalIncomeForm({
   const [loadingRate, setLoadingRate] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString());
   const [deduction, setDeduction] = useState("");
   const [targetPocketId, setTargetPocketId] = useState("");
 
@@ -169,6 +178,12 @@ export function AdditionalIncomeForm({
       ? exchangeRate 
       : (currency === "USD" ? Number(manualRate) : null);
 
+    // Create full ISO timestamp with current local time
+    const [year, month, day] = date.split('-').map(Number);
+    const now = new Date();
+    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+    const fullTimestamp = dateWithTime.toISOString();
+
     onAddIncome({
       name: name.trim(),
       amount: Number(amount),
@@ -176,7 +191,7 @@ export function AdditionalIncomeForm({
       exchangeRate: rate,
       amountIDR: calculateIDR(),
       conversionType: currency === "USD" ? conversionType : "manual",
-      date,
+      date: fullTimestamp,
       deduction: Number(deduction) || 0,
       pocketId: targetPocketId,
     });
