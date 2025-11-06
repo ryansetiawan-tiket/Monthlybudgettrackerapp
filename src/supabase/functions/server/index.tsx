@@ -1049,7 +1049,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -1091,6 +1091,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
+      ...(groupId ? { groupId } : {}),
       createdAt: new Date().toISOString(),
     };
     
@@ -1099,6 +1100,77 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     return c.json({ success: true, data: expenseData });
   } catch (error: any) {
     return c.json({ error: `Failed to add expense: ${error.message}` }, 500);
+  }
+});
+
+// Add multiple expenses at once (batch)
+app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const body = await c.req.json();
+    
+    const { expenses } = body;
+    
+    if (!Array.isArray(expenses) || expenses.length === 0) {
+      return c.json({ error: "Expenses array is required" }, 400);
+    }
+    
+    const addedExpenses = [];
+    const currentTime = new Date();
+    
+    for (const expense of expenses) {
+      const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = expense;
+      
+      if (!name || amount === undefined) {
+        continue; // Skip invalid entries
+      }
+      
+      const expenseId = crypto.randomUUID();
+      const key = `expense:${year}-${month}:${expenseId}`;
+      
+      // Parse date: if date is in YYYY-MM-DD format, add current time
+      let expenseDate;
+      if (date) {
+        if (date.includes('T')) {
+          expenseDate = date;
+        } else {
+          const dateObj = new Date(date);
+          dateObj.setHours(currentTime.getHours());
+          dateObj.setMinutes(currentTime.getMinutes());
+          dateObj.setSeconds(currentTime.getSeconds());
+          dateObj.setMilliseconds(currentTime.getMilliseconds());
+          expenseDate = dateObj.toISOString();
+        }
+      } else {
+        expenseDate = currentTime.toISOString();
+      }
+      
+      const expenseData = {
+        id: expenseId,
+        name,
+        amount: Number(amount),
+        date: expenseDate,
+        pocketId: pocketId || POCKET_IDS.DAILY,
+        ...(items && items.length > 0 ? { items } : {}),
+        ...(color ? { color } : {}),
+        ...(fromIncome ? { fromIncome: true } : {}),
+        ...(currency ? { currency } : {}),
+        ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
+        ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
+        ...(conversionType ? { conversionType } : {}),
+        ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
+        ...(groupId ? { groupId } : {}),
+        createdAt: currentTime.toISOString(),
+      };
+      
+      await kv.set(key, expenseData);
+      addedExpenses.push(expenseData);
+    }
+    
+    return c.json({ success: true, data: addedExpenses, count: addedExpenses.length });
+  } catch (error: any) {
+    return c.json({ error: `Failed to add expenses: ${error.message}` }, 500);
   }
 });
 
@@ -1127,13 +1199,13 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     const key = `expense:${year}-${month}:${id}`;
     const body = await c.req.json();
     
-    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
     }
     
-    // Get existing expense to preserve createdAt and pocketId if not provided
+    // Get existing expense to preserve createdAt, pocketId, and groupId if not provided
     const existingExpense = await kv.get(key);
     
     // Parse date: if date is in YYYY-MM-DD format, preserve the original time or add current time
@@ -1175,6 +1247,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
       ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
+      ...(groupId !== undefined ? { groupId } : existingExpense?.groupId ? { groupId: existingExpense.groupId } : {}),
       createdAt: existingExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

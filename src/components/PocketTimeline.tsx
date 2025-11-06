@@ -1,6 +1,6 @@
 import { Badge } from "./ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Wallet, Sparkles, DollarSign, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
@@ -345,23 +345,22 @@ export function PocketTimeline({
   // Mobile: Bottom Sheet
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent 
           className="h-[75vh] flex flex-col rounded-t-2xl p-0" 
           aria-describedby={undefined}
         >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">
-            <SheetTitle className="flex items-center justify-between">
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">
+            <DrawerTitle className="flex items-center justify-between">
               <span>Timeline {pocketName}</span>
               <Badge variant="secondary">{entries.length} aktivitas</Badge>
-            </SheetTitle>
-          </SheetHeader>
+            </DrawerTitle>
+          </DrawerHeader>
           <div className="flex-1 overflow-hidden px-4 py-4">
             {timelineContent}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

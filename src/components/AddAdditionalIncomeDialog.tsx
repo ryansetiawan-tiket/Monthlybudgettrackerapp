@@ -1,7 +1,9 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 import { useIsMobile } from "./ui/use-mobile";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface Pocket {
   id: string;
@@ -38,6 +40,14 @@ export function AddAdditionalIncomeDialog({
   defaultTargetPocket,
 }: AddAdditionalIncomeDialogProps) {
   const isMobile = useIsMobile();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'add-income-dialog'
+  );
   
   const handleIncomeSuccess = () => {
     onOpenChange(false);
@@ -56,19 +66,16 @@ export function AddAdditionalIncomeDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
-        >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>Tambah Pemasukan Tambahan</SheetTitle>
-          </SheetHeader>
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent className="h-[75vh] flex flex-col rounded-t-2xl p-0">
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>Tambah Pemasukan Tambahan</DrawerTitle>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {content}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

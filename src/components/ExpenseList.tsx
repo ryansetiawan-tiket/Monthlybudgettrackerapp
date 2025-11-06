@@ -5,6 +5,7 @@ import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, E
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { 
   AlertDialog, 
   AlertDialogAction, 
@@ -19,6 +20,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner@2.0.3";
+import { useIsMobile } from "./ui/use-mobile";
 
 interface ExpenseItem {
   name: string;
@@ -39,6 +41,7 @@ interface Expense {
   conversionType?: string;
   deduction?: number;
   pocketId?: string;
+  groupId?: string;
 }
 
 interface ExpenseListProps {
@@ -55,6 +58,7 @@ interface ExpenseListProps {
 }
 
 function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
+  const isMobile = useIsMobile();
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -70,7 +74,8 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
     exchangeRate: undefined,
     conversionType: undefined,
     deduction: undefined,
-    pocketId: undefined
+    pocketId: undefined,
+    groupId: undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -496,7 +501,8 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
         exchangeRate: expense.exchangeRate,
         conversionType: expense.conversionType,
         deduction: expense.deduction,
-        pocketId: expense.pocketId
+        pocketId: expense.pocketId,
+        groupId: expense.groupId  // Preserve groupId
       });
       // Initialize input strings for items
       const initialInputs: { [index: number]: string } = {};
@@ -529,7 +535,8 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
         exchangeRate: undefined,
         conversionType: undefined,
         deduction: undefined,
-        pocketId: undefined
+        pocketId: undefined,
+        groupId: undefined
       });
     }
   };
@@ -548,7 +555,8 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       exchangeRate: undefined,
       conversionType: undefined,
       deduction: undefined,
-      pocketId: undefined
+      pocketId: undefined,
+      groupId: undefined
     });
     setItemAmountInputs({});
   };
@@ -628,15 +636,16 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
     setItemAmountInputs(newInputs);
   };
 
-  // Group expenses by date
+  // Group expenses by groupId and date
   const groupExpensesByDate = (expenses: Expense[]): Map<string, Expense[]> => {
     const grouped = new Map<string, Expense[]>();
     expenses.forEach(expense => {
-      const dateKey = expense.date;
-      if (!grouped.has(dateKey)) {
-        grouped.set(dateKey, []);
+      // Use groupId as the primary key if it exists, otherwise use date
+      const groupKey = expense.groupId || expense.date;
+      if (!grouped.has(groupKey)) {
+        grouped.set(groupKey, []);
       }
-      grouped.get(dateKey)!.push(expense);
+      grouped.get(groupKey)!.push(expense);
     });
     return grouped;
   };
@@ -668,22 +677,24 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       return sum + expense.amount;
     }, 0);
 
-  // Render grouped expenses by date
-  const renderGroupedExpenseItem = (date: string, expenses: Expense[]) => {
+  // Render grouped expenses by date or groupId
+  const renderGroupedExpenseItem = (groupKey: string, expenses: Expense[]) => {
     // If only 1 expense, render as single item
     if (expenses.length === 1) {
       return renderExpenseItem(expenses[0]);
     }
 
-    // Multiple expenses on same date - render as grouped card
+    // Multiple expenses - render as grouped card
     const dateExpenses = expenses;
-    const isGroupExpanded = expandedItems.has(`group-${date}`);
+    // Use the actual date from the first expense (all in group should have same date)
+    const actualDate = dateExpenses[0].date;
+    const isGroupExpanded = expandedItems.has(`group-${groupKey}`);
     const hasExcludedInGroup = dateExpenses.some(exp => excludedExpenseIds.has(exp.id));
     const allExcluded = dateExpenses.every(exp => excludedExpenseIds.has(exp.id));
     const hasSelectedInGroup = dateExpenses.some(exp => selectedExpenseIds.has(exp.id));
     const allSelected = dateExpenses.every(exp => selectedExpenseIds.has(exp.id));
 
-    // Calculate total for this date group (excluding excluded items)
+    // Calculate total for this group (excluding excluded items)
     const groupTotal = dateExpenses
       .filter(exp => !excludedExpenseIds.has(exp.id))
       .reduce((sum, exp) => {
@@ -698,12 +709,12 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
 
     return (
       <Collapsible 
-        key={`group-${date}`} 
+        key={`group-${groupKey}`} 
         open={isGroupExpanded} 
         onOpenChange={() => {
           setExpandedItems(prev => {
             const newSet = new Set(prev);
-            const key = `group-${date}`;
+            const key = `group-${groupKey}`;
             if (newSet.has(key)) {
               newSet.delete(key);
             } else {
@@ -713,54 +724,103 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
           });
         }}
       >
-        <div className={`border rounded-lg ${isToday(date) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+        <div className={`border rounded-lg ${isToday(actualDate) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
           <CollapsibleTrigger asChild>
-            <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg">
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                {isBulkSelectMode && (
-                  <Checkbox
-                    checked={allSelected}
-                    onCheckedChange={() => {
-                      // Toggle all expenses in this group
-                      setSelectedExpenseIds(prev => {
-                        const newSet = new Set(prev);
-                        if (allSelected) {
-                          dateExpenses.forEach(exp => newSet.delete(exp.id));
-                        } else {
-                          dateExpenses.forEach(exp => newSet.add(exp.id));
-                        }
-                        return newSet;
-                      });
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                )}
-                {isToday(date) && (
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
-                )}
-                <span 
-                  className={`${isWeekend(date) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} whitespace-nowrap`}
-                >
-                  {formatDateShort(date)}
-                </span>
-                <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''} truncate`}>
-                  {dateExpenses.length} item{dateExpenses.length > 1 ? 's' : ''}
-                </p>
-                {isGroupExpanded ? (
-                  <ChevronUp className="size-4 shrink-0" />
-                ) : (
-                  <ChevronDown className="size-4 shrink-0" />
-                )}
+            <div className="cursor-pointer hover:bg-accent/50 transition-all rounded-lg">
+              {/* Mobile: Single-line compact layout (more natural and common) */}
+              <div className="md:hidden p-3">
+                <div className="flex items-center justify-between gap-3">
+                  {/* Left side: Date, badge, indicator */}
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {isBulkSelectMode && (
+                      <Checkbox
+                        checked={allSelected}
+                        onCheckedChange={() => {
+                          setSelectedExpenseIds(prev => {
+                            const newSet = new Set(prev);
+                            if (allSelected) {
+                              dateExpenses.forEach(exp => newSet.delete(exp.id));
+                            } else {
+                              dateExpenses.forEach(exp => newSet.add(exp.id));
+                            }
+                            return newSet;
+                          });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    {isToday(actualDate) && (
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
+                    )}
+                    <span className={`text-sm ${isWeekend(actualDate) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} truncate`}>
+                      {formatDateShort(actualDate)}
+                    </span>
+                    <Badge variant="secondary" className="text-xs h-5 px-2 shrink-0">
+                      {dateExpenses.length}
+                    </Badge>
+                  </div>
+                  
+                  {/* Right side: Amount and chevron */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <p className={`text-sm ${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''}`}>
+                      {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
+                    </p>
+                    {isGroupExpanded ? (
+                      <ChevronUp className="size-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="size-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
-                  {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
-                </p>
+
+              {/* Desktop: Keep original single-line layout */}
+              <div className="hidden md:flex items-center justify-between p-3">
+                <div className="flex-1 flex items-center gap-2 min-w-0">
+                  {isBulkSelectMode && (
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={() => {
+                        setSelectedExpenseIds(prev => {
+                          const newSet = new Set(prev);
+                          if (allSelected) {
+                            dateExpenses.forEach(exp => newSet.delete(exp.id));
+                          } else {
+                            dateExpenses.forEach(exp => newSet.add(exp.id));
+                          }
+                          return newSet;
+                        });
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
+                  {isToday(actualDate) && (
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
+                  )}
+                  <span 
+                    className={`${isWeekend(actualDate) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} whitespace-nowrap`}
+                  >
+                    {formatDateShort(actualDate)}
+                  </span>
+                  <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''} truncate`}>
+                    {dateExpenses.length} item{dateExpenses.length > 1 ? 's' : ''}
+                  </p>
+                  {isGroupExpanded ? (
+                    <ChevronUp className="size-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-4 shrink-0" />
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
+                    {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
+                  </p>
+                </div>
               </div>
             </div>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="px-3 pb-3 space-y-2 border-t pt-2 mt-1">
+            <div className="px-3 pb-3 space-y-3 border-t pt-3">
               {dateExpenses.map(expense => renderIndividualExpenseInGroup(expense))}
             </div>
           </CollapsibleContent>
@@ -778,89 +838,167 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       const isItemExpanded = expandedItems.has(expense.id);
       return (
         <Collapsible key={expense.id} open={isItemExpanded} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-md' : ''} ${isExcluded ? 'opacity-50' : ''}`}>
+          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-lg' : ''} ${isExcluded ? 'opacity-50' : ''}`}>
             <CollapsibleTrigger asChild>
-              <div className="flex items-center justify-between p-2 cursor-pointer">
-                <div className="flex-1 flex items-center gap-2">
-                  {isBulkSelectMode && (
-                    <Checkbox
-                      checked={selectedExpenseIds.has(expense.id)}
-                      onCheckedChange={() => handleToggleExpense(expense.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  )}
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
-                    {expense.name}
-                  </p>
-                  {expense.pocketId && getPocketName(expense.pocketId) && (
-                    <Badge variant="secondary" className="text-xs">
-                      {getPocketName(expense.pocketId)}
-                    </Badge>
-                  )}
-                  {isItemExpanded ? (
-                    <ChevronUp className="size-3" />
-                  ) : (
-                    <ChevronDown className="size-3" />
-                  )}
+              <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
+                {/* Mobile: Compact layout with badge below */}
+                <div className="md:hidden p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    {/* Left: Checkbox, Name area, Chevron */}
+                    <div className="flex items-start gap-2 min-w-0 flex-1">
+                      {isBulkSelectMode && (
+                        <Checkbox
+                          checked={selectedExpenseIds.has(expense.id)}
+                          onCheckedChange={() => handleToggleExpense(expense.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5"
+                        />
+                      )}
+                      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                        <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                          {expense.name}
+                        </p>
+                        {expense.pocketId && getPocketName(expense.pocketId) && (
+                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 py-0 w-fit">
+                            {getPocketName(expense.pocketId)}
+                          </Badge>
+                        )}
+                      </div>
+                      {isItemExpanded ? (
+                        <ChevronUp className="size-3 text-muted-foreground shrink-0 mt-1" />
+                      ) : (
+                        <ChevronDown className="size-3 text-muted-foreground shrink-0 mt-1" />
+                      )}
+                    </div>
+
+                    {/* Right: Amount and action buttons */}
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                        {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+                      </p>
+                      {!isBulkSelectMode && (
+                        <>
+                          {expense.fromIncome && onMoveToIncome && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => onMoveToIncome(expense)}
+                              title="Kembalikan ke pemasukan tambahan"
+                            >
+                              <ArrowRight className="size-3.5 text-muted-foreground" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleToggleExclude(expense.id)}
+                            title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                          >
+                            {isExcluded ? (
+                              <EyeOff className="size-3.5 text-muted-foreground" />
+                            ) : (
+                              <Eye className="size-3.5 text-muted-foreground" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleEditExpense(expense.id)}
+                          >
+                            <Pencil className="size-3.5 text-muted-foreground" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
-                    {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-                  </p>
-                  {!isBulkSelectMode && (
-                    <>
-                      {expense.fromIncome && onMoveToIncome && (
+
+                {/* Desktop: Keep original single-line layout */}
+                <div className="hidden md:flex items-center justify-between p-2">
+                  <div className="flex-1 flex items-center gap-2">
+                    {isBulkSelectMode && (
+                      <Checkbox
+                        checked={selectedExpenseIds.has(expense.id)}
+                        onCheckedChange={() => handleToggleExpense(expense.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
+                      {expense.name}
+                    </p>
+                    {expense.pocketId && getPocketName(expense.pocketId) && (
+                      <Badge variant="secondary" className="text-xs">
+                        {getPocketName(expense.pocketId)}
+                      </Badge>
+                    )}
+                    {isItemExpanded ? (
+                      <ChevronUp className="size-3" />
+                    ) : (
+                      <ChevronDown className="size-3" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                      {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+                    </p>
+                    {!isBulkSelectMode && (
+                      <>
+                        {expense.fromIncome && onMoveToIncome && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => onMoveToIncome(expense)}
+                            title="Kembalikan ke pemasukan tambahan"
+                          >
+                            <ArrowRight className="size-3 text-green-600" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6"
-                          onClick={() => onMoveToIncome(expense)}
-                          title="Kembalikan ke pemasukan tambahan"
+                          onClick={() => handleToggleExclude(expense.id)}
+                          title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
                         >
-                          <ArrowRight className="size-3 text-green-600" />
+                          {isExcluded ? (
+                            <EyeOff className="size-3 text-muted-foreground" />
+                          ) : (
+                            <Eye className="size-3 text-muted-foreground" />
+                          )}
                         </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => handleToggleExclude(expense.id)}
-                        title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                      >
-                        {isExcluded ? (
-                          <EyeOff className="size-3 text-muted-foreground" />
-                        ) : (
-                          <Eye className="size-3 text-muted-foreground" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => handleEditExpense(expense.id)}
-                      >
-                        <Pencil className="size-3 text-muted-foreground" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => {
-                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                          setDeleteConfirmOpen(true);
-                        }}
-                      >
-                        <Trash2 className="size-3 text-destructive" />
-                      </Button>
-                    </>
-                  )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => handleEditExpense(expense.id)}
+                        >
+                          <Pencil className="size-3 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => {
+                            setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                            setDeleteConfirmOpen(true);
+                          }}
+                        >
+                          <Trash2 className="size-3 text-destructive" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="px-2 pb-2 space-y-1 border-t pt-1 mt-1">
+              <div className="px-3 pb-3 space-y-2 border-t pt-3 mt-2 md:px-2 md:pb-2 md:space-y-1 md:pt-1 md:mt-1">
                 {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className={`flex items-center gap-2 text-xs text-green-600 pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className={`flex items-center gap-2 text-xs text-green-600 pl-8 md:pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
                     <DollarSign className="size-3" />
                     <span>
                       {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -871,12 +1009,12 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   </div>
                 )}
                 {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className={`text-xs text-muted-foreground pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className={`text-xs text-muted-foreground pl-8 md:pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
                     <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                   </div>
                 )}
                 {expense.items.map((item, index) => (
-                  <div key={index} className={`flex justify-between text-xs pl-6 ${isExcluded ? 'line-through' : ''}`}>
+                  <div key={index} className={`flex justify-between items-center text-sm md:text-xs pl-8 md:pl-6 py-1.5 md:py-0 rounded-lg md:rounded-none hover:bg-accent/30 md:hover:bg-transparent transition-colors ${isExcluded ? 'line-through' : ''}`}>
                     <span className="text-muted-foreground">{item.name}</span>
                     <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
                       {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
@@ -893,93 +1031,183 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       return (
         <div
           key={expense.id}
-          className={`flex items-center justify-between p-2 ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-md' : ''} ${isExcluded ? 'opacity-50' : ''}`}
+          className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''} ${isExcluded ? 'opacity-50' : ''}`}
         >
-          <div className="flex-1 flex items-center gap-2">
-            {isBulkSelectMode && (
-              <Checkbox
-                checked={selectedExpenseIds.has(expense.id)}
-                onCheckedChange={() => handleToggleExpense(expense.id)}
-              />
-            )}
-            <div>
-              <div className="flex items-center gap-2">
-                <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
-                {expense.pocketId && getPocketName(expense.pocketId) && (
-                  <Badge variant="secondary" className="text-xs">
-                    {getPocketName(expense.pocketId)}
-                  </Badge>
+          {/* Mobile: Compact layout with badge below */}
+          <div className="md:hidden p-2">
+            <div className="flex items-start justify-between gap-2">
+              {/* Left: Checkbox, Name area */}
+              <div className="flex items-start gap-2 min-w-0 flex-1">
+                {isBulkSelectMode && (
+                  <Checkbox
+                    checked={selectedExpenseIds.has(expense.id)}
+                    onCheckedChange={() => handleToggleExpense(expense.id)}
+                    className="mt-0.5"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col gap-0.5">
+                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                      {expense.name}
+                    </p>
+                    {expense.pocketId && getPocketName(expense.pocketId) && (
+                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5 py-0 w-fit">
+                        {getPocketName(expense.pocketId)}
+                      </Badge>
+                    )}
+                  </div>
+                  {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                    <div className={`flex items-center gap-1 text-xs text-green-600 mt-0.5 ${isExcluded ? 'line-through' : ''}`}>
+                      <DollarSign className="size-3" />
+                      <span className="truncate">
+                        {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                        <span className="ml-1">
+                          ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                    <div className={`text-xs text-muted-foreground mt-0.5 truncate ${isExcluded ? 'line-through' : ''}`}>
+                      <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Amount and action buttons */}
+              <div className="flex items-center gap-1 shrink-0">
+                <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                  {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+                </p>
+                {!isBulkSelectMode && (
+                  <>
+                    {expense.fromIncome && onMoveToIncome && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => onMoveToIncome(expense)}
+                        title="Kembalikan ke pemasukan tambahan"
+                      >
+                        <ArrowRight className="size-3.5 text-muted-foreground" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => handleToggleExclude(expense.id)}
+                      title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                    >
+                      {isExcluded ? (
+                        <EyeOff className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <Eye className="size-3.5 text-muted-foreground" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => handleEditExpense(expense.id)}
+                    >
+                      <Pencil className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  </>
                 )}
               </div>
-              {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                <div className={`flex items-center gap-2 text-xs text-green-600 ${isExcluded ? 'line-through' : ''}`}>
-                  <DollarSign className="size-3" />
-                  <span>
-                    {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
-                    <span className="ml-1 text-xs">
-                      ({expense.conversionType === "auto" ? "realtime" : "manual"})
-                    </span>
-                  </span>
-                </div>
-              )}
-              {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                  <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
-                </div>
-              )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
-              {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-            </p>
-            {!isBulkSelectMode && (
-              <>
-                {expense.fromIncome && onMoveToIncome && (
+
+          {/* Desktop: Keep original single-line layout */}
+          <div className="hidden md:flex items-center justify-between p-2">
+            <div className="flex-1 flex items-center gap-2">
+              {isBulkSelectMode && (
+                <Checkbox
+                  checked={selectedExpenseIds.has(expense.id)}
+                  onCheckedChange={() => handleToggleExpense(expense.id)}
+                />
+              )}
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+                  {expense.pocketId && getPocketName(expense.pocketId) && (
+                    <Badge variant="secondary" className="text-xs">
+                      {getPocketName(expense.pocketId)}
+                    </Badge>
+                  )}
+                </div>
+                {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
+                  <div className={`flex items-center gap-2 text-xs text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                    <DollarSign className="size-3" />
+                    <span>
+                      {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
+                      <span className="ml-1 text-xs">
+                        ({expense.conversionType === "auto" ? "realtime" : "manual"})
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
+                  <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                    <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
+              </p>
+              {!isBulkSelectMode && (
+                <>
+                  {expense.fromIncome && onMoveToIncome && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => onMoveToIncome(expense)}
+                      title="Kembalikan ke pemasukan tambahan"
+                    >
+                      <ArrowRight className="size-3 text-green-600" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => onMoveToIncome(expense)}
-                    title="Kembalikan ke pemasukan tambahan"
+                    onClick={() => handleToggleExclude(expense.id)}
+                    title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
                   >
-                    <ArrowRight className="size-3 text-green-600" />
+                    {isExcluded ? (
+                      <EyeOff className="size-3 text-muted-foreground" />
+                    ) : (
+                      <Eye className="size-3 text-muted-foreground" />
+                    )}
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => handleToggleExclude(expense.id)}
-                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                >
-                  {isExcluded ? (
-                    <EyeOff className="size-3 text-muted-foreground" />
-                  ) : (
-                    <Eye className="size-3 text-muted-foreground" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => handleEditExpense(expense.id)}
-                >
-                  <Pencil className="size-3 text-muted-foreground" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => {
-                    setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                    setDeleteConfirmOpen(true);
-                  }}
-                >
-                  <Trash2 className="size-3 text-destructive" />
-                </Button>
-              </>
-            )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => handleEditExpense(expense.id)}
+                  >
+                    <Pencil className="size-3 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => {
+                      setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                      setDeleteConfirmOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-3 text-destructive" />
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       );
@@ -1362,7 +1590,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   </div>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="space-y-2 mt-3">
+                  <div className="space-y-3 md:space-y-2 mt-3">
                     {upcomingExpenses.length === 0 ? (
                       <p className="text-center text-muted-foreground py-4 text-sm">
                         Tidak ada pengeluaran mendatang
@@ -1397,7 +1625,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="space-y-2 mt-3">
+                    <div className="space-y-3 md:space-y-2 mt-3">
                       {Array.from(historyGrouped.entries())
                         .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
                         .map(([date, expenses]) => 
@@ -1411,12 +1639,15 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
           </div>
         )}
       </CardContent>
-      <Dialog open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Pengeluaran</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
+      
+      {/* Edit Dialog/Drawer - Responsive */}
+      {isMobile ? (
+        <Drawer open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()} dismissible={true}>
+          <DrawerContent className="max-h-[90vh] flex flex-col">
+            <DrawerHeader className="text-left border-b">
+              <DrawerTitle>Edit Pengeluaran</DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="edit-name">Nama</Label>
               <Input
@@ -1509,22 +1740,138 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 </div>
               </div>
             )}
-          </div>
-          <div className="mt-6 flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={handleCloseEditDialog}
-            >
-              Batal
-            </Button>
-            <Button
-              onClick={handleSaveEditExpense}
-            >
-              Simpan
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+            </div>
+            <div className="px-4 py-4 border-t bg-background flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleCloseEditDialog}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={handleSaveEditExpense}
+              >
+                Simpan
+              </Button>
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Pengeluaran</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name-desktop">Nama</Label>
+                <Input
+                  id="edit-name-desktop"
+                  value={editingExpense.name}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, name: e.target.value })}
+                />
+              </div>
+              
+              {(!editingExpense.items || editingExpense.items.length === 0) && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-amount-desktop">Jumlah</Label>
+                  <Input
+                    id="edit-amount-desktop"
+                    type="number"
+                    value={editingExpense.amount.toString()}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-date-desktop">Tanggal</Label>
+                <Input
+                  id="edit-date-desktop"
+                  type="date"
+                  value={editingExpense.date}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, date: e.target.value })}
+                />
+              </div>
+
+              {pockets.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-pocket-desktop">Sumber Dana (Kantong)</Label>
+                  <select
+                    id="edit-pocket-desktop"
+                    value={editingExpense.pocketId || ''}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, pocketId: e.target.value || undefined })}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Pilih Kantong</option>
+                    {pockets.map(pocket => (
+                      <option key={pocket.id} value={pocket.id}>
+                        {pocket.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              {editingExpense.items && editingExpense.items.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Item Pengeluaran</Label>
+                  <div className="space-y-2">
+                    {editingExpense.items.map((item, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <Input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
+                          placeholder="Nama Item"
+                          className="flex-1"
+                        />
+                        <Input
+                          type="text"
+                          value={itemAmountInputs[index] ?? item.amount.toString()}
+                          onChange={(e) => handleUpdateItem(index, 'amount', e.target.value)}
+                          onBlur={() => handleBlurItemAmount(index)}
+                          placeholder="Jumlah"
+                          className="w-32"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveItem(index)}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAddItem}
+                      className="w-full"
+                    >
+                      <Plus className="size-4 mr-2" />
+                      Tambah Item
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleCloseEditDialog}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={handleSaveEditExpense}
+              >
+                Simpan
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>

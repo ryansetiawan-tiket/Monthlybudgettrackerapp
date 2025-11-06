@@ -6,6 +6,7 @@ import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -14,6 +15,7 @@ import { format } from "date-fns";
 import { cn } from "./ui/utils";
 import { formatCurrency } from "../utils/currency";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
+import { useIsMobile } from "./ui/use-mobile";
 
 
 interface AdditionalIncome {
@@ -67,6 +69,7 @@ function AdditionalIncomeListComponent({
   isExcludeLocked = false,
   onToggleExcludeLock
 }: AdditionalIncomeListProps) {
+  const isMobile = useIsMobile();
   const [editingIncome, setEditingIncome] = useState<AdditionalIncome | null>(null);
   const [editName, setEditName] = useState("");
   const [editAmount, setEditAmount] = useState("");
@@ -526,12 +529,14 @@ function AdditionalIncomeListComponent({
             </CardContent>
         </Card>
 
-      <Dialog open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
-          <DialogHeader>
-            <DialogTitle>Edit Pemasukan Tambahan</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
+      {/* Edit Dialog/Drawer - Responsive */}
+      {isMobile ? (
+        <Drawer open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)} dismissible={true}>
+          <DrawerContent className="max-h-[90vh] flex flex-col">
+            <DrawerHeader className="text-left border-b">
+              <DrawerTitle>Edit Pemasukan Tambahan</DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="editName">Nama Pemasukan</Label>
               <Input
@@ -695,19 +700,211 @@ function AdditionalIncomeListComponent({
                 </div>
               )}
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingIncome(null)}>
-              <X className="size-4 mr-2" />
-              Batal
-            </Button>
-            <Button onClick={handleSaveEdit}>
-              <Check className="size-4 mr-2" />
-              Simpan
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </div>
+            <div className="px-4 py-4 border-t bg-background flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditingIncome(null)}>
+                <X className="size-4 mr-2" />
+                Batal
+              </Button>
+              <Button onClick={handleSaveEdit}>
+                <Check className="size-4 mr-2" />
+                Simpan
+              </Button>
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)}>
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle>Edit Pemasukan Tambahan</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="editName-desktop">Nama Pemasukan</Label>
+                <Input
+                  id="editName-desktop"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Contoh: Fiverr, Freelance, Bonus, dll"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Mata Uang</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={editCurrency === "IDR" ? "default" : "outline"}
+                    onClick={() => setEditCurrency("IDR")}
+                    className="flex-1"
+                  >
+                    IDR (Rupiah)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={editCurrency === "USD" ? "default" : "outline"}
+                    onClick={() => setEditCurrency("USD")}
+                    className="flex-1"
+                  >
+                    USD (Dollar)
+                  </Button>
+                </div>
+              </div>
+
+              {editCurrency === "USD" && (
+                <div className="space-y-2">
+                  <Label>Metode Konversi</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={editConversionType === "auto" ? "default" : "outline"}
+                      onClick={() => setEditConversionType("auto")}
+                      className="flex-1"
+                    >
+                      Auto (Realtime)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={editConversionType === "manual" ? "default" : "outline"}
+                      onClick={() => setEditConversionType("manual")}
+                      className="flex-1"
+                    >
+                      Manual
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="editAmount-desktop">
+                  Nominal {editCurrency === "USD" ? "(USD)" : "(IDR)"}
+                </Label>
+                <Input
+                  id="editAmount-desktop"
+                  type="number"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              {editCurrency === "USD" && (
+                <>
+                  {editConversionType === "auto" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Kurs Realtime</Label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={fetchExchangeRate}
+                          disabled={loadingRate}
+                        >
+                          <RefreshCw className={`size-4 ${loadingRate ? 'animate-spin' : ''}`} />
+                        </Button>
+                      </div>
+                      <Input
+                        value={editExchangeRate ? formatCurrency(editExchangeRate) : "Memuat..."}
+                        disabled
+                      />
+                    </div>
+                  )}
+
+                  {editConversionType === "manual" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="editManualRate-desktop">Kurs Manual (1 USD = ... IDR)</Label>
+                      <Input
+                        id="editManualRate-desktop"
+                        type="number"
+                        value={editManualRate}
+                        onChange={(e) => setEditManualRate(e.target.value)}
+                        placeholder="Contoh: 15000"
+                      />
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-accent rounded-md">
+                    <div className="flex items-center gap-2 text-sm">
+                      <DollarSign className="size-4" />
+                      <div>
+                        <p className="text-sm text-muted-foreground">Nilai Konversi:</p>
+                        <p className="text-green-600">{formatCurrency(calculateIDR())}</p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="editDate-desktop">Tanggal</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="editDate-desktop"
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left",
+                        !editDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 size-4" />
+                      {editDate ? format(new Date(editDate), "PPP") : <span>Pilih tanggal</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={editDate ? new Date(editDate) : undefined}
+                      onSelect={(date) => setEditDate(date ? date.toISOString().split('T')[0] : '')}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="editDeduction-desktop" className="flex items-center gap-2">
+                    <Minus className="size-3 text-red-600" />
+                    Potongan Individual (Opsional)
+                  </Label>
+                </div>
+                <Input
+                  id="editDeduction-desktop"
+                  type="number"
+                  value={editDeduction}
+                  onChange={(e) => setEditDeduction(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              {(Number(editDeduction) || 0) > 0 && (
+                <div className="p-3 bg-accent rounded-md space-y-2">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Nilai Bersih (Net):</p>
+                    <p className="text-green-600">{formatCurrency(calculateIDR() - (Number(editDeduction) || 0))}</p>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Kotor: {formatCurrency(calculateIDR())}
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingIncome(null)}>
+                <X className="size-4 mr-2" />
+                Batal
+              </Button>
+              <Button onClick={handleSaveEdit}>
+                <Check className="size-4 mr-2" />
+                Simpan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

@@ -4,7 +4,7 @@ import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
 import { ArrowDownToLine } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { useIsMobile } from "./ui/use-mobile";
 
 interface BudgetFormProps {
@@ -126,22 +126,19 @@ export function BudgetForm({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
-        >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>Budget Bulanan</SheetTitle>
-            <SheetDescription>
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent className="h-[75vh] flex flex-col rounded-t-2xl p-0">
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>Budget Bulanan</DrawerTitle>
+            <DrawerDescription>
               Atur budget awal, carryover, dan catatan untuk bulan ini
-            </SheetDescription>
-          </SheetHeader>
+            </DrawerDescription>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4">
             {formContent}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

@@ -151,3 +151,11 @@ export const DEBOUNCE = {
   INPUT: 500,
   RESIZE: 200,
 } as const;
+
+// Dialog Priority Levels (for mobile gesture support)
+export const DialogPriority = {
+  LOW: 1,        // Sheets, drawers
+  MEDIUM: 5,     // Main dialogs (expense, income, wishlist, transfer, manage pockets)
+  HIGH: 10,      // Nested dialogs (confirmations, grouping)
+  CRITICAL: 20   // Error dialogs, alerts
+} as const;

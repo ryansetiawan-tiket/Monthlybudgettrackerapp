@@ -3,7 +3,7 @@ import { Button } from "./ui/button";
 import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings, Calendar, BarChart3 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { WishlistSimulation } from "./WishlistSimulation";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
@@ -335,7 +335,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
             {[1, 2].map(i => (
               <div key={i} className="border rounded-lg p-4 space-y-3 animate-pulse">
                 <div className="h-6 bg-gray-200 rounded w-1/2"></div>
-                <div className="h-8 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-8 bg-[rgb(0,0,0)] rounded w-3/4"></div>
                 <div className="space-y-1">
                   <div className="h-4 bg-gray-200 rounded"></div>
                   <div className="h-4 bg-gray-200 rounded"></div>
@@ -620,17 +620,16 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
 
       {/* Wishlist Dialog - Responsive */}
       {isMobile ? (
-        <Sheet open={showWishlist} onOpenChange={setShowWishlist}>
-          <SheetContent 
-            side="bottom" 
+        <Drawer open={showWishlist} onOpenChange={setShowWishlist} dismissible={true}>
+          <DrawerContent 
             className="h-[75vh] flex flex-col rounded-t-2xl p-0"
             aria-describedby={undefined}
           >
-            <SheetHeader className="px-4 pt-6 pb-4 border-b">
-              <SheetTitle>
+            <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+              <DrawerTitle>
                 Simulasi Wishlist - {selectedPocket?.name || 'Kantong'}
-              </SheetTitle>
-            </SheetHeader>
+              </DrawerTitle>
+            </DrawerHeader>
             <div className="flex-1 overflow-y-auto px-4 py-4">
               {selectedPocket && (
                 <WishlistSimulation
@@ -641,8 +640,8 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                 />
               )}
             </div>
-          </SheetContent>
-        </Sheet>
+          </DrawerContent>
+        </Drawer>
       ) : (
         <Dialog open={showWishlist} onOpenChange={setShowWishlist}>
           <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
@@ -680,15 +679,14 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
 
       {/* Delete Confirmation Dialog - Responsive */}
       {isMobile ? (
-        <Sheet open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-          <SheetContent 
-            side="bottom" 
-            className="rounded-t-2xl"
+        <Drawer open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm} dismissible={true}>
+          <DrawerContent 
+            className="rounded-t-2xl p-4"
             aria-describedby={undefined}
           >
-            <SheetHeader className="text-left">
-              <SheetTitle>Hapus Kantong?</SheetTitle>
-              <SheetDescription>
+            <DrawerHeader className="text-left px-0">
+              <DrawerTitle>Hapus Kantong?</DrawerTitle>
+              <DrawerDescription>
                 Apakah Anda yakin ingin menghapus kantong "{pocketToDelete?.name}"? 
                 Kantong yang dihapus akan diarsipkan dan tidak dapat digunakan lagi.
                 {balances.get(pocketToDelete?.id || '')?.availableBalance !== 0 && (
@@ -696,8 +694,8 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                     Saldo kantong harus Rp 0 sebelum dihapus.
                   </span>
                 )}
-              </SheetDescription>
-            </SheetHeader>
+              </DrawerDescription>
+            </DrawerHeader>
             <div className="flex gap-2 mt-6">
               <Button 
                 variant="outline" 
@@ -715,8 +713,8 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                 {isDeleting ? 'Menghapus...' : 'Hapus Kantong'}
               </Button>
             </div>
-          </SheetContent>
-        </Sheet>
+          </DrawerContent>
+        </Drawer>
       ) : (
         <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
           <AlertDialogContent className="max-w-xl">

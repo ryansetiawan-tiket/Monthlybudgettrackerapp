@@ -187,3 +187,28 @@
 html {
   font-size: var(--font-size);
 }
+
+/* Mobile Touch Optimization */
+@media (max-width: 768px) {
+  button:not([role="switch"]),
+  [role="button"],
+  a:not([role="switch"]) {
+    min-height: 44px;
+  }
+
+  /* Dialog close button - larger touch target */
+  [data-radix-dialog-close] {
+    padding: 12px;
+  }
+  
+  /* Ensure adequate spacing for touch targets */
+  button + button {
+    margin-left: 8px;
+  }
+  
+  /* Ensure switch stays at proper size */
+  [data-slot="switch"] {
+    min-height: unset !important;
+    height: 1.25rem !important; /* h-5 */
+  }
+}

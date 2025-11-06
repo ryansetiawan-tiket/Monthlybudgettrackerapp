@@ -19,6 +19,7 @@ export interface Expense {
   deduction?: number;
   notes?: string;
   pocketId?: string;
+  groupId?: string;
 }
 
 export interface AdditionalIncome {

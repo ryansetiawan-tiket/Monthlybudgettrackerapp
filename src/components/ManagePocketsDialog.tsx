@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -11,6 +11,8 @@ import { Wallet, Sparkles, Plus, Trash2, Archive, ArchiveRestore, AlertCircle, P
 import { Alert, AlertDescription } from "./ui/alert";
 import { Theme, EmojiClickData } from 'emoji-picker-react';
 import { useIsMobile } from "./ui/use-mobile";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 // Lazy load emoji picker for better performance (~100KB reduction)
 const EmojiPicker = lazy(() => import('emoji-picker-react'));
@@ -80,6 +82,14 @@ export function ManagePocketsDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const isMobile = useIsMobile();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'manage-pockets-dialog'
+  );
 
   // Handle edit pocket from props
   useEffect(() => {
@@ -541,21 +551,20 @@ export function ManagePocketsDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent 
           className="h-[75vh] flex flex-col rounded-t-2xl p-0"
           aria-describedby={undefined}
         >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>{dialogTitle}</SheetTitle>
-            <SheetDescription>{dialogDescription}</SheetDescription>
-          </SheetHeader>
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>{dialogTitle}</DrawerTitle>
+            <DrawerDescription>{dialogDescription}</DrawerDescription>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {content}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

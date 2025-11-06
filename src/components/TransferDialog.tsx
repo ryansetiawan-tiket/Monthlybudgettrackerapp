@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "./ui/drawer";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -13,6 +13,8 @@ import { useState, useEffect } from "react";
 import { cn } from "./ui/utils";
 import { useIsMobile } from "./ui/use-mobile";
 import { formatCurrency } from "../utils/currency";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface Pocket {
   id: string;
@@ -59,6 +61,14 @@ export function TransferDialog({
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'transfer-dialog'
+  );
 
   // Watch for changes in default props and update state when dialog is open
   useEffect(() => {
@@ -293,23 +303,22 @@ export function TransferDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent 
           className="h-[75vh] flex flex-col rounded-t-2xl p-0"
           aria-describedby={undefined}
         >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>Transfer Antar Kantong</SheetTitle>
-          </SheetHeader>
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>Transfer Antar Kantong</DrawerTitle>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4">
             {formContent}
           </div>
           <div className="flex gap-2 p-4 border-t">
             {footerButtons}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

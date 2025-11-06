@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -8,6 +8,8 @@ import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Badge } from "./ui/badge";
 import { useIsMobile } from "./ui/use-mobile";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface WishlistItem {
   id: string;
@@ -56,6 +58,14 @@ export function WishlistDialog({
   });
   const [isSaving, setIsSaving] = useState(false);
   const isMobile = useIsMobile();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'wishlist-dialog'
+  );
 
   // Update form data when item prop changes (for edit mode)
   useEffect(() => {
@@ -220,21 +230,20 @@ export function WishlistDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent 
           className="h-[75vh] flex flex-col rounded-t-2xl p-0"
           aria-describedby={undefined}
         >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>{dialogTitle}</SheetTitle>
-            <SheetDescription>{dialogDescription}</SheetDescription>
-          </SheetHeader>
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>{dialogTitle}</DrawerTitle>
+            <DrawerDescription>{dialogDescription}</DrawerDescription>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {formFields}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 

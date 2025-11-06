@@ -7,6 +7,7 @@ import { AdditionalIncomeList } from "./components/AdditionalIncomeList";
 import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { PocketsSummary } from "./components/PocketsSummary";
+import { FloatingActionButton } from "./components/FloatingActionButton";
 
 // Lazy load heavy dialogs for better initial bundle size (200-300KB reduction)
 const AddExpenseDialog = lazy(() => 
@@ -36,6 +37,8 @@ import { formatCurrency } from "./utils/currency";
 import { useBudgetData } from "./hooks/useBudgetData";
 import { usePockets } from "./hooks/usePockets";
 import { useExcludeState } from "./hooks/useExcludeState";
+import { DialogStackProvider } from "./contexts/DialogStackContext";
+import { useMobileBackButton } from "./hooks/useMobileBackButton";
 
 interface BudgetData {
   initialBudget: number;
@@ -63,6 +66,7 @@ interface Expense {
   conversionType?: string;
   deduction?: number;
   pocketId?: string;
+  groupId?: string;
 }
 
 interface Pocket {
@@ -105,11 +109,9 @@ interface MonthCache {
   previousMonthRemaining: number | null;
 }
 
-export default function App() {
-  // Apply dark mode to the document
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
+function AppContent() {
+  // Setup mobile back button handler (for Capacitor/Android)
+  useMobileBackButton();
 
   // Random funny quote
   const [randomQuote, setRandomQuote] = useState("");
@@ -694,7 +696,7 @@ export default function App() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, budget]);
 
-  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string) => {
+  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => {
     setIsAdding(true);
     try {
       const response = await fetch(
@@ -705,7 +707,7 @@ export default function App() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, amount, date, items, color, pocketId }),
+          body: JSON.stringify({ name, amount, date, items, color, pocketId, groupId }),
         }
       );
 
@@ -714,27 +716,39 @@ export default function App() {
       }
 
       const result = await response.json();
-      const newExpenses = [...expenses, result.data];
-      setExpenses(newExpenses);
       
-      // Update cache
-      updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+      // Use functional update to avoid stale closure issues with multiple rapid calls
+      setExpenses(prev => {
+        const newExpenses = [...prev, result.data];
+        // Update cache with new state
+        updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+        return newExpenses;
+      });
+      
       // Invalidate next month's cache (carryover changes)
       invalidateCache(selectedYear, selectedMonth);
       
-      // Reload pockets to update balances
-      await fetchPockets(selectedYear, selectedMonth);
+      // Only reload pockets and show toast if not silent (for batch operations)
+      if (!silent) {
+        // Reload pockets to update balances
+        await fetchPockets(selectedYear, selectedMonth);
+        
+        // Trigger refresh for PocketsSummary timeline
+        refreshPockets();
+        
+        toast.success("Pengeluaran berhasil ditambahkan");
+      }
       
-      // Trigger refresh for PocketsSummary timeline
-      refreshPockets();
-      
-      toast.success("Pengeluaran berhasil ditambahkan");
+      return result.data; // Return the created expense
     } catch (error) {
-      toast.error("Gagal menambahkan pengeluaran");
+      if (!silent) {
+        toast.error("Gagal menambahkan pengeluaran");
+      }
+      throw error;
     } finally {
       setIsAdding(false);
     }
-  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, expenses, updateCachePartial, invalidateCache, fetchPockets, refreshPockets]);
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, updateCachePartial, invalidateCache, fetchPockets, refreshPockets]);
 
   const handleDeleteExpense = useCallback(async (id: string) => {
     try {
@@ -1146,6 +1160,19 @@ export default function App() {
     });
   }, []);
 
+  // FAB Action Handlers
+  const handleFABAddExpense = useCallback(() => {
+    startTransition(() => setIsExpenseDialogOpen(true));
+  }, []);
+
+  const handleFABAddIncome = useCallback(() => {
+    startTransition(() => setIsIncomeDialogOpen(true));
+  }, []);
+
+  const handleFABToggleSummary = useCallback(() => {
+    handleTogglePockets();
+  }, [handleTogglePockets]);
+
   const handleUpdateGlobalDeduction = useCallback(async (deduction: number) => {
     const newBudget = { ...budget, incomeDeduction: deduction };
     setBudget(newBudget);
@@ -1235,30 +1262,33 @@ export default function App() {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className="min-h-screen bg-background p-4 md:p-6 lg:p-8"
+        className="min-h-screen bg-background pb-4 pt-0 px-4 md:p-6 lg:p-8"
       >
         <div className="max-w-5xl mx-auto space-y-8">
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-center space-y-2 pt-2"
-          >
-            <h1>Budget Tracker</h1>
-            <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
-          </motion.div>
+          {/* Sticky Header for Mobile with Native App Space */}
+          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[30px] pr-[16px] pb-[16px] pl-[16px]">
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="text-center space-y-2 pt-2"
+            >
+              <h1>Budget Tracker</h1>
+              <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
+            </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.15 }}
-          >
-            <MonthSelector
-              selectedMonth={selectedMonth}
-              selectedYear={selectedYear}
-              onMonthChange={handleMonthChange}
-            />
-          </motion.div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.15 }}
+            >
+              <MonthSelector
+                selectedMonth={selectedMonth}
+                selectedYear={selectedYear}
+                onMonthChange={handleMonthChange}
+              />
+            </motion.div>
+          </div>
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -1470,8 +1500,28 @@ export default function App() {
           </motion.div>
         </div>
         
+        {/* Floating Action Button */}
+        <FloatingActionButton
+          onAddExpense={handleFABAddExpense}
+          onAddIncome={handleFABAddIncome}
+          onToggleSummary={handleFABToggleSummary}
+        />
+        
         <Toaster />
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+export default function App() {
+  // Apply dark mode to the document
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  return (
+    <DialogStackProvider>
+      <AppContent />
+    </DialogStackProvider>
   );
 }

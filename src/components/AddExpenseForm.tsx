@@ -14,7 +14,7 @@ import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
 
 interface AddExpenseFormProps {
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string) => void;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onSuccess?: () => void;
@@ -216,16 +216,36 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
 
     if (validEntries.length === 0) return;
 
-    // Submit each entry
-    for (const entry of validEntries) {
-      const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
-      const finalName = entry.name.trim() || formatDateToIndonesian(date);
-      
-      onAddExpense(finalName, finalAmount, date, undefined, undefined, entry.pocketId);
-    }
+    // Generate groupId for multiple entries added together
+    const groupId = validEntries.length > 1 ? crypto.randomUUID() : undefined;
+    const isBatch = validEntries.length > 1;
 
-    if (onSuccess) onSuccess();
-    resetEntries();
+    try {
+      // Submit each entry individually with groupId
+      // Using sequential calls to maintain order and ensure proper state updates
+      for (let i = 0; i < validEntries.length; i++) {
+        const entry = validEntries[i];
+        const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+        const finalName = entry.name.trim() || formatDateToIndonesian(date);
+        const isLast = i === validEntries.length - 1;
+        
+        // Wait for each to complete before moving to next
+        // Use silent mode for batch to avoid multiple toasts, except for the last one
+        await onAddExpense(finalName, finalAmount, date, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch);
+      }
+
+      // Show success toast for batch
+      if (isBatch) {
+        const { toast } = await import("sonner@2.0.3");
+        toast.success(`${validEntries.length} pengeluaran berhasil ditambahkan`);
+      }
+
+      if (onSuccess) onSuccess();
+      resetEntries();
+    } catch (error) {
+      const { toast } = await import("sonner@2.0.3");
+      toast.error("Gagal menambahkan pengeluaran");
+    }
   };
 
   const resetEntries = () => {

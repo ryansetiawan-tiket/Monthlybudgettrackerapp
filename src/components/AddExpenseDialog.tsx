@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AddExpenseForm } from "./AddExpenseForm";
 import { FixedExpenseTemplates, FixedExpenseTemplate } from "./FixedExpenseTemplates";
 import { useIsMobile } from "./ui/use-mobile";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface AddExpenseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string) => void;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onAddTemplate: (name: string, items: Array<{name: string, amount: number}>, color?: string) => void;
@@ -33,6 +35,14 @@ export function AddExpenseDialog({
 }: AddExpenseDialogProps) {
   const [activeTab, setActiveTab] = useState("manual");
   const isMobile = useIsMobile();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'add-expense-dialog'
+  );
 
   const handleManualExpenseSuccess = () => {
     onOpenChange(false);
@@ -69,19 +79,16 @@ export function AddExpenseDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent 
-          side="bottom" 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
-        >
-          <SheetHeader className="px-4 pt-6 pb-4 border-b">
-            <SheetTitle>Tambah Pengeluaran</SheetTitle>
-          </SheetHeader>
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+        <DrawerContent className="h-[75vh] flex flex-col rounded-t-2xl p-0">
+          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+            <DrawerTitle>Tambah Pengeluaran</DrawerTitle>
+          </DrawerHeader>
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {content}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DrawerContent>
+      </Drawer>
     );
   }
 
