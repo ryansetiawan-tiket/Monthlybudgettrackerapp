@@ -1067,7 +1067,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -1111,6 +1111,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
       ...(groupId ? { groupId } : {}),
+      ...(category ? { category } : {}),
       createdAt: new Date().toISOString(),
     };
     
@@ -1141,7 +1142,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
     console.log(`[Add Batch Expenses] Processing ${expenses.length} expenses`);
     
     for (const expense of expenses) {
-      const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = expense;
+      const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = expense;
       
       if (!name || amount === undefined) {
         continue; // Skip invalid entries
@@ -1181,6 +1182,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
         ...(conversionType ? { conversionType } : {}),
         ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
         ...(groupId ? { groupId } : {}),
+        ...(category ? { category } : {}),
         createdAt: currentTime.toISOString(),
       };
       
@@ -1219,7 +1221,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     const key = `expense:${year}-${month}:${id}`;
     const body = await c.req.json();
     
-    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
@@ -1310,6 +1312,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
       ...(finalGroupId ? { groupId: finalGroupId } : {}),
+      ...(category ? { category } : {}),
       createdAt: existingExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -3136,7 +3139,7 @@ function generateWishlistRecommendations(
     const shortage = wishlistTotal - currentBalance;
     recs.push({
       type: 'warning',
-      message: `⚠️ Kurang Rp ${shortage.toLocaleString('id-ID')} untuk beli semua items`,
+      message: `⚠��� Kurang Rp ${shortage.toLocaleString('id-ID')} untuk beli semua items`,
       actionable: true,
       action: {
         type: 'save',

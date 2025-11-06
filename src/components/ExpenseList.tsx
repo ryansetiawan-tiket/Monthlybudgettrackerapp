@@ -21,6 +21,9 @@ import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner@2.0.3";
 import { useIsMobile } from "./ui/use-mobile";
+import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
+import { EXPENSE_CATEGORIES } from "../constants";
+import { BulkEditCategoryDialog } from "./BulkEditCategoryDialog";
 
 interface ExpenseItem {
   name: string;
@@ -42,6 +45,7 @@ interface Expense {
   deduction?: number;
   pocketId?: string;
   groupId?: string;
+  category?: string;
 }
 
 interface ExpenseListProps {
@@ -49,6 +53,7 @@ interface ExpenseListProps {
   onDeleteExpense: (id: string) => void;
   onEditExpense: (id: string, expense: Omit<Expense, 'id'>) => void;
   onBulkDeleteExpenses: (ids: string[]) => Promise<void>;
+  onBulkUpdateCategory?: (ids: string[], category: string) => Promise<void>;
   excludedExpenseIds?: Set<string>;
   onExcludedIdsChange?: (ids: Set<string>) => void;
   onMoveToIncome?: (expense: Expense) => void;
@@ -57,7 +62,7 @@ interface ExpenseListProps {
   pockets?: Array<{id: string; name: string}>;
 }
 
-function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
+function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, onBulkUpdateCategory, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
   const isMobile = useIsMobile();
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -75,7 +80,8 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
     conversionType: undefined,
     deduction: undefined,
     pocketId: undefined,
-    groupId: undefined
+    groupId: undefined,
+    category: undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -95,6 +101,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
   const [itemAmountInputs, setItemAmountInputs] = useState<{ [index: number]: string }>({});
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkEditCategoryDialog, setShowBulkEditCategoryDialog] = useState(false);
   
   // Exclude from calculation states - use prop or default to empty Set
   const excludedExpenseIds = excludedExpenseIdsProp || new Set<string>();
@@ -443,6 +450,26 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       setIsBulkDeleting(false);
     }
   }, [selectedExpenseIds, onBulkDeleteExpenses]);
+
+  const handleBulkEditCategory = useCallback(() => {
+    if (selectedExpenseIds.size === 0) return;
+    setShowBulkEditCategoryDialog(true);
+  }, [selectedExpenseIds.size]);
+
+  const handleConfirmBulkEditCategory = useCallback(async (ids: string[], category: string) => {
+    if (!onBulkUpdateCategory) return;
+    
+    try {
+      await onBulkUpdateCategory(ids, category);
+      
+      setSelectedExpenseIds(new Set());
+      setIsBulkSelectMode(false);
+      setShowBulkEditCategoryDialog(false);
+    } catch (error) {
+      // Error already handled in dialog with toast
+      console.error("Bulk category update failed:", error);
+    }
+  }, [onBulkUpdateCategory]);
 
   // Auto-exit bulk mode when expenses change (e.g., month change)
   useEffect(() => {
@@ -859,6 +886,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       )}
                       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                         <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                          {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
                           {expense.name}
                         </p>
                         {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -930,6 +958,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       />
                     )}
                     <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
+                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1051,6 +1080,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col gap-0.5">
                     <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1134,7 +1164,10 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
               )}
               <div>
                 <div className="flex items-center gap-2">
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>{expense.name}</p>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                    {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
+                    {expense.name}
+                  </p>
                   {expense.pocketId && getPocketName(expense.pocketId) && (
                     <Badge variant="secondary" className="text-xs">
                       {getPocketName(expense.pocketId)}
@@ -1244,7 +1277,10 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   >
                     {formatDateShort(expense.date)}
                   </span>
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>
+                    {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category)}</span>}
+                    {expense.name}
+                  </p>
                   {expense.pocketId && getPocketName(expense.pocketId) && (
                     <Badge variant="secondary" className="text-xs">
                       {getPocketName(expense.pocketId)}
@@ -1361,12 +1397,10 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>{expense.name}</p>
-                {expense.pocketId && getPocketName(expense.pocketId) && (
-                  <Badge variant="secondary" className="text-xs">
-                    {getPocketName(expense.pocketId)}
-                  </Badge>
-                )}
+                <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>
+                  {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category)}</span>}
+                  {expense.name}
+                </p>
               </div>
               {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
                 <div className={`flex items-center gap-2 text-sm text-green-600 ${isExcluded ? 'line-through' : ''}`}>
@@ -1384,7 +1418,17 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                 </div>
               )}
-              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>{formatDateShort(expense.date)}</p>
+              <div className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} flex items-center gap-1.5`}>
+                <span>{formatDateShort(expense.date)}</span>
+                {expense.pocketId && getPocketName(expense.pocketId) && (
+                  <>
+                    <span className="text-muted-foreground">•</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {getPocketName(expense.pocketId)}
+                    </Badge>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center justify-between sm:justify-end gap-1">
@@ -1511,6 +1555,17 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                {onBulkUpdateCategory && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleBulkEditCategory}
+                    disabled={selectedExpenseIds.size === 0}
+                    className="h-8 text-xs"
+                  >
+                    Edit Kategori
+                  </Button>
+                )}
                 <Button
                   variant="destructive"
                   size="sm"
@@ -1700,6 +1755,23 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 </select>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-category">Kategori (Opsional)</Label>
+              <select
+                id="edit-category"
+                value={editingExpense.category || ''}
+                onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Pilih Kategori</option>
+                {EXPENSE_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.emoji} {cat.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             
             {editingExpense.items && editingExpense.items.length > 0 && (
               <div className="space-y-2">
@@ -1815,6 +1887,23 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   </select>
                 </div>
               )}
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-category-desktop">Kategori (Opsional)</Label>
+                <select
+                  id="edit-category-desktop"
+                  value={editingExpense.category || ''}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Pilih Kategori</option>
+                  {EXPENSE_CATEGORIES.map(cat => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.emoji} {cat.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               
               {editingExpense.items && editingExpense.items.length > 0 && (
                 <div className="space-y-2">
@@ -1950,6 +2039,17 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk Edit Category Dialog */}
+      {onBulkUpdateCategory && (
+        <BulkEditCategoryDialog
+          open={showBulkEditCategoryDialog}
+          onOpenChange={setShowBulkEditCategoryDialog}
+          selectedExpenseIds={Array.from(selectedExpenseIds)}
+          expenses={expenses}
+          onUpdate={handleConfirmBulkEditCategory}
+        />
+      )}
     </Card>
   );
 }

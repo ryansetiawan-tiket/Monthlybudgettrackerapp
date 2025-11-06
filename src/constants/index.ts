@@ -126,16 +126,19 @@ export const TOAST_MESSAGES = {
   },
 } as const;
 
-// Expense Categories
-export const DEFAULT_CATEGORIES = [
-  { name: 'Makanan', icon: '🍔', color: '#f59e0b' },
-  { name: 'Transport', icon: '🚗', color: '#3b82f6' },
-  { name: 'Belanja', icon: '🛒', color: '#ec4899' },
-  { name: 'Hiburan', icon: '🎮', color: '#8b5cf6' },
-  { name: 'Tagihan', icon: '📄', color: '#ef4444' },
-  { name: 'Kesehatan', icon: '💊', color: '#10b981' },
-  { name: 'Pendidikan', icon: '📚', color: '#06b6d4' },
-  { name: 'Lainnya', icon: '📦', color: '#6b7280' },
+// Expense Categories System
+export const EXPENSE_CATEGORIES = [
+  { value: 'food', label: 'Makanan', emoji: '🍔' },
+  { value: 'transport', label: 'Transportasi', emoji: '🚗' },
+  { value: 'savings', label: 'Tabungan', emoji: '💰' },
+  { value: 'bills', label: 'Tagihan', emoji: '📄' },
+  { value: 'health', label: 'Kesehatan', emoji: '🏥' },
+  { value: 'loan', label: 'Pinjaman', emoji: '💳' },
+  { value: 'family', label: 'Keluarga', emoji: '👨‍👩‍👧‍👦' },
+  { value: 'entertainment', label: 'Hiburan', emoji: '🎬' },
+  { value: 'installment', label: 'Cicilan', emoji: '💸' },
+  { value: 'shopping', label: 'Belanja', emoji: '🛒' },
+  { value: 'other', label: 'Lainnya', emoji: '📦' }
 ] as const;
 
 // Animation Durations (in ms)

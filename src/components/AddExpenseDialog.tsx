@@ -7,11 +7,12 @@ import { FixedExpenseTemplates, FixedExpenseTemplate } from "./FixedExpenseTempl
 import { useIsMobile } from "./ui/use-mobile";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
+import type { ExpenseCategory } from "../types";
 
 interface AddExpenseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => Promise<any>;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: ExpenseCategory) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onAddTemplate: (name: string, items: Array<{name: string, amount: number}>, color?: string) => void;

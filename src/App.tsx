@@ -70,6 +70,7 @@ interface Expense {
   deduction?: number;
   pocketId?: string;
   groupId?: string;
+  category?: string;
 }
 
 interface Pocket {
@@ -731,7 +732,7 @@ function AppContent() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, budget]);
 
-  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => {
+  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string) => {
     setIsAdding(true);
     try {
       const response = await fetch(
@@ -742,7 +743,7 @@ function AppContent() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, amount, date, items, color, pocketId, groupId }),
+          body: JSON.stringify({ name, amount, date, items, color, pocketId, groupId, category }),
         }
       );
 
@@ -861,6 +862,70 @@ function AppContent() {
       toast.error("Gagal mengupdate pengeluaran");
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, expenses, updateCachePartial, invalidateCache, fetchPockets, refreshPockets]);
+
+  const handleBulkUpdateCategory = useCallback(async (ids: string[], category: string) => {
+    console.log('[Bulk Update] Starting bulk category update for', ids.length, 'expenses');
+    console.log('[Bulk Update] Category:', category);
+    console.log('[Bulk Update] Base URL:', baseUrl);
+    
+    try {
+      // Update each expense with the new category
+      const updatePromises = ids.map(async (id, index) => {
+        const expense = expenses.find(e => e.id === id);
+        if (!expense) {
+          console.log(`[Bulk Update] Expense ${id} not found, skipping`);
+          return null;
+        }
+        
+        // Exclude 'id' from the expense object (API expects Omit<Expense, 'id'>)
+        const { id: _id, ...expenseWithoutId } = expense;
+        const updatedExpense = {
+          ...expenseWithoutId,
+          category
+        };
+        
+        const url = `${baseUrl}/expenses/${selectedYear}/${selectedMonth}/${id}`;
+        console.log(`[Bulk Update ${index + 1}/${ids.length}] Updating expense ${id} at ${url}`);
+        
+        const response = await fetch(url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify(updatedExpense),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[Bulk Update] Failed to update expense ${id}:`, response.status, errorText);
+          throw new Error(`Failed to update expense ${id}: ${response.status} ${errorText}`);
+        }
+
+        console.log(`[Bulk Update ${index + 1}/${ids.length}] Successfully updated expense ${id}`);
+        return response;
+      });
+
+      await Promise.all(updatePromises);
+
+      // Update local state
+      const newExpenses = expenses.map(expense =>
+        ids.includes(expense.id) ? { ...expense, category } : expense
+      );
+      setExpenses(newExpenses);
+      
+      // Update cache
+      updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+      // Invalidate next month's cache
+      invalidateCache(selectedYear, selectedMonth);
+      
+      console.log('[Bulk Update] All updates completed successfully');
+      toast.success(`${ids.length} pengeluaran berhasil diupdate`);
+    } catch (error) {
+      console.error("[Bulk Update] Error bulk updating categories:", error);
+      throw error; // Re-throw to be caught by the dialog
+    }
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, expenses, updateCachePartial, invalidateCache]);
 
   const handleAddIncome = useCallback(async (income: {
     name: string;
@@ -1313,7 +1378,7 @@ function AppContent() {
 
         <div className="max-w-5xl mx-auto space-y-8">
           {/* Sticky Header for Mobile with Native App Space */}
-          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[36px] pr-[16px] pb-[16px] pl-[16px]">
+          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[40px] pr-[16px] pb-[16px] pl-[16px]">
             <motion.div 
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1510,6 +1575,7 @@ function AppContent() {
                   onDeleteExpense={handleDeleteExpense} 
                   onEditExpense={handleEditExpense}
                   onBulkDeleteExpenses={handleBulkDeleteExpenses}
+                  onBulkUpdateCategory={handleBulkUpdateCategory}
                   excludedExpenseIds={excludedExpenseIds}
                   onExcludedIdsChange={updateExcludedExpenseIds}
                   onMoveToIncome={handleMoveExpenseToIncome}

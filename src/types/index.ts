@@ -7,12 +7,26 @@ export interface Budget {
   carryover: number;
 }
 
+// Expense Categories
+export type ExpenseCategory = 
+  | 'food'
+  | 'transport'
+  | 'savings'
+  | 'bills'
+  | 'health'
+  | 'loan'
+  | 'family'
+  | 'entertainment'
+  | 'installment'
+  | 'shopping'
+  | 'other';
+
 export interface Expense {
   id: string;
   name: string;
   amount: number;
   date: string;
-  category?: string;
+  category?: ExpenseCategory; // Updated to use ExpenseCategory type
   categoryColor?: string;
   categoryIcon?: string;
   fromIncome?: boolean;

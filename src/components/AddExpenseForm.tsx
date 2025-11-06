@@ -12,9 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import type { FixedExpenseTemplate } from "./FixedExpenseTemplates";
 import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
+import { EXPENSE_CATEGORIES } from "../constants";
+import type { ExpenseCategory } from "../types";
 
 interface AddExpenseFormProps {
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean) => Promise<any>;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: ExpenseCategory) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onSuccess?: () => void;
@@ -28,6 +30,7 @@ interface ExpenseEntry {
   amount: string;
   calculatedAmount: number | null;
   pocketId: string;
+  category?: ExpenseCategory;
 }
 
 export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances }: AddExpenseFormProps) {
@@ -206,7 +209,8 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     // Send as single expense with items and color
     if (totalAmount > 0) {
       const items = templateItems.map(item => ({ name: item.name, amount: item.amount }));
-      onAddExpense(templateName, totalAmount, fullTimestamp, items, templateColor, pocketId);
+      // Templates don't have category for now (future enhancement)
+      onAddExpense(templateName, totalAmount, fullTimestamp, items, templateColor, pocketId, undefined, false, undefined);
       if (onSuccess) onSuccess();
     }
 
@@ -252,7 +256,7 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
         
         // Wait for each to complete before moving to next
         // Use silent mode for batch to avoid multiple toasts, except for the last one
-        await onAddExpense(finalName, finalAmount, fullTimestamp, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch);
+        await onAddExpense(finalName, finalAmount, fullTimestamp, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch, entry.category);
       }
 
       // Show success toast for batch
@@ -430,6 +434,25 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
                   onKeyPress={(e) => handleKeyPress(e, entry.id)}
                   placeholder="Kosongkan untuk otomatis menggunakan tanggal"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Kategori (Opsional)</Label>
+                <Select 
+                  value={entry.category || ""} 
+                  onValueChange={(value) => updateEntryField(entry.id, 'category', value as ExpenseCategory)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih kategori" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPENSE_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat.value} value={cat.value}>
+                        {cat.emoji} {cat.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">

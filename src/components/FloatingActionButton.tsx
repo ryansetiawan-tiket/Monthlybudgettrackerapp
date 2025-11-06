@@ -34,6 +34,7 @@ function useScrollDetection() {
 
   useEffect(() => {
     const handleScroll = () => {
+      // INSTANT hide saat scroll - no delay!
       setIsScrolling(true);
       
       // Clear previous timeout
@@ -41,22 +42,20 @@ function useScrollDetection() {
         clearTimeout(idleTimeoutRef.current);
       }
       
-      // Set idle timeout - DELAY kemunculan FAB (800ms mobile, 1200ms desktop)
+      // Set idle timeout - DELAY kemunculan FAB (500ms mobile, 1200ms desktop)
       const isMobile = window.innerWidth < 768;
-      const idleDelay = isMobile ? 800 : 1200; // Increased delay!
+      const idleDelay = isMobile ? 500 : 1200;
       
       idleTimeoutRef.current = setTimeout(() => {
         setIsScrolling(false);
       }, idleDelay);
     };
     
-    // Debounced scroll handler (16ms = 60fps)
-    const debouncedScroll = debounce(handleScroll, 16);
-    
-    window.addEventListener('scroll', debouncedScroll, { passive: true });
+    // Direct scroll handler - no debounce for instant hiding!
+    window.addEventListener('scroll', handleScroll, { passive: true });
     
     return () => {
-      window.removeEventListener('scroll', debouncedScroll);
+      window.removeEventListener('scroll', handleScroll);
       if (idleTimeoutRef.current) {
         clearTimeout(idleTimeoutRef.current);
       }
@@ -84,6 +83,7 @@ export function FloatingActionButton({
     return 'right';
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [snapBackX, setSnapBackX] = useState(0);
   const isScrolling = useScrollDetection();
   
   // Save FAB side preference to localStorage whenever it changes
@@ -131,50 +131,52 @@ export function FloatingActionButton({
     setIsDragging(true);
   }, []);
 
-  // Handle drag - LIVE magnetic snap while dragging
+  // Handle drag - no auto-switching, just follow drag
   const handleDrag = useCallback((event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-    const windowWidth = window.innerWidth;
-    const fabWidth = 64;
-    const margin = 24;
-    
-    // Calculate current FAB center X position
-    let fabCenterX;
-    if (fabSide === 'right') {
-      fabCenterX = windowWidth - margin - fabWidth / 2 + info.offset.x;
-    } else {
-      fabCenterX = margin + fabWidth / 2 + info.offset.x;
-    }
-    
-    // Magnetic snap threshold: 40% for left, 60% for right (with hysteresis)
-    const leftThreshold = windowWidth * 0.4;
-    const rightThreshold = windowWidth * 0.6;
-    
-    // Snap logic with hysteresis to prevent jittering
-    if (fabSide === 'right' && fabCenterX < leftThreshold) {
-      // Snap to left when dragged significantly to left
-      setFabSide('left');
-    } else if (fabSide === 'left' && fabCenterX > rightThreshold) {
-      // Snap to right when dragged significantly to right
-      setFabSide('right');
-    }
-  }, [fabSide]);
+    // No auto-switching during drag - just let it move
+  }, []);
 
-  // Handle drag end - save vertical position, reset horizontal
+  // Handle drag end - smart snap: 10-50% snap back, >50% switch side
   const handleDragEnd = useCallback((event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const windowWidth = window.innerWidth;
+    const dragDistanceX = Math.abs(info.offset.x);
+    const dragPercentage = (dragDistanceX / windowWidth) * 100;
+    
+    // Determine if should switch side based on drag distance and direction
+    let shouldSwitch = false;
+    
+    if (fabSide === 'right' && info.offset.x < 0) {
+      // Dragging from right to left
+      shouldSwitch = dragPercentage > 50;
+    } else if (fabSide === 'left' && info.offset.x > 0) {
+      // Dragging from left to right
+      shouldSwitch = dragPercentage > 50;
+    }
+    
+    // Switch side if threshold met
+    if (shouldSwitch) {
+      setFabSide(fabSide === 'right' ? 'left' : 'right');
+      setSnapBackX(0);
+    } else {
+      // Snap back to original position with current drag offset negated
+      setSnapBackX(-info.offset.x);
+    }
+    
     // Calculate new vertical position
     const newY = dragPosition.y + info.offset.y;
     
     // Constrain vertical position: keep at least 100px from top, and original position at bottom
     const constrainedY = Math.max(Math.min(newY, 0), -400);
     
-    // Reset X position to 0 (FAB snaps to edge)
+    // Update position
     setDragPosition({ x: 0, y: constrainedY });
     
-    // Reset dragging flag after a short delay to prevent click
+    // Reset dragging flag and snap-back after animation
     setTimeout(() => {
       setIsDragging(false);
-    }, 100);
-  }, [dragPosition]);
+      setSnapBackX(0);
+    }, 300);
+  }, [dragPosition, fabSide]);
 
   // Action buttons configuration - CLOCK POSITIONS (Dynamic based on FAB side)
   // RIGHT side: Jam 12, 10.30, 9 (left positions)
@@ -258,7 +260,7 @@ export function FloatingActionButton({
           ? (fabSide === 'right' ? 'calc(100% - 8px)' : 'calc(-100% + 8px)')
           : shouldHide === 'auto' 
           ? (fabSide === 'right' ? '90%' : '-90%')
-          : 0,
+          : snapBackX,
           
         opacity: shouldHide === 'manual' 
           ? 0.5 
@@ -271,9 +273,14 @@ export function FloatingActionButton({
       transition={{ 
         left: { duration: 0.3, ease: 'easeOut' },
         right: { duration: 0.3, ease: 'easeOut' },
-        x: { duration: 0.2, ease: 'easeOut' },
+        x: { 
+          duration: shouldHide ? 0.15 : 0.3, // Faster hiding, slower snap-back
+          ease: shouldHide ? 'easeIn' : [0.4, 0, 0.2, 1]
+        },
         y: { duration: 0.2, ease: 'easeOut' },
-        opacity: { duration: 0.2 }
+        opacity: { 
+          duration: shouldHide ? 0.1 : 0.2 // Faster fade on hide
+        }
       }}
       style={{ touchAction: 'none' }}
     >

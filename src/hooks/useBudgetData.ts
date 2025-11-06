@@ -23,6 +23,7 @@ interface Expense {
   conversionType?: string;
   deduction?: number;
   pocketId?: string;
+  category?: string;
 }
 
 interface AdditionalIncome {

@@ -167,3 +167,49 @@ export const projectFutureBalance = (
 ): number => {
   return currentBalance - (averageDailySpending * days);
 };
+
+/**
+ * Get category emoji with fallback
+ */
+export const getCategoryEmoji = (category?: string): string => {
+  if (!category) return '📦';
+  
+  const categoryMap: Record<string, string> = {
+    food: '🍔',
+    transport: '🚗',
+    savings: '💰',
+    bills: '📄',
+    health: '🏥',
+    loan: '💳',
+    family: '👨‍👩‍👧‍👦',
+    entertainment: '🎬',
+    installment: '💸',
+    shopping: '🛒',
+    other: '📦'
+  };
+  
+  return categoryMap[category] || '📦';
+};
+
+/**
+ * Get category label with fallback
+ */
+export const getCategoryLabel = (category?: string): string => {
+  if (!category) return 'Lainnya';
+  
+  const labelMap: Record<string, string> = {
+    food: 'Makanan',
+    transport: 'Transportasi',
+    savings: 'Tabungan',
+    bills: 'Tagihan',
+    health: 'Kesehatan',
+    loan: 'Pinjaman',
+    family: 'Keluarga',
+    entertainment: 'Hiburan',
+    installment: 'Cicilan',
+    shopping: 'Belanja',
+    other: 'Lainnya'
+  };
+  
+  return labelMap[category] || 'Lainnya';
+};
