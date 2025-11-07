@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -7,6 +7,9 @@ import { Progress } from "./ui/progress";
 import { Separator } from "./ui/separator";
 import { ScrollArea } from "./ui/scroll-area";
 import { Skeleton } from "./ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "./ui/tooltip";
+import { useIsMobile } from "./ui/use-mobile";
 import { 
   Target, 
   TrendingUp, 
@@ -19,7 +22,8 @@ import {
   Edit,
   Trash2,
   ExternalLink,
-  DollarSign
+  DollarSign,
+  X as XIcon
 } from "lucide-react";
 
 // Lazy load wishlist dialog for better performance
@@ -31,6 +35,7 @@ import { toast } from "sonner@2.0.3";
 import { useConfirm } from "../hooks/useConfirm";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
 import { formatCurrency } from "../utils/currency";
+import { getRandomWishlistQuote } from "../data/wishlist-quotes";
 
 interface WishlistItem {
   id: string;
@@ -96,6 +101,190 @@ const PRIORITY_LABELS = {
   3: { label: '🔵 Low', color: 'secondary' as const }
 };
 
+// QuickInsightButton Component - Interactive Affordable Items Filter
+interface QuickInsightButtonProps {
+  affordableCount: number;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function QuickInsightButton({ affordableCount, isActive, onClick }: QuickInsightButtonProps) {
+  if (affordableCount === 0) return null;
+
+  return (
+    <Button
+      variant={isActive ? "default" : "outline"}
+      className="w-full justify-start gap-2 transition-all"
+      onClick={onClick}
+    >
+      <span className="text-base">💡</span>
+      <span className="flex-1 text-left text-sm">
+        Tampilkan {affordableCount} item yang bisa dibeli sekarang
+      </span>
+      {isActive && (
+        <XIcon className="size-4 ml-auto" />
+      )}
+    </Button>
+  );
+}
+
+// PriorityTabs Component - Interactive Priority Filter
+interface PriorityTabsProps {
+  items: WishlistItem[];
+  activeTab: string;
+  onTabChange: (value: string) => void;
+}
+
+function PriorityTabs({ items, activeTab, onTabChange }: PriorityTabsProps) {
+  const counts = useMemo(() => ({
+    all: items.length,
+    high: items.filter(i => i.priority === 1).length,
+    medium: items.filter(i => i.priority === 2).length,
+    low: items.filter(i => i.priority === 3).length,
+  }), [items]);
+
+  return (
+    <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
+      {/* ✅ MOBILE: Horizontal scrollable | DESKTOP: Grid */}
+      <div className="overflow-x-auto overflow-y-hidden -mx-1 px-1 sm:overflow-visible">
+        <TabsList className="inline-flex sm:grid sm:w-full sm:grid-cols-4 h-auto min-w-full sm:min-w-0">
+          <TabsTrigger value="all" className="text-xs sm:text-sm shrink-0">
+            Semua ({counts.all})
+          </TabsTrigger>
+          <TabsTrigger value="high" className="text-xs sm:text-sm shrink-0">
+            <span className="mr-1">⭐</span>
+            High ({counts.high})
+          </TabsTrigger>
+          <TabsTrigger value="medium" className="text-xs sm:text-sm shrink-0">
+            <span className="mr-1">🟡</span>
+            Med ({counts.medium})
+          </TabsTrigger>
+          <TabsTrigger value="low" className="text-xs sm:text-sm shrink-0">
+            <span className="mr-1">🔵</span>
+            Low ({counts.low})
+          </TabsTrigger>
+        </TabsList>
+      </div>
+    </Tabs>
+  );
+}
+
+// SmartCTA Component - Always-visible CTA with contextual state
+interface SmartCTAProps {
+  itemId: string;
+  itemName: string;
+  isAffordable: boolean;
+  shortage: number;
+  onPurchase: (itemId: string) => void;
+}
+
+function SmartCTA({ itemId, itemName, isAffordable, shortage, onPurchase }: SmartCTAProps) {
+  const tooltipContent = isAffordable
+    ? `Klik untuk membeli ${itemName}`
+    : `Kurang Rp ${shortage.toLocaleString('id-ID')} untuk membeli item ini`;
+
+  return (
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="w-full">
+            <Button
+              onClick={() => onPurchase(itemId)}
+              disabled={!isAffordable}
+              variant={isAffordable ? "default" : "secondary"}
+              className="w-full"
+            >
+              <ShoppingCart className="h-4 w-4 mr-2" />
+              {isAffordable ? 'Beli Sekarang' : 'Belum Bisa Dibeli'}
+            </Button>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <p className="text-sm">{tooltipContent}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// SummaryHeader Component - Centralized Budget Summary with Cycling Quotes! 🎭
+interface SummaryHeaderProps {
+  currentBalance: number;
+  totalWishlist: number;
+  itemCount: number;
+  quoteKey: number; // ✨ NEW: Triggers quote change when drawer reopens
+}
+
+function SummaryHeader({ currentBalance, totalWishlist, itemCount, quoteKey }: SummaryHeaderProps) {
+  const shortage = totalWishlist - currentBalance;
+  const isAffordable = currentBalance >= totalWishlist;
+  const progressPercentage = useMemo(() => {
+    if (totalWishlist === 0) return 0;
+    return Math.min(Math.round((currentBalance / totalWishlist) * 100), 100);
+  }, [currentBalance, totalWishlist]);
+
+  // ✨ NEW: Random quote based on state - changes when quoteKey changes!
+  const randomQuote = useMemo(() => {
+    if (isAffordable) {
+      return getRandomWishlistQuote('affordable');
+    } else {
+      return getRandomWishlistQuote('shortage', shortage);
+    }
+  }, [isAffordable, shortage, quoteKey]); // quoteKey dependency causes re-calculation
+
+  return (
+    <div className="bg-[rgba(38,38,38,0.3)] border border-neutral-800 rounded-lg p-4 space-y-3">
+      {/* Balance Overview */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        <div className="flex flex-col">
+          <span className="text-neutral-400 text-xs mb-1">💰 Saldo Kantong</span>
+          <span className="text-neutral-50 text-base">
+            Rp {currentBalance.toLocaleString('id-ID')}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-neutral-400 text-xs mb-1">🎯 Total Wishlist</span>
+          <span className="text-neutral-50 text-base">
+            Rp {totalWishlist.toLocaleString('id-ID')}
+            <span className="text-neutral-500 text-sm ml-1">({itemCount} items)</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Status Message - SUPER KOCAK TONE dengan Cycling Quotes! 🎉✨ */}
+      {isAffordable ? (
+        <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+          <span className="text-lg">🎉</span>
+          <div className="flex-1">
+            <p className="text-sm text-emerald-400">
+              {randomQuote}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg mt-[0px] mr-[0px] mb-[12px] ml-[0px] pt-[12px] pr-[12px] pb-[2px] pl-[12px]">
+          <span className="text-lg">😅</span>
+          <div className="flex-1">
+            <p className="text-sm text-amber-400">
+              {randomQuote}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Progress Bar */}
+      <div className="space-y-1.5">
+        <Progress value={progressPercentage} className="h-2" />
+        <div className="flex items-center justify-between text-xs text-neutral-500">
+          <span>Rp {currentBalance.toLocaleString('id-ID')}</span>
+          <span className="font-semibold">{progressPercentage}%</span>
+          <span>Rp {totalWishlist.toLocaleString('id-ID')}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey }: WishlistSimulationProps) {
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const { confirm, ConfirmDialog } = useConfirm();
@@ -103,9 +292,41 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   const [isLoading, setIsLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<WishlistItem | null>(null);
+  
+  // ✨ NEW: Quote cycling - increment setiap drawer dibuka!
+  const [quoteKey, setQuoteKey] = useState(0);
+  
+  // ✅ NEW: Filter state
+  const [filterState, setFilterState] = useState<{
+    type: 'all' | 'affordable' | 'priority';
+    value?: 1 | 2 | 3;
+  }>({ type: 'all' });
+  
+  // ✅ NEW: Platform detection & swipe state
+  const isMobile = useIsMobile();
+  const [swipedItemId, setSwipedItemId] = useState<string | null>(null);
 
   const [year, month] = monthKey.split('-');
   const baseUrl = getBaseUrl(projectId);
+  
+  // ✅ NEW: Calculate affordable items
+  const affordableItems = useMemo(() => {
+    if (!simulation) return [];
+    return wishlist.filter(item => simulation.affordableNow.includes(item.id));
+  }, [wishlist, simulation]);
+  
+  // ✅ NEW: Apply filters to get filtered items
+  const filteredItems = useMemo(() => {
+    if (filterState.type === 'affordable') {
+      return affordableItems;
+    }
+    
+    if (filterState.type === 'priority' && filterState.value) {
+      return wishlist.filter(item => item.priority === filterState.value);
+    }
+    
+    return wishlist;
+  }, [wishlist, affordableItems, filterState]);
 
   const fetchWishlist = async () => {
     try {
@@ -155,6 +376,39 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   useEffect(() => {
     loadData();
   }, [pocketId, monthKey]);
+
+  // ✨ NEW: Increment quoteKey setiap drawer dibuka untuk cycling quotes!
+  useEffect(() => {
+    setQuoteKey(prev => prev + 1);
+  }, []); // Empty deps = runs on mount only
+
+  // ✅ NEW: Filter handlers
+  const toggleAffordableFilter = () => {
+    if (filterState.type === 'affordable') {
+      setFilterState({ type: 'all' });
+    } else {
+      setFilterState({ type: 'affordable' });
+    }
+  };
+
+  const handlePriorityFilter = (value: string) => {
+    if (value === 'all') {
+      setFilterState({ type: 'all' });
+    } else {
+      const priorityValue = value === 'high' ? 1 : value === 'medium' ? 2 : 3;
+      setFilterState({ 
+        type: 'priority', 
+        value: priorityValue as 1 | 2 | 3
+      });
+    }
+  };
+
+  // ✅ NEW: Mobile swipe handlers
+  const handleSwipeLeft = (itemId: string) => {
+    if (isMobile) {
+      setSwipedItemId(swipedItemId === itemId ? null : itemId);
+    }
+  };
 
   const handleAddItem = async (itemData: Partial<WishlistItem>) => {
     try {
@@ -269,51 +523,40 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   if (isLoading) {
     return (
       <div className="space-y-6">
-        {/* Summary Section */}
-        <div className="space-y-6">
-          {/* Saldo & Total Wishlist */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-6 w-32" />
+        {/* Summary Header Skeleton */}
+        <div className="bg-[rgba(38,38,38,0.3)] border border-neutral-800 rounded-lg p-4 space-y-3">
+          {/* Balance Overview Skeleton */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col space-y-1">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-5 w-32" />
             </div>
-            <div className="space-y-1">
-              <Skeleton className="h-3 w-28" />
-              <Skeleton className="h-6 w-32" />
-              <Skeleton className="h-3 w-16" />
+            <div className="flex flex-col space-y-1">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-5 w-36" />
             </div>
           </div>
           
-          {/* Remaining Balance Skeleton */}
-          <div className="p-4 rounded-lg bg-muted/50 space-y-1">
-            <Skeleton className="h-3 w-48" />
-            <Skeleton className="h-7 w-40" />
+          {/* Status Message Skeleton */}
+          <div className="p-3 rounded-lg bg-muted/20">
+            <Skeleton className="h-4 w-full max-w-xs" />
           </div>
 
-          {/* Health Bar Skeleton */}
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-10" />
-              </div>
-              <Skeleton className="h-4 w-28" />
+          {/* Progress Bar Skeleton */}
+          <div className="space-y-1.5">
+            <Skeleton className="h-2 w-full rounded-full" />
+            <div className="flex justify-between">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-3 w-10" />
+              <Skeleton className="h-3 w-20" />
             </div>
-            <Skeleton className="h-3 w-full" />
           </div>
+        </div>
 
-          <Separator />
-
-          {/* Priority Breakdown Skeleton */}
-          <div className="grid grid-cols-3 gap-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="space-y-1">
-                <Skeleton className="h-3 w-16" />
-                <Skeleton className="h-5 w-14" />
-                <Skeleton className="h-3 w-24" />
-              </div>
-            ))}
-          </div>
+        {/* Filters Skeleton */}
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
         </div>
 
         <Separator />
@@ -359,141 +602,37 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
     );
   }
 
-  // Health bar: menunjukkan sisa saldo setelah wishlist (100% = sehat, 0% = habis)
-  const remainingBalance = simulation 
-    ? simulation.currentBalance - simulation.wishlist.total
-    : 0;
-  
-  const healthPercentage = simulation && simulation.currentBalance > 0
-    ? Math.max(0, Math.min(100, (remainingBalance / simulation.currentBalance) * 100))
-    : 0;
-  
-  // Tentukan warna berdasarkan health level
-  const getHealthColor = () => {
-    if (remainingBalance < 0) return 'text-red-600';
-    if (healthPercentage > 50) return 'text-green-600';
-    if (healthPercentage > 20) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
   return (
     <>
       <div className="space-y-6">
-          {/* Summary */}
+          {/* ✅ NEW: Centralized Summary Header with Cycling Quotes! */}
           {simulation && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Saldo Saat Ini</p>
-                  <p className="text-xl font-semibold break-words">
-                    Rp {simulation.currentBalance.toLocaleString('id-ID')}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Wishlist</p>
-                  <p className="text-xl font-semibold break-words">
-                    Rp {simulation.wishlist.total.toLocaleString('id-ID')}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {simulation.wishlist.count} items
-                  </p>
-                </div>
-              </div>
-              
-              {/* Sisa Saldo Setelah Wishlist */}
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Sisa Saldo Setelah Wishlist</p>
-                <p className={`text-2xl font-semibold break-words ${getHealthColor()}`}>
-                  {remainingBalance < 0 ? '-' : ''}Rp {Math.abs(remainingBalance).toLocaleString('id-ID')}
-                </p>
-                {remainingBalance < 0 && (
-                  <p className="text-red-500 mt-2 text-sm">
-                    ⚠️ Kurang Rp {Math.abs(remainingBalance).toLocaleString('id-ID')} untuk beli semua items
-                  </p>
-                )}
-              </div>
+            <SummaryHeader
+              currentBalance={simulation.currentBalance}
+              totalWishlist={simulation.wishlist.total}
+              itemCount={simulation.wishlist.count}
+              quoteKey={quoteKey}
+            />
+          )}
 
-              {/* Health Bar - Sisa Saldo */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <span>Health Saldo</span>
-                    <span className={getHealthColor()}>
-                      {healthPercentage.toFixed(0)}%
-                    </span>
-                  </div>
-                  <span className={`text-sm ${getHealthColor()}`}>
-                    {healthPercentage > 50 && '💚 Saldo sehat'}
-                    {healthPercentage > 20 && healthPercentage <= 50 && '⚠️ Saldo menipis'}
-                    {healthPercentage <= 20 && healthPercentage > 0 && '🔴 Saldo kritis!'}
-                    {healthPercentage === 0 && '❌ Saldo tidak cukup!'}
-                  </span>
-                </div>
-                <div 
-                  style={{
-                    '--progress-color': healthPercentage > 50 
-                      ? 'rgb(22 163 74)' // green-600
-                      : healthPercentage > 20 
-                      ? 'rgb(202 138 4)' // yellow-600
-                      : 'rgb(220 38 38)' // red-600
-                  } as React.CSSProperties}
-                >
-                  <Progress 
-                    value={healthPercentage} 
-                    className="h-3 [&>*]:bg-[var(--progress-color)]" 
-                  />
-                </div>
-              </div>
+          {/* ✅ NEW: Interactive Filters */}
+          {simulation && wishlist.length > 0 && (
+            <div className="space-y-3">
+              <QuickInsightButton
+                affordableCount={affordableItems.length}
+                isActive={filterState.type === 'affordable'}
+                onClick={toggleAffordableFilter}
+              />
 
-              {/* Recommendations - Only show affordable/purchase related */}
-              {simulation.recommendations.length > 0 && (
-                <div className="space-y-3">
-                  {simulation.recommendations
-                    .filter(rec => rec.message.toLowerCase().includes('bisa beli') || 
-                                   rec.message.toLowerCase().includes('affordable') ||
-                                   rec.message.toLowerCase().includes('mampu'))
-                    .map((rec, idx) => (
-                      <Alert key={idx} variant="default">
-                        <AlertDescription>
-                          {rec.message}
-                        </AlertDescription>
-                      </Alert>
-                    ))}
-                </div>
-              )}
-
-              <Separator />
-
-              {/* Priority Breakdown */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">⭐ High</p>
-                  <p className="text-lg font-semibold">
-                    {simulation.wishlist.byPriority.high.count} items
-                  </p>
-                  <p className="text-xs text-muted-foreground break-words">
-                    Rp {simulation.wishlist.byPriority.high.total.toLocaleString('id-ID')}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">🟡 Medium</p>
-                  <p className="text-lg font-semibold">
-                    {simulation.wishlist.byPriority.medium.count} items
-                  </p>
-                  <p className="text-xs text-muted-foreground break-words">
-                    Rp {simulation.wishlist.byPriority.medium.total.toLocaleString('id-ID')}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">🔵 Low</p>
-                  <p className="text-lg font-semibold">
-                    {simulation.wishlist.byPriority.low.count} items
-                  </p>
-                  <p className="text-xs text-muted-foreground break-words">
-                    Rp {simulation.wishlist.byPriority.low.total.toLocaleString('id-ID')}
-                  </p>
-                </div>
-              </div>
+              <PriorityTabs
+                items={wishlist}
+                activeTab={
+                  filterState.type === 'priority' 
+                    ? (filterState.value === 1 ? 'high' : filterState.value === 2 ? 'medium' : 'low')
+                    : 'all'
+                }
+                onTabChange={handlePriorityFilter}
+              />
             </div>
           )}
 
@@ -501,36 +640,112 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
 
           {/* Wishlist Items */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Items Wishlist</h3>
-              <Button onClick={() => setShowDialog(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Tambah Item
-              </Button>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl font-semibold flex-1 min-w-0">
+                Items Wishlist
+                {filterState.type !== 'all' && (
+                  <span className="text-sm text-muted-foreground ml-2">
+                    ({filteredItems.length} dari {wishlist.length})
+                  </span>
+                )}
+              </h3>
+              {/* ✅ MOBILE: Icon only | DESKTOP: Full button */}
+              {isMobile ? (
+                <Button 
+                  onClick={() => setShowDialog(true)}
+                  aria-label="Tambah item wishlist baru"
+                  size="icon"
+                  className="min-w-[44px] min-h-[44px] shrink-0"
+                >
+                  <Plus className="h-5 w-5" aria-hidden="true" />
+                </Button>
+              ) : (
+                <Button 
+                  onClick={() => setShowDialog(true)}
+                  aria-label="Tambah item wishlist baru"
+                  className="min-h-[44px] shrink-0"
+                >
+                  <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
+                  Tambah Item
+                </Button>
+              )}
             </div>
             
             {wishlist.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Target className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                <p className="text-lg mb-4">Belum ada item di wishlist</p>
+              <div 
+                className="text-center py-12"
+                role="status"
+                aria-live="polite"
+              >
+                <Target className="h-16 w-16 mx-auto mb-4 opacity-30 text-muted-foreground" aria-hidden="true" />
+                <p className="text-lg mb-2 text-foreground font-semibold">✨ Wishlist Kosong Nih!</p>
+                <p className="text-sm mb-4 text-amber-400/90 px-4 max-w-md mx-auto">
+                  {getRandomWishlistQuote('empty')}
+                </p>
                 <Button 
                   variant="outline" 
                   onClick={() => setShowDialog(true)}
+                  aria-label="Tambah item wishlist pertama"
+                  className="min-h-[44px]"
                 >
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
                   Tambah Item Pertama
                 </Button>
               </div>
+            ) : filteredItems.length === 0 ? (
+              <div 
+                className="text-center py-12 text-muted-foreground"
+                role="status"
+                aria-live="polite"
+              >
+                <AlertTriangle className="h-16 w-16 mx-auto mb-4 opacity-30" aria-hidden="true" />
+                <p className="text-lg mb-2">Tidak ada item yang sesuai filter</p>
+                <p className="text-sm mb-4 text-muted-foreground/80">
+                  {filterState.type === 'affordable' 
+                    ? 'Tidak ada item yang bisa dibeli dengan saldo saat ini. Coba tambahkan saldo atau pilih item dengan harga lebih rendah.'
+                    : `Tidak ada item dengan prioritas ${
+                        filterState.value === 1 ? 'High' : 
+                        filterState.value === 2 ? 'Medium' : 'Low'
+                      }. Coba pilih prioritas lain.`
+                  }
+                </p>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setFilterState({ type: 'all' })}
+                  aria-label="Reset filter dan tampilkan semua item"
+                  className="min-h-[44px]"
+                >
+                  Reset Filter
+                </Button>
+              </div>
             ) : (
-              <ScrollArea className="h-[500px]">
-                <div className="space-y-4 pr-4">
-                  {wishlist.sort((a, b) => a.priority - b.priority).map((item) => {
+              <>
+                {/* ✅ MOBILE: Hint untuk tap card */}
+                {isMobile && filteredItems.length > 0 && !swipedItemId && (
+                  <div className="bg-muted/30 border border-muted rounded-lg p-3 mb-4">
+                    <p className="text-xs text-muted-foreground text-center">
+                      💡 <span className="font-medium">Tips:</span> Tap kartu item untuk menampilkan tombol Edit & Hapus
+                    </p>
+                  </div>
+                )}
+                
+                <ScrollArea className="h-[500px]">
+                  <div className="space-y-4 pr-4">
+                    {filteredItems.sort((a, b) => a.priority - b.priority).map((item) => {
                     const scenario = simulation?.scenarios.find(s => s.itemId === item.id);
                     const isAffordable = simulation?.affordableNow.includes(item.id);
                     const isSoon = simulation?.affordableSoon.find(s => s.itemId === item.id);
 
                     return (
-                      <Card key={item.id}>
+                      <Card 
+                        key={item.id}
+                        className={`
+                          ${!isMobile ? "group" : "relative overflow-hidden cursor-pointer"}
+                          ${isMobile && swipedItemId === item.id ? "ring-2 ring-primary/50 bg-primary/5" : ""}
+                          transition-all duration-200
+                        `}
+                        onClick={() => isMobile && handleSwipeLeft(item.id)}
+                      >
                         <CardContent className="pt-6">
                           <div className="space-y-4">
                             <div className="flex items-start justify-between gap-4">
@@ -551,93 +766,101 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
                                 )}
                               </div>
 
-                              <div className="flex gap-1 shrink-0">
+                              {/* ✅ DESKTOP: Hover to show actions | MOBILE: Tap to toggle */}
+                              <div className={`flex gap-1 shrink-0 ${
+                                isMobile 
+                                  ? (swipedItemId === item.id ? 'opacity-100' : 'opacity-0')
+                                  : 'opacity-0 group-hover:opacity-100'
+                              } transition-opacity duration-200 motion-reduce:transition-none`}>
                                 {item.url && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={() => window.open(item.url, '_blank')}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(item.url, '_blank');
+                                    }}
+                                    aria-label={`Buka link untuk ${item.name}`}
                                     title="Buka Link"
+                                    className="min-w-[44px] min-h-[44px]"
                                   >
-                                    <ExternalLink className="h-5 w-5" />
+                                    <ExternalLink className="h-5 w-5" aria-hidden="true" />
                                   </Button>
                                 )}
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setEditingItem(item);
                                     setShowDialog(true);
                                   }}
+                                  aria-label={`Edit ${item.name}`}
+                                  className="min-w-[44px] min-h-[44px]"
                                 >
-                                  <Edit className="h-5 w-5" />
+                                  <Edit className="h-5 w-5" aria-hidden="true" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => handleDeleteItem(item.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteItem(item.id);
+                                  }}
+                                  aria-label={`Hapus ${item.name} dari wishlist`}
+                                  className="min-w-[44px] min-h-[44px]"
                                 >
-                                  <Trash2 className="h-5 w-5" />
+                                  <Trash2 className="h-5 w-5" aria-hidden="true" />
                                 </Button>
                               </div>
                             </div>
 
-                            {/* Affordability Status */}
+                            {/* ✅ DECLUTTERED: Only show contextual info */}
                             {scenario && (
                               <div className="space-y-3">
-                                {isAffordable ? (
-                                  <div className="flex items-center gap-2 text-green-600">
-                                    <CheckCircle2 className="h-5 w-5" />
-                                    <span>Bisa dibeli sekarang</span>
-                                  </div>
-                                ) : isSoon ? (
-                                  <div className="flex items-center gap-2 text-yellow-500 font-medium">
+                                {/* Only show "Soon" indicator (yellow) - most actionable */}
+                                {isSoon && !isAffordable && (
+                                  <div className="flex items-center gap-2 text-amber-500">
                                     <Clock className="h-5 w-5" />
-                                    <span>
+                                    <span className="text-sm">
                                       Kurang Rp {isSoon.amountNeeded.toLocaleString('id-ID')} 
-                                      (~{isSoon.estimatedWeeks} minggu)
+                                      <span className="text-muted-foreground ml-1">
+                                        (~{isSoon.estimatedWeeks} minggu)
+                                      </span>
                                     </span>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2 text-red-600">
-                                    <XCircle className="h-5 w-5" />
-                                    <span>Belum bisa dibeli</span>
                                   </div>
                                 )}
 
-                                {scenario.warning && (
+                                {/* ✅ POLISHED: Only show warning for AFFORDABLE items (critical balance warnings) */}
+                                {/* Don't show for unaffordable items - redundant with shortage info above */}
+                                {scenario.warning && isAffordable && (
                                   <Alert variant="destructive" className="py-3">
                                     <AlertDescription className="!text-[rgb(239,68,68)] font-semibold">
                                       {scenario.warning}
                                     </AlertDescription>
                                   </Alert>
                                 )}
-
-                                {scenario.status !== 'insufficient' && (
-                                  <div className="text-sm text-muted-foreground">
-                                    Sisa saldo: Rp {scenario.balanceAfter.toLocaleString('id-ID')}
-                                  </div>
-                                )}
                               </div>
                             )}
 
-                            {/* Actions */}
-                            {isAffordable && (
-                              <Button 
-                                onClick={() => handlePurchaseItem(item.id)}
-                                className="w-full"
-                              >
-                                <ShoppingCart className="h-4 w-4 mr-2" />
-                                Beli Sekarang
-                              </Button>
+                            {/* ✅ NEW: SmartCTA - Always visible, contextual state */}
+                            {scenario && (
+                              <SmartCTA
+                                itemId={item.id}
+                                itemName={item.name}
+                                isAffordable={!!isAffordable}
+                                shortage={isSoon?.amountNeeded || Math.max(0, item.amount - (simulation?.currentBalance || 0))}
+                                onPurchase={handlePurchaseItem}
+                              />
                             )}
                           </div>
                         </CardContent>
                       </Card>
                     );
-                  })}
-                </div>
-              </ScrollArea>
+                    })}
+                  </div>
+                </ScrollArea>
+              </>
             )}
           </div>
       </div>

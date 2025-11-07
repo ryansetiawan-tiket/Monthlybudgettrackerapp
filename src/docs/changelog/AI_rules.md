@@ -158,6 +158,67 @@ Avoid Over-Engineering
  Prefer simple, maintainable solutions over complex abstractions.
 
 
+🎯 ExpenseList-Specific Rules
+CRITICAL: Multiple Rendering Paths
+ ExpenseList.tsx has 2 rendering paths and 2 expense types:
+ - **Path 1**: Responsive Layout (mobile/desktop variants)
+ - **Path 2**: Tab View (`renderExpenseItem` function)
+ - **Type 1**: Template expense (with multiple items, collapsible)
+ - **Type 2**: Single expense (without items)
+ 
+ **RULE**: When making ANY change to expense items UI/UX, you MUST update ALL 6 sections:
+ 1. Template expense - Responsive Mobile
+ 2. Template expense - Responsive Desktop
+ 3. Single expense - Responsive Mobile
+ 4. Single expense - Responsive Desktop
+ 5. Template expense - Tab View (renderExpenseItem)
+ 6. Single expense - Tab View (renderExpenseItem)
+ 
+ **DO NOT** differentiate or separate changes between template and single expenses.
+ **ALWAYS** apply the same change to BOTH types in BOTH paths.
+ 
+ Failure to do this will result in UI inconsistencies where some expense entries look different from others.
+
+
+🎨 UI Consistency Rules
+More Button Pattern (Edit/Delete Actions)
+ ALL entry types (expenses, incomes, etc.) MUST use the "More" dropdown button pattern for Edit and Delete actions:
+ 
+ **Pattern**:
+ ```tsx
+ <DropdownMenu>
+   <DropdownMenuTrigger asChild>
+     <Button variant="ghost" size="icon" className="h-8 w-8" title="More">
+       <MoreVertical className="size-3.5 text-muted-foreground" />
+     </Button>
+   </DropdownMenuTrigger>
+   <DropdownMenuContent align="end">
+     <DropdownMenuItem onClick={handleEdit}>
+       <Pencil className="size-3.5 mr-2" />
+       Edit
+     </DropdownMenuItem>
+     <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+       <Trash2 className="size-3.5 mr-2" />
+       Hapus
+     </DropdownMenuItem>
+   </DropdownMenuContent>
+ </DropdownMenu>
+ ```
+ 
+ **DO NOT**:
+ - ❌ Create separate Edit and Delete buttons
+ - ❌ Use different button patterns for different entry types
+ - ❌ Change the icon sizes or spacing
+ - ❌ Remove the "More" dropdown pattern
+ 
+ **Applies to**:
+ - Expense entries (single & template)
+ - Income entries (additional income)
+ - Any future entry types
+ 
+ **Exception**: Exclude/Include (Eye/EyeOff) button remains separate as it's a toggle, not a destructive action.
+
+
 ✅ Summary
 This rule set ensures that AI-assisted tools produce reliable, consistent, and linter-compliant code — with zero speculation, minimal noise, and maximum maintainability.
 

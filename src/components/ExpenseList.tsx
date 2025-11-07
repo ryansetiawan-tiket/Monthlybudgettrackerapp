@@ -1,7 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3 } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3, Settings, MoreVertical, ListChecks } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -103,7 +109,7 @@ interface ExpenseListProps {
   onExcludedIncomeIdsChange?: (ids: Set<string>) => void;
   isDeductionExcluded?: boolean;
   onDeductionExcludedChange?: (excluded: boolean) => void;
-  onMoveToExpense?: (income: AdditionalIncome) => void;
+  onOpenCategoryManager?: () => void; // Phase 8: Open CategoryManager
 }
 
 function ExpenseListComponent({ 
@@ -130,7 +136,7 @@ function ExpenseListComponent({
   onExcludedIncomeIdsChange,
   isDeductionExcluded = false,
   onDeductionExcludedChange,
-  onMoveToExpense
+  onOpenCategoryManager
 }: ExpenseListProps) {
   const isMobile = useIsMobile();
   
@@ -172,6 +178,7 @@ function ExpenseListComponent({
   // Bulk select states
   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
+  const [selectedIncomeIds, setSelectedIncomeIds] = useState<Set<string>>(new Set());
   
   // Track input strings for item amounts (for math expression support)
   const [itemAmountInputs, setItemAmountInputs] = useState<{ [index: number]: string }>({});
@@ -333,6 +340,8 @@ function ExpenseListComponent({
 
   // Handle category click from pie chart
   const handleCategoryClick = (category: import('../types').ExpenseCategory) => {
+    console.log('handleCategoryClick called for category:', category);
+    
     setActiveCategoryFilter(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
@@ -346,8 +355,20 @@ function ExpenseListComponent({
       return newSet;
     });
     
-    // Close the drawer/dialog after clicking
+    // ✅ CRITICAL FIX: Force close the drawer/dialog after clicking
+    console.log('Closing category drawer...');
     setShowCategoryDrawer(false);
+    
+    // ✅ Additional safety: Force cleanup after short delay
+    setTimeout(() => {
+      const overlays = document.querySelectorAll('[data-vaul-overlay]');
+      console.log('Found stuck overlays:', overlays.length);
+      overlays.forEach(overlay => {
+        overlay.remove();
+      });
+      // Restore pointer events
+      document.body.style.pointerEvents = '';
+    }, 200);
   };
 
   const formatCurrency = (amount: number) => {
@@ -400,6 +421,80 @@ function ExpenseListComponent({
     today.setHours(0, 0, 0, 0);
     date.setHours(0, 0, 0, 0);
     return date < today;
+  };
+
+  // Bulk selection handlers (supports both expense and income tabs)
+  const handleActivateBulkMode = useCallback(() => {
+    setIsBulkSelectMode(true);
+    if (activeTab === 'expense') {
+      setSelectedExpenseIds(new Set());
+    } else {
+      setSelectedIncomeIds(new Set());
+    }
+  }, [activeTab]);
+
+  const handleCancelBulkMode = useCallback(() => {
+    setIsBulkSelectMode(false);
+    setSelectedExpenseIds(new Set());
+    setSelectedIncomeIds(new Set());
+  }, []);
+
+  const handleToggleSelectExpense = (id: string) => {
+    setSelectedExpenseIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const handleToggleSelectIncome = (id: string) => {
+    setSelectedIncomeIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAllExpenses = () => {
+    const visibleExpenses = activeTab === 'expense' ? filteredExpenses : [];
+    if (selectedExpenseIds.size === visibleExpenses.length) {
+      setSelectedExpenseIds(new Set());
+    } else {
+      setSelectedExpenseIds(new Set(visibleExpenses.map(exp => exp.id)));
+    }
+  };
+
+  const handleSelectAllIncomes = () => {
+    if (selectedIncomeIds.size === incomes.length) {
+      setSelectedIncomeIds(new Set());
+    } else {
+      setSelectedIncomeIds(new Set(incomes.map(inc => inc.id)));
+    }
+  };
+
+  const handleBulkDeleteIncomes = async () => {
+    if (selectedIncomeIds.size === 0 || !onDeleteIncome) return;
+
+    const confirmed = window.confirm(
+      `Anda yakin ingin menghapus ${selectedIncomeIds.size} pemasukan yang dipilih? Tindakan ini tidak dapat dibatalkan.`
+    );
+
+    if (confirmed) {
+      selectedIncomeIds.forEach(id => {
+        onDeleteIncome(id);
+      });
+      toast.success(`${selectedIncomeIds.size} pemasukan berhasil dihapus`);
+      setIsBulkSelectMode(false);
+      setSelectedIncomeIds(new Set());
+    }
   };
 
   // Toggle exclude expense from calculation
@@ -543,16 +638,7 @@ function ExpenseListComponent({
            sortedAndFilteredExpenses.every(exp => selectedExpenseIds.has(exp.id));
   }, [selectedExpenseIds, sortedAndFilteredExpenses]);
 
-  // Bulk select handlers with useCallback for performance
-  const handleActivateBulkMode = useCallback(() => {
-    setIsBulkSelectMode(true);
-    setSelectedExpenseIds(new Set());
-  }, []);
-
-  const handleCancelBulkMode = useCallback(() => {
-    setIsBulkSelectMode(false);
-    setSelectedExpenseIds(new Set());
-  }, []);
+  // Bulk select handlers with useCallback for performance - REMOVED (using handlers defined above that support both expense and income)
 
   const handleToggleExpense = useCallback((id: string) => {
     setSelectedExpenseIds(prev => {
@@ -652,11 +738,40 @@ function ExpenseListComponent({
       if (e.key === 'Escape' && isBulkSelectMode) {
         handleCancelBulkMode();
       }
+      // ✅ FIX: Close category drawer dengan Escape key
+      if (e.key === 'Escape' && showCategoryDrawer) {
+        setShowCategoryDrawer(false);
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isBulkSelectMode, handleCancelBulkMode]);
+  }, [isBulkSelectMode, handleCancelBulkMode, showCategoryDrawer]);
+
+  // ✅ CRITICAL FIX: Cleanup stuck drawer overlays when state changes
+  useEffect(() => {
+    if (!showCategoryDrawer) {
+      // Force cleanup any stuck Vaul drawer overlays
+      const cleanupOverlays = () => {
+        const overlays = document.querySelectorAll('[data-vaul-overlay], [data-vaul-drawer-wrapper]');
+        overlays.forEach(overlay => {
+          const style = window.getComputedStyle(overlay);
+          // Only remove if drawer is truly closed (opacity 0 or display none)
+          if (style.opacity === '0' || style.display === 'none') {
+            overlay.remove();
+          }
+        });
+        
+        // Also remove any stuck pointer-events blocking
+        document.body.style.pointerEvents = '';
+        document.documentElement.style.pointerEvents = '';
+      };
+      
+      // Run cleanup after animation completes
+      const timer = setTimeout(cleanupOverlays, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [showCategoryDrawer]);
 
   const handleEditExpense = (id: string) => {
     const expense = expenses.find(e => e.id === id);
@@ -1081,14 +1196,34 @@ function ExpenseListComponent({
                               <Eye className="size-3.5 text-muted-foreground" />
                             )}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleEditExpense(expense.id)}
-                          >
-                            <Pencil className="size-3.5 text-muted-foreground" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="size-3.5 text-muted-foreground" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                                <Pencil className="size-3.5 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => {
+                                  setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                                  setDeleteConfirmOpen(true);
+                                }}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="size-3.5 mr-2" />
+                                Hapus
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </>
                       )}
                     </div>
@@ -1150,25 +1285,34 @@ function ExpenseListComponent({
                             <Eye className="size-3 text-muted-foreground" />
                           )}
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => handleEditExpense(expense.id)}
-                        >
-                          <Pencil className="size-3 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => {
-                            setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                            setDeleteConfirmOpen(true);
-                          }}
-                        >
-                          <Trash2 className="size-3 text-destructive" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreVertical className="size-3 text-muted-foreground" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                              <Pencil className="size-3 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              onClick={() => {
+                                setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                                setDeleteConfirmOpen(true);
+                              }}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="size-3 mr-2" />
+                              Hapus
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </>
                     )}
                   </div>
@@ -1287,14 +1431,34 @@ function ExpenseListComponent({
                         <Eye className="size-3.5 text-muted-foreground" />
                       )}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleEditExpense(expense.id)}
-                    >
-                      <Pencil className="size-3.5 text-muted-foreground" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreVertical className="size-3.5 text-muted-foreground" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                          <Pencil className="size-3.5 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => {
+                            setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                            setDeleteConfirmOpen(true);
+                          }}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="size-3.5 mr-2" />
+                          Hapus
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </>
                 )}
               </div>
@@ -1370,25 +1534,34 @@ function ExpenseListComponent({
                       <Eye className="size-3 text-muted-foreground" />
                     )}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => handleEditExpense(expense.id)}
-                  >
-                    <Pencil className="size-3 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                      setDeleteConfirmOpen(true);
-                    }}
-                  >
-                    <Trash2 className="size-3 text-destructive" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="size-3 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                        <Pencil className="size-3 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => {
+                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                          setDeleteConfirmOpen(true);
+                        }}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="size-3 mr-2" />
+                        Hapus
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               )}
             </div>
@@ -1470,27 +1643,35 @@ function ExpenseListComponent({
                           <Eye className="size-3.5 text-muted-foreground" />
                         )}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => handleEditExpense(expense.id)}
-                        title="Edit"
-                      >
-                        <Pencil className="size-3.5 text-muted-foreground" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                          setDeleteConfirmOpen(true);
-                        }}
-                        title="Hapus"
-                      >
-                        <Trash2 className="size-3.5 text-destructive" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.stopPropagation()}
+                            title="More"
+                          >
+                            <MoreVertical className="size-3.5 text-muted-foreground" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                            <Pencil className="size-3.5 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => {
+                              setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                              setDeleteConfirmOpen(true);
+                            }}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="size-3.5 mr-2" />
+                            Hapus
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   )}
                 </div>
@@ -1538,6 +1719,7 @@ function ExpenseListComponent({
               <Checkbox
                 checked={selectedExpenseIds.has(expense.id)}
                 onCheckedChange={() => handleToggleExpense(expense.id)}
+                className="border-neutral-400 data-[state=checked]:border-primary"
               />
             )}
             {isToday(expense.date) && (
@@ -1609,27 +1791,35 @@ function ExpenseListComponent({
                     <Eye className="size-3.5 text-muted-foreground" />
                   )}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => handleEditExpense(expense.id)}
-                  title="Edit"
-                >
-                  <Pencil className="size-3.5 text-muted-foreground" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => {
-                    setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                    setDeleteConfirmOpen(true);
-                  }}
-                  title="Hapus"
-                >
-                  <Trash2 className="size-3.5 text-destructive" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => e.stopPropagation()}
+                      title="More"
+                    >
+                      <MoreVertical className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                      <Pencil className="size-3.5 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => {
+                        setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                        setDeleteConfirmOpen(true);
+                      }}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="size-3.5 mr-2" />
+                      Hapus
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
           </div>
@@ -1645,46 +1835,51 @@ function ExpenseListComponent({
           {!isBulkSelectMode ? (
             // Normal Mode
             <>
-              {/* Row 1: Title + Category Button */}
+              {/* Row 1: Title + Category Menu */}
               <div className="flex items-center justify-between">
                 <span className="text-base sm:text-lg">Daftar Transaksi</span>
-                <button
-                  onClick={() => setShowCategoryDrawer(true)}
-                  className="h-8 w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
-                  title="Lihat Breakdown Kategori"
-                >
-                  <span className="text-sm">📊</span>
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className="h-8 w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
+                      title="Menu Kategori"
+                    >
+                      <span className="text-sm">📊</span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      onClick={() => setShowCategoryDrawer(true)}
+                      className="cursor-pointer"
+                    >
+                      <BarChart3 className="size-4 mr-2" />
+                      <span>Lihat Breakdown</span>
+                    </DropdownMenuItem>
+                    {onOpenCategoryManager && (
+                      <DropdownMenuItem
+                        onClick={() => onOpenCategoryManager()}
+                        className="cursor-pointer"
+                      >
+                        <Settings className="size-4 mr-2" />
+                        <span>Kelola Kategori</span>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
               
-              {/* Row 2: Action Buttons + Total */}
+              {/* Row 2: Action Buttons + Lock + Total */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {onToggleExcludeLock && (
-                    <button
-                      onClick={() => onToggleExcludeLock()}
-                      className="h-11 px-3 flex items-center gap-1.5 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
-                      title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
-                    >
-                      {isExcludeLocked ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
-                      <span className="text-xs text-neutral-50">Lock</span>
-                    </button>
-                  )}
                   {expenses.length > 0 && (
                     <button
                       onClick={handleActivateBulkMode}
-                      className="h-11 px-3 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-xs text-neutral-50"
+                      className="h-11 w-11 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
+                      aria-label="Pilih"
                     >
-                      Pilih
+                      <ListChecks className="h-5 w-5" />
                     </button>
                   )}
-                  <button
-                    onClick={toggleSortOrder}
-                    className="h-11 w-8 flex items-center justify-center rounded-lg hover:bg-[rgba(38,38,38,0.3)] transition-colors"
-                    title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
-                  >
-                    <ArrowUpDown className="size-4" />
-                  </button>
                   {activeTab === 'expense' && excludedExpenseIds.size > 0 && (
                     <Badge variant="secondary" className="text-xs h-6 px-1.5">
                       {excludedExpenseIds.size} excluded
@@ -1696,16 +1891,31 @@ function ExpenseListComponent({
                     </Badge>
                   )}
                 </div>
-                <span className={`text-sm whitespace-nowrap ${
-                  activeTab === 'expense' 
-                    ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
-                    : 'text-green-600'
-                }`}>
-                  {activeTab === 'expense' 
-                    ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
-                    : `+${formatCurrency(totalNetIncome)}`
-                  }
-                </span>
+                <div className="flex items-center gap-2">
+                  {onToggleExcludeLock && (
+                    <button
+                      onClick={() => onToggleExcludeLock()}
+                      className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors ${
+                        isExcludeLocked 
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                          : 'bg-[rgba(38,38,38,0.3)] hover:bg-[rgba(38,38,38,0.5)] text-neutral-400'
+                      }`}
+                      title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
+                    >
+                      {isExcludeLocked ? <Lock className="size-4" /> : <Unlock className="size-4" />}
+                    </button>
+                  )}
+                  <span className={`text-sm font-normal whitespace-nowrap ${
+                    activeTab === 'expense' 
+                      ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
+                      : 'text-green-600'
+                  }`}>
+                    {activeTab === 'expense' 
+                      ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
+                      : `+${formatCurrency(totalNetIncome)}`
+                    }
+                  </span>
+                </div>
               </div>
             </>
           ) : (
@@ -1713,17 +1923,19 @@ function ExpenseListComponent({
             <>
               <div className="flex items-center gap-2">
                 <Checkbox
-                  checked={isAllSelected}
-                  onCheckedChange={handleSelectAll}
+                  checked={activeTab === 'expense' ? isAllSelected : (selectedIncomeIds.size === incomes.length && incomes.length > 0)}
+                  onCheckedChange={activeTab === 'expense' ? handleSelectAllExpenses : handleSelectAllIncomes}
+                  className="border-neutral-400 data-[state=checked]:border-primary"
                 />
                 <span className="text-sm">
-                  {selectedExpenseIds.size > 0
-                    ? `${selectedExpenseIds.size} dipilih`
-                    : "Pilih semua"}
+                  {activeTab === 'expense' 
+                    ? (selectedExpenseIds.size > 0 ? `${selectedExpenseIds.size} dipilih` : "Pilih semua")
+                    : (selectedIncomeIds.size > 0 ? `${selectedIncomeIds.size} dipilih` : "Pilih semua")
+                  }
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                {onBulkUpdateCategory && (
+                {activeTab === 'expense' && onBulkUpdateCategory && (
                   <Button
                     variant="default"
                     size="sm"
@@ -1737,11 +1949,11 @@ function ExpenseListComponent({
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={handleBulkDelete}
-                  disabled={selectedExpenseIds.size === 0}
+                  onClick={activeTab === 'expense' ? handleBulkDelete : handleBulkDeleteIncomes}
+                  disabled={activeTab === 'expense' ? selectedExpenseIds.size === 0 : selectedIncomeIds.size === 0}
                   className="h-8 text-xs"
                 >
-                  Hapus ({selectedExpenseIds.size})
+                  Hapus ({activeTab === 'expense' ? selectedExpenseIds.size : selectedIncomeIds.size})
                 </Button>
                 <Button
                   variant="outline"
@@ -1812,39 +2024,50 @@ function ExpenseListComponent({
               </button>
             </div>
             
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#a1a1a1]" />
-              <Input
-                type="text"
-                placeholder="Cari nama, hari, atau tanggal..."
-                value={searchQuery}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                ref={searchInputRef}
-                className="pl-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <div
-                  ref={suggestionsRef}
-                  className="absolute left-0 top-full mt-1 w-full bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#a1a1a1]" />
+                <Input
+                  type="text"
+                  placeholder="Cari nama, hari, atau tanggal..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  ref={searchInputRef}
+                  className="pl-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
+                />
+              </div>
+              {activeTab === 'expense' && (
+                <button
+                  onClick={toggleSortOrder}
+                  className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-[rgba(38,38,38,0.3)] transition-colors flex-shrink-0"
+                  title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
                 >
-                  {suggestions.map((suggestion, index) => (
-                    <div
-                      key={suggestion}
-                      className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
-                        index === selectedSuggestionIndex 
-                          ? 'bg-accent text-accent-foreground' 
-                          : 'hover:bg-accent/50'
-                      }`}
-                      onClick={() => handleSelectSuggestion(suggestion)}
-                      onMouseEnter={() => setSelectedSuggestionIndex(index)}
-                    >
-                      {suggestion}
-                    </div>
-                  ))}
-                </div>
+                  <ArrowUpDown className="size-4" />
+                </button>
               )}
             </div>
+            {showSuggestions && suggestions.length > 0 && (
+              <div
+                ref={suggestionsRef}
+                className="absolute left-0 top-full mt-1 w-full bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
+              >
+                {suggestions.map((suggestion, index) => (
+                  <div
+                    key={suggestion}
+                    className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
+                      index === selectedSuggestionIndex 
+                        ? 'bg-accent text-accent-foreground' 
+                        : 'hover:bg-accent/50'
+                    }`}
+                    onClick={() => handleSelectSuggestion(suggestion)}
+                    onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                  >
+                    {suggestion}
+                  </div>
+                ))}
+              </div>
+            )}
             
             {/* Conditional rendering based on active tab */}
             {activeTab === 'expense' ? (
@@ -1924,12 +2147,33 @@ function ExpenseListComponent({
                   <>
                     {incomes.map((income) => {
                       const isExcluded = excludedIncomeIds.has(income.id);
+                      const isSelected = selectedIncomeIds.has(income.id);
                       return (
                         <div
                           key={income.id}
-                          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                          className={`flex items-start gap-2 p-3 border rounded-lg transition-all ${
+                            isExcluded ? 'opacity-50 bg-muted/30' : ''
+                          } ${
+                            isBulkSelectMode 
+                              ? 'cursor-pointer hover:bg-accent/50' 
+                              : 'hover:bg-accent/50 hover:scale-[1.005]'
+                          } ${
+                            isSelected ? 'bg-accent border-primary' : ''
+                          }`}
+                          onClick={() => isBulkSelectMode && handleToggleSelectIncome(income.id)}
                         >
-                          <div className="flex-1 min-w-0">
+                          {isBulkSelectMode && (
+                            <div className="pt-0.5">
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={() => handleToggleSelectIncome(income.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="border-neutral-400 data-[state=checked]:border-primary"
+                              />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
+                            <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
                               <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
@@ -1951,58 +2195,72 @@ function ExpenseListComponent({
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center justify-between sm:justify-end gap-1">
-                            <div className="text-right">
-                              <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                                {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
-                              </p>
+                          {!isBulkSelectMode && (
+                            <div className="flex items-center justify-between sm:justify-end gap-1">
+                              <div className="text-right">
+                                <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                  {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <Button variant="ghost" size="icon" className="h-8 w-8"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const wasExcluded = excludedIncomeIds.has(income.id);
+                                    const newSet = new Set(excludedIncomeIds);
+                                    if (wasExcluded) {
+                                      newSet.delete(income.id);
+                                      toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
+                                    } else {
+                                      newSet.add(income.id);
+                                      toast.info(`${income.name} dikecualikan dari hitungan`);
+                                    }
+                                    if (onExcludedIncomeIdsChange) onExcludedIncomeIdsChange(newSet);
+                                  }}
+                                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                                >
+                                  {isExcluded ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5 text-muted-foreground" />}
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={(e) => e.stopPropagation()}
+                                      title="More"
+                                    >
+                                      <MoreVertical className="size-3.5 text-muted-foreground" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setEditingIncomeId(income.id);
+                                        // Convert date to YYYY-MM-DD format for input type="date"
+                                        const dateObj = new Date(income.date);
+                                        const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+                                        setEditingIncome({
+                                          ...income,
+                                          date: formattedDate
+                                        });
+                                      }}
+                                    >
+                                      <Pencil className="size-3.5 mr-2" />
+                                      Edit
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => onDeleteIncome?.(income.id)}
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Trash2 className="size-3.5 mr-2" />
+                                      Hapus
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-0.5">
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => {
-                                  const wasExcluded = excludedIncomeIds.has(income.id);
-                                  const newSet = new Set(excludedIncomeIds);
-                                  if (wasExcluded) {
-                                    newSet.delete(income.id);
-                                    toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
-                                  } else {
-                                    newSet.add(income.id);
-                                    toast.info(`${income.name} dikecualikan dari hitungan`);
-                                  }
-                                  if (onExcludedIncomeIdsChange) onExcludedIncomeIdsChange(newSet);
-                                }}
-                                title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                              >
-                                {isExcluded ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5 text-muted-foreground" />}
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => {
-                                  setEditingIncomeId(income.id);
-                                  // Convert date to YYYY-MM-DD format for input type="date"
-                                  const dateObj = new Date(income.date);
-                                  const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
-                                  setEditingIncome({
-                                    ...income,
-                                    date: formattedDate
-                                  });
-                                }}
-                                title="Edit pemasukan"
-                              >
-                                <Pencil className="size-3.5 text-muted-foreground" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => onMoveToExpense?.(income)}
-                                title="Pindahkan ke pengeluaran"
-                              >
-                                <ArrowLeft className="size-3.5 text-blue-500" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => onDeleteIncome?.(income.id)}
-                                title="Hapus"
-                              >
-                                <Trash2 className="size-3.5 text-destructive" />
-                              </Button>
-                            </div>
+                          )}
                           </div>
                         </div>
                       );
@@ -2451,38 +2709,64 @@ function ExpenseListComponent({
       )}
       
       {/* Category Breakdown - Dialog (Desktop) / Drawer (Mobile) */}
+      {/* ✅ CRITICAL FIX: Conditional rendering to force unmount when closed */}
       {isMobile ? (
-        <Drawer open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
-          <DrawerContent className="max-h-[85vh]">
-            <DrawerHeader>
-              <DrawerTitle>Breakdown Kategori</DrawerTitle>
-            </DrawerHeader>
-            <div className="overflow-y-auto px-4 pb-6">
-              <CategoryBreakdown
-                monthKey=""
-                expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
-                onCategoryClick={handleCategoryClick}
-                activeFilter={activeCategoryFilter}
-              />
-            </div>
-          </DrawerContent>
-        </Drawer>
+        showCategoryDrawer && (
+          <Drawer 
+            open={showCategoryDrawer} 
+            onOpenChange={(open) => {
+              console.log('Category Drawer onOpenChange:', open);
+              setShowCategoryDrawer(open);
+              // ✅ Force cleanup stuck overlay
+              if (!open) {
+                // Force remove any stuck overlays
+                setTimeout(() => {
+                  const overlays = document.querySelectorAll('[data-vaul-overlay], [data-vaul-drawer]');
+                  overlays.forEach(overlay => {
+                    if (overlay.parentElement) {
+                      overlay.parentElement.removeChild(overlay);
+                    }
+                  });
+                }, 100);
+              }
+            }}
+            modal={true}
+            dismissible={true}
+            shouldScaleBackground={false}
+          >
+            <DrawerContent className="max-h-[85vh]">
+              <DrawerHeader>
+                <DrawerTitle>Breakdown Kategori</DrawerTitle>
+              </DrawerHeader>
+              <div className="overflow-y-auto px-4 pb-6">
+                <CategoryBreakdown
+                  monthKey=""
+                  expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
+                  onCategoryClick={handleCategoryClick}
+                  activeFilter={activeCategoryFilter}
+                />
+              </div>
+            </DrawerContent>
+          </Drawer>
+        )
       ) : (
-        <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
-          <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Breakdown Kategori</DialogTitle>
-            </DialogHeader>
-            <div className="mt-2">
-              <CategoryBreakdown
-                monthKey=""
-                expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
-                onCategoryClick={handleCategoryClick}
-                activeFilter={activeCategoryFilter}
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
+        showCategoryDrawer && (
+          <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
+            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Breakdown Kategori</DialogTitle>
+              </DialogHeader>
+              <div className="mt-2">
+                <CategoryBreakdown
+                  monthKey=""
+                  expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
+                  onCategoryClick={handleCategoryClick}
+                  activeFilter={activeCategoryFilter}
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
+        )
       )}
       
       {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}

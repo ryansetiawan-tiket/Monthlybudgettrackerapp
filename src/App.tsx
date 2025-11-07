@@ -1036,81 +1036,7 @@ function AppContent() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets]);
 
-  const handleMoveIncomeToExpense = useCallback(async (income: AdditionalIncome) => {
-    try {
-      // Add as expense with fromIncome flag and preserve all conversion data
-      const response = await fetch(
-        `${baseUrl}/expenses/${selectedYear}/${selectedMonth}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-          body: JSON.stringify({ 
-            name: income.name, 
-            amount: income.amountIDR - (income.deduction || 0), // Nilai bersih (net amount)
-            date: income.date,
-            fromIncome: true,
-            currency: income.currency,
-            originalAmount: income.amount,
-            exchangeRate: income.exchangeRate,
-            conversionType: income.conversionType,
-            deduction: income.deduction || 0,
-          }),
-        }
-      );
 
-      if (!response.ok) {
-        throw new Error("Failed to add expense");
-      }
-
-      const result = await response.json();
-      
-      // Ensure fromIncome flag is set (workaround if server didn't save it)
-      const expenseWithFlag = {
-        ...result.data,
-        fromIncome: true,
-        currency: income.currency,
-        originalAmount: income.amount,
-        exchangeRate: income.exchangeRate,
-        conversionType: income.conversionType,
-        deduction: income.deduction || 0,
-      };
-      
-      // Delete from income
-      const deleteResponse = await fetch(
-        `${baseUrl}/additional-income/${selectedYear}/${selectedMonth}/${income.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
-
-      if (!deleteResponse.ok) {
-        throw new Error("Failed to delete income");
-      }
-
-      // Update states with the flagged expense
-      setExpenses((prev) => [...prev, expenseWithFlag]);
-      setAdditionalIncomes((prev) => prev.filter((inc) => inc.id !== income.id));
-      
-      // Invalidate cache (both income and expense changed)
-      invalidateCache(selectedYear, selectedMonth);
-      
-      // Reload pockets to update balances
-      await fetchPockets(selectedYear, selectedMonth);
-      
-      // Trigger refresh for PocketsSummary timeline
-      refreshPockets();
-      
-      toast.success(`"${income.name}" dipindahkan ke pengeluaran`);
-    } catch (error) {
-      toast.error("Gagal memindahkan ke pengeluaran");
-    }
-  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, invalidateCache, fetchPockets, refreshPockets]);
 
   const handleMoveExpenseToIncome = useCallback(async (expense: Expense) => {
     try {
@@ -1646,7 +1572,8 @@ function AppContent() {
               onExcludedIncomeIdsChange={updateExcludedIncomeIds}
               isDeductionExcluded={isDeductionExcluded}
               onDeductionExcludedChange={toggleDeductionExcluded}
-              onMoveToExpense={handleMoveIncomeToExpense}
+              // Phase 8: Category Manager
+              onOpenCategoryManager={() => startTransition(() => setIsCategoryManagerOpen(true))}
             />
           </motion.div>
         </div>

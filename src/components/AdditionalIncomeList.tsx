@@ -1,14 +1,23 @@
 import { useState, useCallback, memo } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, DollarSign, Pencil, X, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock } from "lucide-react";
+import { Checkbox } from "./ui/checkbox";
+import { Trash2, DollarSign, Pencil, X, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock, MoreVertical } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { toast } from "sonner@2.0.3";
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { useIsMobile } from "./ui/use-mobile";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
+import { useConfirm } from "../hooks/useConfirm";
 
 // Default pocket IDs
 const POCKET_IDS = {
@@ -57,7 +66,6 @@ interface AdditionalIncomeListProps {
   onExcludedIdsChange?: (ids: Set<string>) => void;
   isDeductionExcluded?: boolean;
   onDeductionExcludedChange?: (excluded: boolean) => void;
-  onMoveToExpense?: (income: AdditionalIncome) => void;
   isExcludeLocked?: boolean;
   onToggleExcludeLock?: () => void;
   pockets?: Pocket[]; // NEW: For edit pocket selection
@@ -73,12 +81,12 @@ function AdditionalIncomeListComponent({
   onExcludedIdsChange,
   isDeductionExcluded = false,
   onDeductionExcludedChange,
-  onMoveToExpense,
   isExcludeLocked = false,
   onToggleExcludeLock,
   pockets = []
 }: AdditionalIncomeListProps) {
   const isMobile = useIsMobile();
+  const confirm = useConfirm();
   const [editingIncome, setEditingIncome] = useState<AdditionalIncome | null>(null);
   
   // Exclude from calculation states - use prop or default to empty Set
@@ -86,8 +94,10 @@ function AdditionalIncomeListComponent({
   
   const [sortBy, setSortBy] = useState<'date' | 'createdAt'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-
-  const baseUrl = getBaseUrl(projectId);
+  
+  // Bulk selection states
+  const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+  const [selectedIncomeIds, setSelectedIncomeIds] = useState<Set<string>>(new Set());
 
   const formatUSD = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -112,6 +122,59 @@ function AdditionalIncomeListComponent({
   const handleEdit = (income: AdditionalIncome) => {
     setEditingIncome(income);
   };
+
+  // Bulk selection handlers
+  const handleActivateBulkMode = () => {
+    setIsBulkSelectMode(true);
+    setSelectedIncomeIds(new Set());
+  };
+
+  const handleCancelBulkMode = () => {
+    setIsBulkSelectMode(false);
+    setSelectedIncomeIds(new Set());
+  };
+
+  const handleToggleSelectIncome = (id: string) => {
+    setSelectedIncomeIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIncomeIds.size === incomes.length) {
+      setSelectedIncomeIds(new Set());
+    } else {
+      setSelectedIncomeIds(new Set(incomes.map(inc => inc.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIncomeIds.size === 0) return;
+
+    const confirmed = await confirm({
+      title: "Hapus Pemasukan Terpilih?",
+      description: `Anda yakin ingin menghapus ${selectedIncomeIds.size} pemasukan yang dipilih? Tindakan ini tidak dapat dibatalkan.`,
+      confirmText: "Hapus",
+      cancelText: "Batal"
+    });
+
+    if (confirmed) {
+      selectedIncomeIds.forEach(id => {
+        onDeleteIncome(id);
+      });
+      toast.success(`${selectedIncomeIds.size} pemasukan berhasil dihapus`);
+      setIsBulkSelectMode(false);
+      setSelectedIncomeIds(new Set());
+    }
+  };
+
+  const isAllSelected = incomes.length > 0 && selectedIncomeIds.size === incomes.length;
 
   // Toggle exclude income from calculation
   const handleToggleExclude = useCallback((id: string) => {
@@ -214,67 +277,109 @@ function AdditionalIncomeListComponent({
     <>
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <span className="flex items-center gap-2 text-base sm:text-lg">
-              Pemasukan Tambahan
-              {excludedCount > 0 && (
-                <Badge variant="secondary" className="text-xs h-6 px-1.5">
-                  {excludedCount} excluded
-                </Badge>
-              )}
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {onToggleExcludeLock && (
-                <Button
-                  variant={isExcludeLocked ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => onToggleExcludeLock()}
-                  className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
-                  title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
-                >
-                  {isExcludeLocked ? <Lock className="size-3.5 mr-1.5" /> : <Unlock className="size-3.5 mr-1.5" />}
-                  {isExcludeLocked ? 'Locked' : 'Lock'}
-                </Button>
-              )}
-              {incomes.length > 0 && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={toggleSortBy}
-                    title={sortBy === 'date' ? 'Urutkan berdasarkan: Tanggal Masuk' : 'Urutkan berdasarkan: Tanggal Entry'}
-                  >
-                    <Badge variant="outline" className="text-xs px-1 h-6 px-[4px] py-[2px] m-[0px]">
-                      {sortBy === 'date' ? 'Masuk' : 'Entry'}
-                    </Badge>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={toggleSortOrder}
-                    title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
-                  >
-                    <ArrowUpDown className="size-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={handleToggleExcludeAll}
-                    title={excludedIncomeIds.size === incomes.length ? "Tampilkan semua" : "Sembunyikan semua"}
-                  >
-                    {excludedIncomeIds.size === incomes.length ? (
-                      <EyeOff className="size-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="size-4 text-muted-foreground" />
+          <CardTitle className="flex flex-col gap-2">
+            {!isBulkSelectMode ? (
+              // Normal Mode
+              <>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-base sm:text-lg">
+                    Pemasukan Tambahan
+                    {excludedCount > 0 && (
+                      <Badge variant="secondary" className="text-xs h-6 px-1.5">
+                        {excludedCount} excluded
+                      </Badge>
                     )}
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {incomes.length > 0 && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-11 px-3 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-xs"
+                          onClick={handleActivateBulkMode}
+                        >
+                          Pilih
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={toggleSortBy}
+                          title={sortBy === 'date' ? 'Urutkan berdasarkan: Tanggal Masuk' : 'Urutkan berdasarkan: Tanggal Entry'}
+                        >
+                          <Badge variant="outline" className="text-xs px-1 h-6 px-[4px] py-[2px] m-[0px]">
+                            {sortBy === 'date' ? 'Masuk' : 'Entry'}
+                          </Badge>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={handleToggleExcludeAll}
+                          title={excludedIncomeIds.size === incomes.length ? "Tampilkan semua" : "Sembunyikan semua"}
+                        >
+                          {excludedIncomeIds.size === incomes.length ? (
+                            <EyeOff className="size-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="size-4 text-muted-foreground" />
+                          )}
+                        </Button>
+                      </>
+                    )}
+                    {onToggleExcludeLock && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`h-8 w-8 ${
+                          isExcludeLocked 
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                            : 'text-muted-foreground'
+                        }`}
+                        onClick={() => onToggleExcludeLock()}
+                        title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
+                      >
+                        {isExcludeLocked ? <Lock className="size-4" /> : <Unlock className="size-4" />}
+                      </Button>
+                    )}
+                    <span className="text-sm font-normal text-green-600 whitespace-nowrap">{formatCurrency(netIncome)}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              // Bulk Select Mode
+              <>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={handleSelectAll}
+                  />
+                  <span className="text-sm">
+                    {selectedIncomeIds.size > 0
+                      ? `${selectedIncomeIds.size} dipilih`
+                      : "Pilih semua"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleBulkDelete}
+                    disabled={selectedIncomeIds.size === 0}
+                  >
+                    <Trash2 className="size-4 mr-2" />
+                    Hapus ({selectedIncomeIds.size})
                   </Button>
-                </>
-              )}
-              <span className="text-sm text-green-600 whitespace-nowrap">{formatCurrency(netIncome)}</span>
-            </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCancelBulkMode}
+                  >
+                    Batal
+                  </Button>
+                </div>
+              </>
+            )}
           </CardTitle>
         </CardHeader>
             <CardContent className="space-y-3">
@@ -286,88 +391,113 @@ function AdditionalIncomeListComponent({
                 <div className="space-y-2">
                   {sortedIncomes.map((income) => {
                     const isExcluded = excludedIncomeIds.has(income.id);
+                    const isSelected = selectedIncomeIds.has(income.id);
                     return (
                       <div
                         key={income.id}
-                        className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                        className={`flex items-start gap-2 p-3 border rounded-lg transition-all ${
+                          isExcluded ? 'opacity-50 bg-muted/30' : ''
+                        } ${
+                          isBulkSelectMode 
+                            ? 'cursor-pointer hover:bg-accent/50' 
+                            : 'hover:bg-accent/50 hover:scale-[1.005]'
+                        } ${
+                          isSelected ? 'bg-accent border-primary' : ''
+                        }`}
+                        onClick={() => isBulkSelectMode && handleToggleSelectIncome(income.id)}
                       >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
-                            <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                              {formatDate(income.date)}
-                            </span>
+                        {isBulkSelectMode && (
+                          <div className="pt-0.5">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => handleToggleSelectIncome(income.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
                           </div>
-                          {income.currency === "USD" && (
-                            <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                              <DollarSign className="size-3" />
-                              <span className="text-xs">
-                                {formatUSD(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
-                                <span className="ml-1">
-                                  ({income.conversionType === "auto" ? "realtime" : "manual"})
-                                </span>
+                        )}
+                        <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
+                              <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                {formatDate(income.date)}
                               </span>
                             </div>
-                          )}
-                          {income.deduction > 0 && (
-                            <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                              <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between sm:justify-end gap-1">
-                          <div className="text-right">
-                            <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                              {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
-                            </p>
+                            {income.currency === "USD" && (
+                              <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                <DollarSign className="size-3" />
+                                <span className="text-xs">
+                                  {formatUSD(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
+                                  <span className="ml-1">
+                                    ({income.conversionType === "auto" ? "realtime" : "manual"})
+                                  </span>
+                                </span>
+                              </div>
+                            )}
                             {income.deduction > 0 && (
-                              <p className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                                Kotor: {formatCurrency(income.amountIDR)}
-                              </p>
+                              <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
+                              </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-0.5">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleToggleExclude(income.id)}
-                              title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                            >
-                              {isExcluded ? (
-                                <EyeOff className="size-3.5 text-muted-foreground" />
-                              ) : (
-                                <Eye className="size-3.5 text-muted-foreground" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => onMoveToExpense?.(income)}
-                              title="Pindahkan ke pengeluaran"
-                            >
-                              <ArrowLeft className="size-3.5 text-blue-500" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleEdit(income)}
-                              title="Edit"
-                            >
-                              <Pencil className="size-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => onDeleteIncome(income.id)}
-                              title="Hapus"
-                            >
-                              <Trash2 className="size-3.5 text-destructive" />
-                            </Button>
-                          </div>
+                          {!isBulkSelectMode && (
+                            <div className="flex items-center justify-between sm:justify-end gap-1">
+                              <div className="text-right">
+                                <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                  {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
+                                </p>
+                                {income.deduction > 0 && (
+                                  <p className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                    Kotor: {formatCurrency(income.amountIDR)}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleExclude(income.id);
+                                  }}
+                                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                                >
+                                  {isExcluded ? (
+                                    <EyeOff className="size-3.5 text-muted-foreground" />
+                                  ) : (
+                                    <Eye className="size-3.5 text-muted-foreground" />
+                                  )}
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={(e) => e.stopPropagation()}
+                                      title="More"
+                                    >
+                                      <MoreVertical className="size-3.5 text-muted-foreground" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleEdit(income)}>
+                                      <Pencil className="size-3.5 mr-2" />
+                                      Edit
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem 
+                                      onClick={() => onDeleteIncome(income.id)}
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Trash2 className="size-3.5 mr-2" />
+                                      Hapus
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
