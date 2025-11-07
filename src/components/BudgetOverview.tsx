@@ -1,8 +1,6 @@
 import { memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Wallet } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { formatCurrency } from "../utils/currency";
 
 interface BudgetOverviewProps {
@@ -37,28 +35,19 @@ export const BudgetOverview = memo(function BudgetOverview({ totalIncome, totalE
         </CardContent>
       </Card>
 
-      <Card className={`relative overflow-hidden ${remainingBudget >= 0 ? 'bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/50' : 'bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/50'}`}>
+      <Card 
+        className={`relative overflow-hidden cursor-pointer transition-all hover:shadow-md ${remainingBudget >= 0 ? 'bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/50 hover:border-green-500/70' : 'bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/50 hover:border-red-500/70'}`}
+        onClick={() => onTogglePockets?.()}
+      >
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">Sisa Budget</CardTitle>
             <div className="flex items-center gap-1">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className={`size-7 hover:bg-background/50 ${showPockets ? 'bg-background/30' : ''}`}
-                      onClick={() => onTogglePockets?.()}
-                    >
-                      <Wallet className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{showPockets ? 'Sembunyikan' : 'Tampilkan'} Ringkasan Kantong</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {showPockets ? (
+                <ChevronUp className="size-5 text-muted-foreground transition-transform duration-300" />
+              ) : (
+                <ChevronDown className="size-5 text-muted-foreground transition-transform duration-300" />
+              )}
             </div>
           </div>
         </CardHeader>

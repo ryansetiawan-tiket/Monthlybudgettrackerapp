@@ -186,6 +186,7 @@ function ExpenseListComponent({
   const excludedIncomeIds = excludedIncomeIdsProp || new Set<string>();
   const [showCategoryDrawer, setShowCategoryDrawer] = useState(false);
   const [showGlobalDeductionInput, setShowGlobalDeductionInput] = useState(false);
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<Set<import('../types').ExpenseCategory>>(new Set());
   
   // Income editing states
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
@@ -328,6 +329,25 @@ function ExpenseListComponent({
 
   const toggleSortOrder = () => {
     setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
+
+  // Handle category click from pie chart
+  const handleCategoryClick = (category: import('../types').ExpenseCategory) => {
+    setActiveCategoryFilter(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(category)) {
+        newSet.delete(category);
+        toast.success(`Filter kategori "${getCategoryLabel(category, settings)}" dihapus`);
+      } else {
+        newSet.clear(); // Only one category at a time
+        newSet.add(category);
+        toast.success(`Filter aktif: ${getCategoryEmoji(category, settings)} ${getCategoryLabel(category, settings)}`);
+      }
+      return newSet;
+    });
+    
+    // Close the drawer/dialog after clicking
+    setShowCategoryDrawer(false);
   };
 
   const formatCurrency = (amount: number) => {
@@ -479,16 +499,17 @@ function ExpenseListComponent({
       }
     });
     
-    // Then filter by category if needed
-    if (categoryFilter.size > 0) {
+    // Then filter by category if needed (combine categoryFilter from props and activeCategoryFilter from breakdown)
+    const combinedFilter = new Set([...Array.from(categoryFilter), ...Array.from(activeCategoryFilter)]);
+    if (combinedFilter.size > 0) {
       filtered = filtered.filter(expense => {
         const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
-        return categoryFilter.has(expCategory);
+        return combinedFilter.has(expCategory);
       });
     }
     
     return filtered;
-  }, [expenses, categoryFilter, activeTab]);
+  }, [expenses, categoryFilter, activeCategoryFilter, activeTab]);
 
   // Sort and filter expenses
   const sortedAndFilteredExpenses = useMemo(() => {
@@ -1745,6 +1766,20 @@ function ExpenseListComponent({
             />
           </div>
         )}
+        
+        {/* Active Category Filter Badge (from pie chart click) */}
+        {activeCategoryFilter.size > 0 && (
+          <div className="mt-3">
+            <CategoryFilterBadge
+              activeCategories={activeCategoryFilter}
+              onClear={() => {
+                setActiveCategoryFilter(new Set());
+                toast.success('Filter kategori dihapus');
+              }}
+              itemCount={categoryFilteredExpenses.length}
+            />
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {expenses.length === 0 ? (
@@ -2415,20 +2450,40 @@ function ExpenseListComponent({
         />
       )}
       
-      {/* Category Breakdown Drawer */}
-      <Drawer open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
-        <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader>
-            <DrawerTitle>Breakdown Kategori</DrawerTitle>
-          </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-6">
-            <CategoryBreakdown
-              expenses={expenses}
-              excludedExpenseIds={excludedExpenseIds}
-            />
-          </div>
-        </DrawerContent>
-      </Drawer>
+      {/* Category Breakdown - Dialog (Desktop) / Drawer (Mobile) */}
+      {isMobile ? (
+        <Drawer open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
+          <DrawerContent className="max-h-[85vh]">
+            <DrawerHeader>
+              <DrawerTitle>Breakdown Kategori</DrawerTitle>
+            </DrawerHeader>
+            <div className="overflow-y-auto px-4 pb-6">
+              <CategoryBreakdown
+                monthKey=""
+                expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
+                onCategoryClick={handleCategoryClick}
+                activeFilter={activeCategoryFilter}
+              />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
+          <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Breakdown Kategori</DialogTitle>
+            </DialogHeader>
+            <div className="mt-2">
+              <CategoryBreakdown
+                monthKey=""
+                expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
+                onCategoryClick={handleCategoryClick}
+                activeFilter={activeCategoryFilter}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       
       {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}
       {editingIncomeId && editingIncome && onUpdateIncome && (

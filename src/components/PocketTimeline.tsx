@@ -1,7 +1,7 @@
 import { Badge } from "./ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
-import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2 } from "lucide-react";
+import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2, DollarSign } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -718,18 +718,19 @@ export function PocketTimeline({
             <span>Timeline {pocketName}</span>
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{entries.length} aktivitas</Badge>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 rounded-full"
-                    onClick={(e) => e.stopPropagation()}
-                    title="Menu Kantong"
-                  >
-                    <MoreVertical className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
+              {isMobile && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 rounded-full"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Menu Kantong"
+                    >
+                      <MoreVertical className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48 z-[102]">
                   <DropdownMenuItem
                     onClick={(e) => {
@@ -767,6 +768,7 @@ export function PocketTimeline({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
+              )}
             </div>
           </DialogTitle>
         </DialogHeader>
