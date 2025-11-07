@@ -17,6 +17,8 @@ import { formatCurrencyInput, parseCurrencyInput } from '../utils/currency';
 import { formatCurrency } from '../utils/currency';
 import { AlertCircle } from 'lucide-react';
 import { useConfirm } from '../hooks/useConfirm';
+import { useDialogRegistration } from '../hooks/useDialogRegistration';
+import { DialogPriority } from '../constants';
 
 interface BudgetLimitEditorProps {
   open: boolean;
@@ -35,6 +37,14 @@ export function BudgetLimitEditor({
 }: BudgetLimitEditorProps) {
   const isMobile = useIsMobile();
   const { confirm, ConfirmDialog } = useConfirm();
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    `budget-limit-${category.id}`
+  );
 
   const [enabled, setEnabled] = useState(category.budget?.enabled ?? false);
   const [limit, setLimit] = useState(category.budget?.limit?.toString() || '1000000');

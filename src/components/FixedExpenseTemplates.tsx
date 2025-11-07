@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner@2.0.3";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { useConfirm } from "../hooks/useConfirm";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 export interface FixedExpenseItem {
   name: string;
@@ -35,6 +37,14 @@ function FixedExpenseTemplatesComponent({
 }: FixedExpenseTemplatesProps) {
   const { confirm, ConfirmDialog } = useConfirm();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  
+  // Register internal dialog for back button handling
+  useDialogRegistration(
+    isDialogOpen,
+    setIsDialogOpen,
+    DialogPriority.HIGH, // Higher than parent AddExpenseDialog
+    'fixed-expense-template-editor'
+  );
   const [editingTemplate, setEditingTemplate] = useState<FixedExpenseTemplate | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [items, setItems] = useState<FixedExpenseItem[]>([{ name: "", amount: 0 }]);

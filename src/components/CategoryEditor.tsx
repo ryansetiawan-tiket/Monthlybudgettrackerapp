@@ -13,6 +13,8 @@ import { useIsMobile } from './ui/use-mobile';
 import { CategoryConfig } from '../types';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { Smile } from 'lucide-react';
+import { useDialogRegistration } from '../hooks/useDialogRegistration';
+import { DialogPriority } from '../constants';
 
 interface CategoryEditorProps {
   open: boolean;
@@ -24,6 +26,14 @@ interface CategoryEditorProps {
 export function CategoryEditor({ open, onOpenChange, category, onSave }: CategoryEditorProps) {
   const isMobile = useIsMobile();
   const isEditing = !!category;
+
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    `category-editor-${category?.id || 'new'}`
+  );
 
   const [label, setLabel] = useState('');
   const [emoji, setEmoji] = useState('');

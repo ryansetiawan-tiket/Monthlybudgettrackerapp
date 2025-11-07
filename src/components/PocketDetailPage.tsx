@@ -65,11 +65,12 @@ export function PocketDetailPage({
   const [localWishlistEnabled, setLocalWishlistEnabled] = useState(pocket.enableWishlist || false);
   
   // Register this page with dialog stack for back button handling
-  useDialogRegistration({
-    isOpen: open,
-    onClose: () => onOpenChange(false),
-    priority: 150, // Higher than drawer (100) so it closes first
-  });
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    150, // Higher priority than drawers so it closes first
+    `pocket-detail-${pocket.id}`
+  );
 
   // Prevent background scroll when detail page is open
   useEffect(() => {

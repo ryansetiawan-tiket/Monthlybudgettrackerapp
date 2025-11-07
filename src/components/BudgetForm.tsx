@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { useIsMobile } from "./ui/use-mobile";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface BudgetFormProps {
   open: boolean;
@@ -34,6 +36,14 @@ export function BudgetForm({
   isLoadingCarryover,
 }: BudgetFormProps) {
   const isMobile = useIsMobile();
+  
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'budget-form'
+  );
   
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {

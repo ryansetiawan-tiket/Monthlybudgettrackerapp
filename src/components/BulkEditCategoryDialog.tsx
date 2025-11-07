@@ -9,6 +9,8 @@ import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
 import type { ExpenseCategory } from "../types";
 import { useCategorySettings } from "../hooks/useCategorySettings";
 import { getAllCategories } from "../utils/categoryManager";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface Expense {
   id: string;
@@ -34,6 +36,14 @@ export function BulkEditCategoryDialog({
 }: BulkEditCategoryDialogProps) {
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | undefined>();
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Register drawer for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'bulk-edit-category'
+  );
   
   // Phase 8: Get custom categories
   const { settings } = useCategorySettings();

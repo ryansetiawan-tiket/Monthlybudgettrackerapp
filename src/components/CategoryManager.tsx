@@ -20,6 +20,8 @@ import { CategoryEditor } from './CategoryEditor';
 import { BudgetLimitEditor } from './BudgetLimitEditor';
 import { useConfirm } from '../hooks/useConfirm';
 import { formatCurrency } from '../utils/currency';
+import { useDialogRegistration } from '../hooks/useDialogRegistration';
+import { DialogPriority } from '../constants';
 
 interface CategoryManagerProps {
   open: boolean;
@@ -29,6 +31,15 @@ interface CategoryManagerProps {
 export function CategoryManager({ open, onOpenChange }: CategoryManagerProps) {
   const isMobile = useIsMobile();
   const { confirm, ConfirmDialog } = useConfirm();
+  
+  // Register dialog for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.MEDIUM,
+    'category-manager'
+  );
+  
   const {
     settings,
     isLoading,

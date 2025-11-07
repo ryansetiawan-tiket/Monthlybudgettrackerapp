@@ -18,6 +18,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface TimelineEntry {
   id: string;
@@ -98,6 +100,14 @@ export function PocketTimeline({
 }: PocketTimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>(prefetchedEntries || []);
   const [loading, setLoading] = useState(false);
+  
+  // Register drawer for back button handling
+  useDialogRegistration(
+    open,
+    onOpenChange,
+    DialogPriority.HIGH, // Higher than normal dialogs
+    `pocket-timeline-${pocketId}`
+  );
   const [viewMode, setViewMode] = useState<'timeline' | 'info'>('timeline');
   const isMobile = useIsMobile();
 
