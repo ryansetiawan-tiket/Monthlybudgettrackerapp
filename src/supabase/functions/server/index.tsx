@@ -609,8 +609,7 @@ function generatePocketTimeline(
   sortOrder: 'asc' | 'desc',
   sharedData: any
 ): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  const { expenses, additionalIncome, transfers, excludeState, pockets, carryOvers } = sharedData;
+  const { budget, expenses, additionalIncome, transfers, excludeState, pockets, carryOvers } = sharedData;
   
   const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
   const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
@@ -619,21 +618,44 @@ function generatePocketTimeline(
   const pocket = pockets.find((p: Pocket) => p.id === pocketId);
   const pocketName = pocket?.name || 'Unknown Pocket';
   
-  // Calculate running balance
-  let runningBalance = 0;
+  // Simple approach: collect all transactions, then sort and calculate balance
+  // No special handling - Budget Awal is just another income transaction
+  const allTransactions: any[] = [];
   
-  // 1. Initial balance from carry over (for custom pockets)
-  if (pocketId !== POCKET_IDS.DAILY && pocketId !== POCKET_IDS.COLD_MONEY) {
+  // 1. Add initial balance as income transaction (if applicable)
+  if (pocketId === POCKET_IDS.DAILY) {
+    // Sehari-hari: Budget Awal = initialBudget + carryover
+    const budgetData = budget || { initialBudget: 0, carryover: 0 };
+    const initialAmount = (budgetData.initialBudget || 0) + (budgetData.carryover || 0);
+    
+    if (initialAmount !== 0) {
+      allTransactions.push({
+        id: `initial_${pocketId}`,
+        type: 'income',
+        date: `${monthKey}-01T00:00:00.000Z`,
+        description: 'Budget Awal',
+        amount: initialAmount,
+        icon: 'Wallet',
+        color: 'green',
+        metadata: {
+          initialBudget: budgetData.initialBudget,
+          carryover: budgetData.carryover,
+          isPrimaryPocket: true
+        }
+      });
+    }
+  } else if (pocketId === POCKET_IDS.COLD_MONEY) {
+    // Uang Dingin: no initial entry, all income shown separately
+  } else {
+    // Custom pockets: Saldo Awal from carry over
     const carryOver = carryOvers.find((co: any) => co.pocketId === pocketId);
     if (carryOver && carryOver.amount !== 0) {
-      runningBalance = carryOver.amount;
-      entries.push({
+      allTransactions.push({
         id: `initial_${pocketId}`,
         type: 'income',
         date: `${monthKey}-01T00:00:00.000Z`,
         description: 'Saldo Awal (Carry Over)',
         amount: carryOver.amount,
-        balanceAfter: runningBalance,
         icon: 'TrendingUp',
         color: 'green',
         metadata: {
@@ -739,47 +761,33 @@ function generatePocketTimeline(
     }
   });
   
-  // Combine all transactions
-  const allTransactions = [
-    ...pocketExpenses,
-    ...pocketIncome,
-    ...pocketTransfers
-  ];
+  // Add expenses, income, and transfers
+  allTransactions.push(...pocketExpenses);
+  allTransactions.push(...pocketIncome);
+  allTransactions.push(...pocketTransfers);
   
-  // Sort by date
+  // Sort by date ASCENDING (oldest first) - always calculate forward
   allTransactions.sort((a, b) => {
     const dateA = new Date(a.date).getTime();
     const dateB = new Date(b.date).getTime();
-    return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+    return dateA - dateB;  // ASC
   });
   
-  // Calculate balance after each transaction
-  if (sortOrder === 'asc') {
-    // For ascending order, start from initial balance
-    allTransactions.forEach(txn => {
-      runningBalance += txn.amount;
-      entries.push({
-        ...txn,
-        balanceAfter: runningBalance
-      });
+  // Calculate balance FORWARD (simple and correct)
+  let runningBalance = 0;
+  const entries: TimelineEntry[] = [];
+  
+  allTransactions.forEach(txn => {
+    runningBalance += txn.amount;
+    entries.push({
+      ...txn,
+      balanceAfter: runningBalance
     });
-  } else {
-    // For descending order (default), calculate from end
-    // First, calculate final balance
-    let finalBalance = runningBalance;
-    allTransactions.forEach(txn => {
-      finalBalance += txn.amount;
-    });
-    
-    // Then work backwards
-    runningBalance = finalBalance;
-    allTransactions.forEach(txn => {
-      entries.push({
-        ...txn,
-        balanceAfter: runningBalance
-      });
-      runningBalance -= txn.amount;
-    });
+  });
+  
+  // If user wants DESC, reverse the array
+  if (sortOrder === 'desc') {
+    entries.reverse();
   }
   
   return entries;

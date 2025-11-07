@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings, Calendar, BarChart3, Info, MoreVertical } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { WishlistSimulation } from "./WishlistSimulation";
@@ -103,6 +103,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   // Timeline prefetch cache
   const [timelineCache, setTimelineCache] = useState<Map<string, TimelineEntry[]>>(new Map());
   
+  // Timeline loading state (per pocket)
+  const [timelineLoading, setTimelineLoading] = useState<Map<string, boolean>>(new Map());
+  
   // Realtime mode state (per pocket) - default ON
   const [realtimeMode, setRealtimeMode] = useState<Map<string, boolean>>(new Map());
   
@@ -118,16 +121,30 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     }).format(amount);
   };
 
-  // Load realtime mode from localStorage
+  // Load realtime mode from localStorage and prefetch timeline data
   useEffect(() => {
-    const loadRealtimeMode = () => {
+    const loadRealtimeMode = async () => {
       const newMap = new Map<string, boolean>();
+      const pocketsToPrefetch: string[] = [];
+      
       pockets.forEach(pocket => {
         const saved = localStorage.getItem(`realtime-mode-${pocket.id}`);
         // Default to true (ON) if not set
-        newMap.set(pocket.id, saved !== null ? saved === 'true' : true);
+        const isRealtime = saved !== null ? saved === 'true' : true;
+        newMap.set(pocket.id, isRealtime);
+        
+        // Queue for prefetch if realtime mode is ON
+        if (isRealtime) {
+          pocketsToPrefetch.push(pocket.id);
+        }
       });
+      
       setRealtimeMode(newMap);
+      
+      // Prefetch timeline for all realtime-enabled pockets IN PARALLEL (faster!)
+      if (pocketsToPrefetch.length > 0) {
+        Promise.all(pocketsToPrefetch.map(pocketId => prefetchTimeline(pocketId)));
+      }
     };
     
     if (pockets.length > 0) {
@@ -141,32 +158,45 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     setRealtimeMode(prev => new Map(prev).set(pocketId, newValue));
     localStorage.setItem(`realtime-mode-${pocketId}`, String(newValue));
     toast.success(newValue ? 'Mode Realtime diaktifkan' : 'Mode Proyeksi diaktifkan');
+    
+    // Prefetch timeline immediately when switching to realtime mode
+    if (newValue && !timelineCache.has(pocketId)) {
+      prefetchTimeline(pocketId);
+    }
   };
 
-  // Calculate realtime balance based on timeline
-  const calculateRealtimeBalance = (pocketId: string, isRealtime: boolean): number | null => {
+  // Calculate realtime balance based on timeline - memoized for performance
+  const calculateRealtimeBalance = useCallback((pocketId: string, isRealtime: boolean): number | null => {
     if (!isRealtime) return null; // Return null to use server balance
     
     const timeline = timelineCache.get(pocketId);
-    if (!timeline || timeline.length === 0) return null; // No timeline data yet
+    if (!timeline || timeline.length === 0) {
+      // Timeline not loaded yet - return null to show server balance temporarily
+      return null;
+    }
     
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
     
-    // Filter timeline items up to today
-    const pastItems = timeline.filter(item => {
+    // Find the last transaction that happened today or before
+    // Timeline is sorted DESC (newest first, most recent transaction appears first)
+    for (const item of timeline) {
       const itemDate = new Date(item.date);
       itemDate.setHours(0, 0, 0, 0);
-      return itemDate <= today;
-    });
+      const itemTime = itemDate.getTime();
+      
+      // If item is today or in the past, return its balanceAfter
+      // This gives us the balance after the most recent transaction up to today
+      if (itemTime <= todayTime) {
+        return item.balanceAfter;
+      }
+    }
     
-    // If no past items, return 0
-    if (pastItems.length === 0) return 0;
-    
-    // Return the balance after the most recent past item
-    // Timeline is sorted desc, so first past item has the latest balanceAfter for past dates
-    return pastItems[0].balanceAfter;
-  };
+    // If all items are in the future (shouldn't happen in normal use), return null
+    // This means there are only future-dated transactions, so we fall back to server balance
+    return null;
+  }, [timelineCache]);
 
   const fetchPockets = async () => {
     try {
@@ -289,12 +319,15 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     });
   };
 
-  // Prefetch timeline data for a pocket
-  const prefetchTimeline = async (pocketId: string) => {
-    // Skip if already cached
-    if (timelineCache.has(pocketId)) {
+  // Prefetch timeline data for a pocket - memoized to prevent recreating on every render
+  const prefetchTimeline = useCallback(async (pocketId: string) => {
+    // Skip if already cached or currently loading
+    if (timelineCache.has(pocketId) || timelineLoading.get(pocketId)) {
       return;
     }
+    
+    // Set loading state
+    setTimelineLoading(prev => new Map(prev).set(pocketId, true));
     
     try {
       const [year, month] = monthKey.split('-');
@@ -315,8 +348,11 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       }
     } catch (error) {
       console.error('Error prefetching timeline:', error);
+    } finally {
+      // Clear loading state
+      setTimelineLoading(prev => new Map(prev).set(pocketId, false));
     }
-  };
+  }, [monthKey, baseUrl, publicAnonKey, timelineCache, timelineLoading]);
 
   const handleDeletePocket = async () => {
     if (!pocketToDelete) return;
@@ -516,6 +552,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                       : 'hover:shadow-md cursor-pointer'
                   }`}
                   onMouseEnter={() => prefetchTimeline(pocket.id)}
+                  onTouchStart={() => prefetchTimeline(pocket.id)}
                   onClick={(e) => {
                     // Always allow opening timeline on card click
                     setTimelinePocket(pocket);
@@ -546,26 +583,36 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
 
                       {/* Compact Balance Section */}
                       <div className="space-y-1">
-                        <p className="text-xs text-neutral-400">
-                          {realtimeMode.get(pocket.id) ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-neutral-400">
+                            {realtimeMode.get(pocket.id) ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
+                          </p>
+                          {/* Loading indicator - shown when fetching timeline */}
+                          {timelineLoading.get(pocket.id) && (
+                            <div className="size-3 border-2 border-neutral-600 border-t-white rounded-full animate-spin" />
+                          )}
+                        </div>
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex-1">
-                            <p className={`text-lg font-semibold tracking-tight ${
-                              (() => {
-                                const isRealtime = realtimeMode.get(pocket.id);
-                                const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
-                                const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
-                                return displayBalance >= 0 ? 'text-[#00c950]' : 'text-red-500';
-                              })()
-                            }`}>
-                              {(() => {
-                                const isRealtime = realtimeMode.get(pocket.id);
-                                const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
-                                const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
-                                return formatCurrency(displayBalance);
-                              })()}
-                            </p>
+                            {timelineLoading.get(pocket.id) ? (
+                              <Skeleton className="h-7 w-32 bg-neutral-800" />
+                            ) : (
+                              <p className={`text-lg font-semibold tracking-tight ${
+                                (() => {
+                                  const isRealtime = realtimeMode.get(pocket.id);
+                                  const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
+                                  const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
+                                  return displayBalance >= 0 ? 'text-[#00c950]' : 'text-red-500';
+                                })()
+                              }`}>
+                                {(() => {
+                                  const isRealtime = realtimeMode.get(pocket.id);
+                                  const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
+                                  const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
+                                  return formatCurrency(displayBalance);
+                                })()}
+                              </p>
+                            )}
                           </div>
                           {/* Compact Wishlist Button - Only if enabled */}
                           {pocket.enableWishlist && (
@@ -583,7 +630,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                             </div>
                           )}
                         </div>
-                        {realtimeMode.get(pocket.id) && (
+                        {realtimeMode.get(pocket.id) && !timelineLoading.get(pocket.id) && (
                           <p className="text-[10px] text-neutral-400 tracking-wide">
                             Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </p>
@@ -727,21 +774,25 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                           <span className="text-xs text-muted-foreground">
                             {realtimeMode.get(pocket.id) ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
                           </span>
-                          <span className={`text-lg font-semibold ${balanceColor}`}>
-                            {(() => {
-                              const isRealtime = realtimeMode.get(pocket.id);
-                              const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
-                              const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
-                              const displayColor = displayBalance >= 0 ? 'text-green-600' : 'text-red-600';
-                              return (
-                                <span className={displayColor}>
-                                  {formatCurrency(displayBalance)}
-                                </span>
-                              );
-                            })()}
-                          </span>
+                          {timelineLoading.get(pocket.id) ? (
+                            <Skeleton className="h-7 w-32" />
+                          ) : (
+                            <span className={`text-lg font-semibold ${balanceColor}`}>
+                              {(() => {
+                                const isRealtime = realtimeMode.get(pocket.id);
+                                const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
+                                const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
+                                const displayColor = displayBalance >= 0 ? 'text-green-600' : 'text-red-600';
+                                return (
+                                  <span className={displayColor}>
+                                    {formatCurrency(displayBalance)}
+                                  </span>
+                                );
+                              })()}
+                            </span>
+                          )}
                         </div>
-                        {realtimeMode.get(pocket.id) && (
+                        {realtimeMode.get(pocket.id) && !timelineLoading.get(pocket.id) && (
                           <p className="text-[10px] text-muted-foreground">
                             Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </p>
@@ -903,6 +954,10 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           prefetchedEntries={timelineCache.get(timelinePocket.id)}
           isRealtimeMode={realtimeMode.get(timelinePocket.id) || false}
           drawerClassName="z-[101]" // Add higher z-index for nested drawer
+          onTimelineLoaded={(entries) => {
+            // Update cache when timeline loads new data
+            setTimelineCache(prev => new Map(prev).set(timelinePocket.id, entries));
+          }}
         />
       )}
 

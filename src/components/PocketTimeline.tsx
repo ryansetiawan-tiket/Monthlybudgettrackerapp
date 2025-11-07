@@ -32,6 +32,7 @@ interface PocketTimelineProps {
   prefetchedEntries?: TimelineEntry[];
   isRealtimeMode?: boolean;
   drawerClassName?: string;
+  onTimelineLoaded?: (entries: TimelineEntry[]) => void;
 }
 
 export function PocketTimeline({ 
@@ -44,7 +45,8 @@ export function PocketTimeline({
   onOpenChange,
   prefetchedEntries,
   isRealtimeMode = false,
-  drawerClassName
+  drawerClassName,
+  onTimelineLoaded
 }: PocketTimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>(prefetchedEntries || []);
   const [loading, setLoading] = useState(false);
@@ -144,6 +146,10 @@ export function PocketTimeline({
       
       if (data.success) {
         setEntries(data.data.entries);
+        // Notify parent to update cache
+        if (onTimelineLoaded) {
+          onTimelineLoaded(data.data.entries);
+        }
       } else {
         throw new Error(data.error || 'Unknown error');
       }

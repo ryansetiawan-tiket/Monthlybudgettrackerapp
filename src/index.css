@@ -106,6 +106,7 @@
     --color-neutral-50: oklch(.985 0 0);
     --color-neutral-200: oklch(.922 0 0);
     --color-neutral-400: oklch(.708 0 0);
+    --color-neutral-600: oklch(.439 0 0);
     --color-neutral-700: oklch(.371 0 0);
     --color-neutral-800: oklch(.269 0 0);
     --color-neutral-950: oklch(.145 0 0);
@@ -1572,6 +1573,10 @@
     border-color: var(--input);
   }
 
+  .border-neutral-600 {
+    border-color: var(--color-neutral-600);
+  }
+
   .border-neutral-800 {
     border-color: var(--color-neutral-800);
   }
@@ -1606,6 +1611,10 @@
 
   .border-t-transparent {
     border-top-color: #0000;
+  }
+
+  .border-t-white {
+    border-top-color: var(--color-white);
   }
 
   .border-l-transparent {
