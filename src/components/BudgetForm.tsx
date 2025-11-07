@@ -6,6 +6,7 @@ import { ArrowDownToLine } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from "./ui/drawer";
 import { useIsMobile } from "./ui/use-mobile";
+import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 
 interface BudgetFormProps {
   open: boolean;
@@ -60,9 +61,10 @@ export function BudgetForm({
             <Label htmlFor="initialBudget">Budget Awal</Label>
             <Input
               id="initialBudget"
-              type="number"
-              value={initialBudget || ""}
-              onChange={(e) => onBudgetChange("initialBudget", e.target.value)}
+              type="text"
+              inputMode="numeric"
+              value={formatCurrencyInput(initialBudget || "")}
+              onChange={(e) => onBudgetChange("initialBudget", parseCurrencyInput(e.target.value).toString())}
               placeholder="0"
             />
           </div>
@@ -86,9 +88,10 @@ export function BudgetForm({
             </div>
             <Input
               id="carryover"
-              type="number"
-              value={carryover || ""}
-              onChange={(e) => onBudgetChange("carryover", e.target.value)}
+              type="text"
+              inputMode="numeric"
+              value={formatCurrencyInput(carryover || "")}
+              onChange={(e) => onBudgetChange("carryover", parseCurrencyInput(e.target.value).toString())}
               placeholder="0"
             />
             {suggestedCarryover !== null && (

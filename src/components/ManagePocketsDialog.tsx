@@ -47,6 +47,7 @@ interface ManagePocketsDialogProps {
   archivedPockets: Pocket[];
   loading?: boolean;
   editPocket?: Pocket | null;
+  initialMode?: 'list' | 'create';
 }
 
 const COLOR_OPTIONS = [
@@ -70,8 +71,9 @@ export function ManagePocketsDialog({
   archivedPockets,
   loading = false,
   editPocket = null,
+  initialMode = 'list',
 }: ManagePocketsDialogProps) {
-  const [mode, setMode] = useState<'list' | 'create' | 'edit' | 'archive'>('create');
+  const [mode, setMode] = useState<'list' | 'create' | 'edit' | 'archive'>(initialMode);
   const [editingPocketId, setEditingPocketId] = useState<string | null>(null);
   const [newPocketName, setNewPocketName] = useState('');
   const [newPocketDescription, setNewPocketDescription] = useState('');
@@ -101,7 +103,7 @@ export function ManagePocketsDialog({
       setNewPocketIcon(editPocket.icon || '💰');
       setNewPocketColor(editPocket.color || 'blue');
     } else if (open && !editPocket) {
-      setMode('create');
+      setMode(initialMode);
       setEditingPocketId(null);
       // Reset form fields
       setNewPocketName('');
@@ -109,7 +111,7 @@ export function ManagePocketsDialog({
       setNewPocketIcon('💰');
       setNewPocketColor('blue');
     }
-  }, [open, editPocket]);
+  }, [open, editPocket, initialMode]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -189,13 +191,15 @@ export function ManagePocketsDialog({
   };
 
   const getIcon = (iconName?: string) => {
-    // If it's an emoji, render it directly
-    if (iconName && iconName.length <= 2 && /[\u{1F300}-\u{1F9FF}]/u.test(iconName)) {
-      return <span className="text-xl">{iconName}</span>;
+    // Check if it's a Lucide icon name
+    if (iconName === 'Wallet') {
+      return <Wallet className="size-5" />;
     }
-    // Fallback for old Lucide icon names
-    const IconComponent = iconName === 'Wallet' ? Wallet : iconName === 'Sparkles' ? Sparkles : Wallet;
-    return <IconComponent className="size-5" />;
+    if (iconName === 'Sparkles') {
+      return <Sparkles className="size-5" />;
+    }
+    // Otherwise, treat as emoji
+    return <span className="text-xl">{iconName || '💰'}</span>;
   };
 
   const customPockets = pockets.filter(p => p.type === 'custom');
@@ -312,7 +316,7 @@ export function ManagePocketsDialog({
                             variant={canArchive ? "outline" : "ghost"}
                             disabled={!canArchive || isSubmitting}
                           >
-                            <Archive className="size-4" />
+                            <Trash2 className="size-4" />
                           </Button>
                         </div>
                       </div>

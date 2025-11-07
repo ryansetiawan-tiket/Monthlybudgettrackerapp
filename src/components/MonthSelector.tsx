@@ -1,12 +1,14 @@
 import { memo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Sliders } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useIsMobile } from "./ui/use-mobile";
 
 interface MonthSelectorProps {
   selectedMonth: number;
   selectedYear: number;
   onMonthChange: (month: number, year: number) => void;
+  onSettingsClick?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -14,7 +16,8 @@ const MONTH_NAMES = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember"
 ];
 
-export const MonthSelector = memo(function MonthSelector({ selectedMonth, selectedYear, onMonthChange }: MonthSelectorProps) {
+export const MonthSelector = memo(function MonthSelector({ selectedMonth, selectedYear, onMonthChange, onSettingsClick }: MonthSelectorProps) {
+  const isMobile = useIsMobile();
   const handlePrevious = () => {
     if (selectedMonth === 1) {
       onMonthChange(12, selectedYear - 1);
@@ -77,6 +80,12 @@ export const MonthSelector = memo(function MonthSelector({ selectedMonth, select
       <Button variant="outline" size="icon" onClick={handleNext}>
         <ChevronRight className="size-4" />
       </Button>
+      {/* Settings button - Desktop only */}
+      {!isMobile && onSettingsClick && (
+        <Button variant="outline" size="icon" onClick={onSettingsClick} title="Pengaturan Budget">
+          <Sliders className="size-4" />
+        </Button>
+      )}
     </div>
   );
 });

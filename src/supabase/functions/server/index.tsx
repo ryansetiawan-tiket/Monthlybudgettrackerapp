@@ -35,8 +35,8 @@ const DEFAULT_POCKETS: Pocket[] = [
     name: 'Sehari-hari',
     type: 'primary',
     description: 'Budget untuk kebutuhan sehari-hari',
-    icon: 'Wallet',
-    color: 'blue',
+    icon: '💰',
+    color: '#3b82f6',
     order: 1,
     createdAt: new Date().toISOString(),
     enableWishlist: false  // Daily pocket doesn't need wishlist simulation
@@ -46,8 +46,8 @@ const DEFAULT_POCKETS: Pocket[] = [
     name: 'Uang Dingin',
     type: 'primary',
     description: 'Dana untuk hobi dan hiburan',
-    icon: 'Sparkles',
-    color: 'purple',
+    icon: '❄️',
+    color: '#8b5cf6',
     order: 2,
     createdAt: new Date().toISOString(),
     enableWishlist: true  // Cold money is perfect for wishlist planning
@@ -216,6 +216,7 @@ interface CarryOverSummary {
 
 /**
  * Get or create pockets for a month
+ * Includes auto-migration for legacy icon names
  */
 async function getPockets(monthKey: string): Promise<Pocket[]> {
   let pockets = await kv.get(`pockets:${monthKey}`);
@@ -224,6 +225,30 @@ async function getPockets(monthKey: string): Promise<Pocket[]> {
     // Auto-create default pockets
     pockets = DEFAULT_POCKETS;
     await kv.set(`pockets:${monthKey}`, pockets);
+    return pockets;
+  }
+  
+  // AUTO-MIGRATION: Convert old Lucide icon names to emoji
+  let needsUpdate = false;
+  const updatedPockets = pockets.map((pocket: Pocket) => {
+    // Convert Wallet icon to 💰 emoji
+    if (pocket.icon === 'Wallet') {
+      needsUpdate = true;
+      return { ...pocket, icon: '💰', color: pocket.color || '#3b82f6' };
+    }
+    // Convert Sparkles icon to ❄️ emoji
+    if (pocket.icon === 'Sparkles') {
+      needsUpdate = true;
+      return { ...pocket, icon: '❄️', color: pocket.color || '#8b5cf6' };
+    }
+    return pocket;
+  });
+  
+  // Save updated pockets if migration occurred
+  if (needsUpdate) {
+    await kv.set(`pockets:${monthKey}`, updatedPockets);
+    console.log(`[MIGRATION] Converted legacy icons to emoji for month ${monthKey}`);
+    return updatedPockets;
   }
   
   return pockets;
@@ -2326,11 +2351,105 @@ app.get("/make-server-3adbeaf1/health/:year/:month", async (c) => {
 });
 
 // ============================================
+// POCKETS UPDATE ENDPOINT
+// ============================================
+
+// Update pocket (name, icon, description, etc.)
+app.put("/make-server-3adbeaf1/pockets/:year/:month/update", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    const body = await c.req.json();
+    const { pocketId, updates } = body;
+    
+    if (!pocketId) {
+      return c.json({ 
+        success: false, 
+        error: 'Missing pocketId' 
+      }, 400);
+    }
+    
+    if (!updates || typeof updates !== 'object') {
+      return c.json({ 
+        success: false, 
+        error: 'Missing updates object' 
+      }, 400);
+    }
+    
+    // Get pockets for this month
+    const pocketsKey = `pockets:${monthKey}`;
+    const allPockets = await kv.get(pocketsKey) || [...DEFAULT_POCKETS];
+    
+    // Find pocket to update
+    const pocketIndex = allPockets.findIndex((p: Pocket) => p.id === pocketId);
+    
+    if (pocketIndex === -1) {
+      return c.json({ 
+        success: false, 
+        error: 'Pocket not found' 
+      }, 404);
+    }
+    
+    const pocket = allPockets[pocketIndex];
+    
+    // Validate: cannot change type of primary pockets
+    if (pocket.type === 'primary' && updates.type && updates.type !== 'primary') {
+      return c.json({ 
+        success: false, 
+        error: 'Cannot change type of primary pockets' 
+      }, 400);
+    }
+    
+    // Allow updating: name, icon, description, color (for custom pockets)
+    // For primary pockets, only allow name, icon, description
+    const allowedUpdates: Partial<Pocket> = {};
+    
+    if (updates.name !== undefined) {
+      allowedUpdates.name = updates.name;
+    }
+    
+    if (updates.icon !== undefined) {
+      allowedUpdates.icon = updates.icon;
+    }
+    
+    if (updates.description !== undefined) {
+      allowedUpdates.description = updates.description;
+    }
+    
+    // Color can only be updated for custom pockets
+    if (pocket.type === 'custom' && updates.color !== undefined) {
+      allowedUpdates.color = updates.color;
+    }
+    
+    // Update the pocket
+    allPockets[pocketIndex] = {
+      ...pocket,
+      ...allowedUpdates
+    };
+    
+    // Save back
+    await kv.set(pocketsKey, allPockets);
+    
+    return c.json({
+      success: true,
+      data: allPockets[pocketIndex]
+    });
+  } catch (error: any) {
+    console.log(`Error updating pocket: ${error}`);
+    return c.json({ 
+      success: false, 
+      error: error.message 
+    }, 500);
+  }
+});
+
+// ============================================
 // ARCHIVE ENDPOINTS
 // ============================================
 
 // Archive a pocket (balance must be 0)
-app.post("/make-server-3adbeaf1/archive/:year/:month", async (c) => {
+app.post("/make-server-3adbeaf1/pockets/:year/:month/archive", async (c) => {
   try {
     const year = c.req.param("year");
     const month = c.req.param("month");
@@ -3247,5 +3366,113 @@ async function generateSavingsPlan(
 // ============================================
 
 // REMOVED: Duplicate exclude-state endpoints (kept at line 1786-1833)
+
+// ============================================
+// CATEGORY SETTINGS ENDPOINTS (Phase 8)
+// ============================================
+
+/**
+ * Get category settings for current user
+ * GET /make-server-3adbeaf1/categories/settings
+ */
+app.get("/make-server-3adbeaf1/categories/settings", async (c) => {
+  try {
+    // For now, we're using a single user. In production, extract from auth token
+    const userId = "default_user";
+    const key = `category_settings_${userId}`;
+    
+    const settings = await kv.get(key);
+    
+    if (!settings) {
+      return c.json({ error: "Settings not found" }, 404);
+    }
+    
+    return c.json({ settings });
+  } catch (error: any) {
+    console.error("Error fetching category settings:", error);
+    return c.json({ error: `Failed to fetch category settings: ${error.message}` }, 500);
+  }
+});
+
+/**
+ * Save category settings for current user
+ * POST /make-server-3adbeaf1/categories/settings
+ */
+app.post("/make-server-3adbeaf1/categories/settings", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { settings } = body;
+    
+    if (!settings) {
+      return c.json({ error: "Settings object is required" }, 400);
+    }
+    
+    // Validate settings structure
+    if (!settings.version || typeof settings.version !== 'number') {
+      return c.json({ error: "Invalid settings: version is required" }, 400);
+    }
+    
+    // For now, we're using a single user. In production, extract from auth token
+    const userId = "default_user";
+    const key = `category_settings_${userId}`;
+    
+    // Save settings
+    await kv.set(key, settings);
+    
+    return c.json({ success: true, settings });
+  } catch (error: any) {
+    console.error("Error saving category settings:", error);
+    return c.json({ error: `Failed to save category settings: ${error.message}` }, 500);
+  }
+});
+
+/**
+ * Get category spending tracking for current month
+ * GET /make-server-3adbeaf1/categories/tracking/:monthKey
+ */
+app.get("/make-server-3adbeaf1/categories/tracking/:monthKey", async (c) => {
+  try {
+    const monthKey = c.req.param("monthKey");
+    const userId = "default_user";
+    const key = `category_tracking_${userId}_${monthKey}`;
+    
+    const tracking = await kv.get(key);
+    
+    if (!tracking) {
+      return c.json({ month: monthKey, tracking: {} });
+    }
+    
+    return c.json(tracking);
+  } catch (error: any) {
+    console.error("Error fetching category tracking:", error);
+    return c.json({ error: `Failed to fetch category tracking: ${error.message}` }, 500);
+  }
+});
+
+/**
+ * Update category spending tracking (called after expense add/edit/delete)
+ * POST /make-server-3adbeaf1/categories/tracking/:monthKey
+ */
+app.post("/make-server-3adbeaf1/categories/tracking/:monthKey", async (c) => {
+  try {
+    const monthKey = c.req.param("monthKey");
+    const body = await c.req.json();
+    const { tracking } = body;
+    
+    if (!tracking) {
+      return c.json({ error: "Tracking object is required" }, 400);
+    }
+    
+    const userId = "default_user";
+    const key = `category_tracking_${userId}_${monthKey}`;
+    
+    await kv.set(key, { month: monthKey, tracking });
+    
+    return c.json({ success: true, month: monthKey, tracking });
+  } catch (error: any) {
+    console.error("Error updating category tracking:", error);
+    return c.json({ error: `Failed to update category tracking: ${error.message}` }, 500);
+  }
+});
 
 Deno.serve(app.fetch);

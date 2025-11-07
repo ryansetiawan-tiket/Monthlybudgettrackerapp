@@ -1,21 +1,14 @@
 import { useState, useCallback, memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
-import { Trash2, DollarSign, Pencil, X, Check, RefreshCw, CalendarIcon, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock } from "lucide-react";
+import { Trash2, DollarSign, Pencil, X, Minus, Eye, EyeOff, ArrowLeft, ArrowUpDown, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
-import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar } from "./ui/calendar";
-import { format } from "date-fns";
-import { cn } from "./ui/utils";
-import { formatCurrency } from "../utils/currency";
-import { getBaseUrl, createAuthHeaders } from "../utils/api";
+import { formatCurrency, formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { useIsMobile } from "./ui/use-mobile";
+import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 
 // Default pocket IDs
 const POCKET_IDS = {
@@ -35,6 +28,13 @@ interface AdditionalIncome {
   deduction: number;
   pocketId?: string;
   createdAt?: string;
+}
+
+interface Pocket {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
 }
 
 interface AdditionalIncomeListProps {
@@ -60,6 +60,7 @@ interface AdditionalIncomeListProps {
   onMoveToExpense?: (income: AdditionalIncome) => void;
   isExcludeLocked?: boolean;
   onToggleExcludeLock?: () => void;
+  pockets?: Pocket[]; // NEW: For edit pocket selection
 }
 
 function AdditionalIncomeListComponent({ 
@@ -74,19 +75,11 @@ function AdditionalIncomeListComponent({
   onDeductionExcludedChange,
   onMoveToExpense,
   isExcludeLocked = false,
-  onToggleExcludeLock
+  onToggleExcludeLock,
+  pockets = []
 }: AdditionalIncomeListProps) {
   const isMobile = useIsMobile();
   const [editingIncome, setEditingIncome] = useState<AdditionalIncome | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editAmount, setEditAmount] = useState("");
-  const [editCurrency, setEditCurrency] = useState<"IDR" | "USD">("IDR");
-  const [editConversionType, setEditConversionType] = useState<"auto" | "manual">("auto");
-  const [editExchangeRate, setEditExchangeRate] = useState<number | null>(null);
-  const [editManualRate, setEditManualRate] = useState("");
-  const [editDate, setEditDate] = useState("");
-  const [editDeduction, setEditDeduction] = useState("");
-  const [loadingRate, setLoadingRate] = useState(false);
   
   // Exclude from calculation states - use prop or default to empty Set
   const excludedIncomeIds = excludedIncomeIdsProp || new Set<string>();
@@ -116,97 +109,8 @@ function AdditionalIncomeListComponent({
     }).format(date);
   };
 
-  const fetchExchangeRate = async () => {
-    setLoadingRate(true);
-    try {
-      const response = await fetch(`${baseUrl}/exchange-rate`, {
-        headers: {
-          Authorization: `Bearer ${publicAnonKey}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch exchange rate");
-      }
-
-      const data = await response.json();
-      setEditExchangeRate(data.rate);
-      toast.success(`Kurs berhasil diperbarui: ${formatCurrency(data.rate)}`);
-    } catch (error) {
-      toast.error("Gagal memuat kurs. Silakan gunakan manual.");
-      setEditConversionType("manual");
-    } finally {
-      setLoadingRate(false);
-    }
-  };
-
   const handleEdit = (income: AdditionalIncome) => {
     setEditingIncome(income);
-    setEditName(income.name);
-    setEditAmount(income.amount.toString());
-    setEditCurrency(income.currency as "IDR" | "USD");
-    setEditConversionType(income.conversionType as "auto" | "manual");
-    setEditExchangeRate(income.exchangeRate);
-    setEditManualRate(income.exchangeRate?.toString() || "");
-    // Extract date only (YYYY-MM-DD) from timestamp to display correctly in date input
-    // Use local date as fallback instead of UTC
-    const getLocalDateString = () => {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    const dateOnly = income.date ? income.date.split('T')[0] : getLocalDateString();
-    setEditDate(dateOnly);
-    setEditDeduction((income.deduction || 0).toString());
-  };
-
-  const calculateIDR = () => {
-    if (editCurrency === "IDR") {
-      return Number(editAmount) || 0;
-    }
-
-    const rate = editConversionType === "auto" 
-      ? editExchangeRate 
-      : Number(editManualRate);
-
-    return rate ? (Number(editAmount) || 0) * rate : 0;
-  };
-
-  const handleSaveEdit = () => {
-    if (!editName.trim() || !editAmount) {
-      toast.error("Nama dan nominal harus diisi");
-      return;
-    }
-
-    if (editCurrency === "USD" && editConversionType === "manual" && !editManualRate) {
-      toast.error("Kurs manual harus diisi");
-      return;
-    }
-
-    if (editCurrency === "USD" && editConversionType === "auto" && !editExchangeRate) {
-      toast.error("Kurs belum dimuat. Silakan tunggu atau gunakan manual.");
-      return;
-    }
-
-    const rate = editConversionType === "auto" 
-      ? editExchangeRate 
-      : (editCurrency === "USD" ? Number(editManualRate) : null);
-
-    onUpdateIncome(editingIncome!.id, {
-      name: editName.trim(),
-      amount: Number(editAmount),
-      currency: editCurrency,
-      exchangeRate: rate,
-      amountIDR: calculateIDR(),
-      conversionType: editCurrency === "USD" ? editConversionType : "manual",
-      date: editDate,
-      deduction: Number(editDeduction) || 0,
-      pocketId: editingIncome!.pocketId || POCKET_IDS.COLD_MONEY, // Preserve existing pocketId or default to cold money
-    });
-
-    setEditingIncome(null);
   };
 
   // Toggle exclude income from calculation
@@ -528,9 +432,10 @@ function AdditionalIncomeListComponent({
                     </div>
                     <Input
                       id="globalDeduction"
-                      type="number"
-                      value={globalDeduction || ""}
-                      onChange={(e) => onUpdateGlobalDeduction(Number(e.target.value) || 0)}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatCurrencyInput(globalDeduction || "")}
+                      onChange={(e) => onUpdateGlobalDeduction(parseCurrencyInput(e.target.value))}
                       placeholder="0"
                       className={`text-sm ${isDeductionExcluded ? 'line-through' : ''}`}
                     />
@@ -545,382 +450,85 @@ function AdditionalIncomeListComponent({
             </CardContent>
         </Card>
 
-      {/* Edit Dialog/Drawer - Responsive */}
-      {isMobile ? (
-        <Drawer open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)} dismissible={true}>
-          <DrawerContent className="max-h-[90vh] flex flex-col">
-            <DrawerHeader className="text-left border-b">
-              <DrawerTitle>Edit Pemasukan Tambahan</DrawerTitle>
-            </DrawerHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="editName">Nama Pemasukan</Label>
-              <Input
-                id="editName"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Contoh: Fiverr, Freelance, Bonus, dll"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Mata Uang</Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant={editCurrency === "IDR" ? "default" : "outline"}
-                  onClick={() => setEditCurrency("IDR")}
-                  className="flex-1"
-                >
-                  IDR (Rupiah)
-                </Button>
-                <Button
-                  type="button"
-                  variant={editCurrency === "USD" ? "default" : "outline"}
-                  onClick={() => setEditCurrency("USD")}
-                  className="flex-1"
-                >
-                  USD (Dollar)
+      {/* Edit Dialog/Drawer - Using AdditionalIncomeForm */}
+      {editingIncome && (
+        isMobile ? (
+          <Drawer open={true} onOpenChange={(open) => !open && setEditingIncome(null)} dismissible={true}>
+            <DrawerContent className="max-h-[90vh] flex flex-col">
+              <DrawerHeader className="text-left border-b">
+                <DrawerTitle>Edit Pemasukan Tambahan</DrawerTitle>
+              </DrawerHeader>
+              <div className="flex-1 overflow-y-auto px-4 py-4">
+                <AdditionalIncomeForm
+                  editMode={true}
+                  initialValues={{
+                    name: editingIncome.name,
+                    amount: editingIncome.amount,
+                    currency: editingIncome.currency,
+                    exchangeRate: editingIncome.exchangeRate || null,
+                    conversionType: editingIncome.conversionType || 'auto',
+                    date: editingIncome.date,
+                    deduction: editingIncome.deduction || 0,
+                    pocketId: editingIncome.pocketId || POCKET_IDS.COLD_MONEY,
+                    amountIDR: editingIncome.amountIDR || editingIncome.amount,
+                  }}
+                  onUpdateIncome={(incomeData) => {
+                    onUpdateIncome(editingIncome.id, incomeData);
+                    setEditingIncome(null);
+                    toast.success("Pemasukan berhasil diupdate");
+                  }}
+                  pockets={pockets}
+                  hideTargetPocket={false}
+                  submitButtonText="Simpan"
+                  inDialog={true}
+                />
+              </div>
+              <div className="px-4 py-4 border-t bg-background flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingIncome(null)}>
+                  <X className="size-4 mr-2" />
+                  Batal
                 </Button>
               </div>
-            </div>
-
-            {editCurrency === "USD" && (
-              <div className="space-y-2">
-                <Label>Metode Konversi</Label>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant={editConversionType === "auto" ? "default" : "outline"}
-                    onClick={() => setEditConversionType("auto")}
-                    className="flex-1"
-                  >
-                    Auto (Realtime)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={editConversionType === "manual" ? "default" : "outline"}
-                    onClick={() => setEditConversionType("manual")}
-                    className="flex-1"
-                  >
-                    Manual
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="editAmount">
-                Nominal {editCurrency === "USD" ? "(USD)" : "(IDR)"}
-              </Label>
-              <Input
-                id="editAmount"
-                type="number"
-                value={editAmount}
-                onChange={(e) => setEditAmount(e.target.value)}
-                placeholder="0"
-              />
-            </div>
-
-            {editCurrency === "USD" && (
-              <>
-                {editConversionType === "auto" && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Kurs Realtime</Label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={fetchExchangeRate}
-                        disabled={loadingRate}
-                      >
-                        <RefreshCw className={`size-4 ${loadingRate ? 'animate-spin' : ''}`} />
-                      </Button>
-                    </div>
-                    <Input
-                      value={editExchangeRate ? formatCurrency(editExchangeRate) : "Memuat..."}
-                      disabled
-                    />
-                  </div>
-                )}
-
-                {editConversionType === "manual" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="editManualRate">Kurs Manual (1 USD = ... IDR)</Label>
-                    <Input
-                      id="editManualRate"
-                      type="number"
-                      value={editManualRate}
-                      onChange={(e) => setEditManualRate(e.target.value)}
-                      placeholder="Contoh: 15000"
-                    />
-                  </div>
-                )}
-
-                <div className="p-3 bg-accent rounded-md">
-                  <p className="text-sm text-muted-foreground">Konversi ke IDR:</p>
-                  <p className="text-green-600">{formatCurrency(calculateIDR())}</p>
-                </div>
-              </>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="editDate">Tanggal Pemasukan</Label>
-              <Popover>
-                <PopoverTrigger>
-                  <Input
-                    id="editDate"
-                    type="text"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    placeholder="Pilih tanggal..."
-                    className={cn(
-                      "w-full pl-3 pr-10 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    )}
-                  />
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    initialFocus
-                    mode="single"
-                    selected={editDate ? new Date(editDate) : undefined}
-                    onSelect={(date) => setEditDate(date ? format(date, "yyyy-MM-dd") : "")}
-                    disabled={(date) =>
-                      date < new Date("1900-01-01")
-                    }
-                    className="p-2"
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="editDeduction">Potongan Individual (Optional)</Label>
-              <Input
-                id="editDeduction"
-                type="number"
-                value={editDeduction}
-                onChange={(e) => setEditDeduction(e.target.value)}
-                placeholder="0"
-              />
-              {editDeduction && Number(editDeduction) > 0 && (
-                <div className="p-2 bg-accent rounded-md space-y-1">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nilai Bersih (Net):</p>
-                    <p className="text-green-600">{formatCurrency(calculateIDR() - (Number(editDeduction) || 0))}</p>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Kotor: {formatCurrency(calculateIDR())}
-                  </div>
-                </div>
-              )}
-            </div>
-            </div>
-            <div className="px-4 py-4 border-t bg-background flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditingIncome(null)}>
-                <X className="size-4 mr-2" />
-                Batal
-              </Button>
-              <Button onClick={handleSaveEdit}>
-                <Check className="size-4 mr-2" />
-                Simpan
-              </Button>
-            </div>
           </DrawerContent>
         </Drawer>
       ) : (
-        <Dialog open={!!editingIncome} onOpenChange={(open) => !open && setEditingIncome(null)}>
+        <Dialog open={true} onOpenChange={(open) => !open && setEditingIncome(null)}>
           <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Edit Pemasukan Tambahan</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="editName-desktop">Nama Pemasukan</Label>
-                <Input
-                  id="editName-desktop"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="Contoh: Fiverr, Freelance, Bonus, dll"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Mata Uang</Label>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant={editCurrency === "IDR" ? "default" : "outline"}
-                    onClick={() => setEditCurrency("IDR")}
-                    className="flex-1"
-                  >
-                    IDR (Rupiah)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={editCurrency === "USD" ? "default" : "outline"}
-                    onClick={() => setEditCurrency("USD")}
-                    className="flex-1"
-                  >
-                    USD (Dollar)
-                  </Button>
-                </div>
-              </div>
-
-              {editCurrency === "USD" && (
-                <div className="space-y-2">
-                  <Label>Metode Konversi</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={editConversionType === "auto" ? "default" : "outline"}
-                      onClick={() => setEditConversionType("auto")}
-                      className="flex-1"
-                    >
-                      Auto (Realtime)
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={editConversionType === "manual" ? "default" : "outline"}
-                      onClick={() => setEditConversionType("manual")}
-                      className="flex-1"
-                    >
-                      Manual
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="editAmount-desktop">
-                  Nominal {editCurrency === "USD" ? "(USD)" : "(IDR)"}
-                </Label>
-                <Input
-                  id="editAmount-desktop"
-                  type="number"
-                  value={editAmount}
-                  onChange={(e) => setEditAmount(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-
-              {editCurrency === "USD" && (
-                <>
-                  {editConversionType === "auto" && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label>Kurs Realtime</Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={fetchExchangeRate}
-                          disabled={loadingRate}
-                        >
-                          <RefreshCw className={`size-4 ${loadingRate ? 'animate-spin' : ''}`} />
-                        </Button>
-                      </div>
-                      <Input
-                        value={editExchangeRate ? formatCurrency(editExchangeRate) : "Memuat..."}
-                        disabled
-                      />
-                    </div>
-                  )}
-
-                  {editConversionType === "manual" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="editManualRate-desktop">Kurs Manual (1 USD = ... IDR)</Label>
-                      <Input
-                        id="editManualRate-desktop"
-                        type="number"
-                        value={editManualRate}
-                        onChange={(e) => setEditManualRate(e.target.value)}
-                        placeholder="Contoh: 15000"
-                      />
-                    </div>
-                  )}
-
-                  <div className="p-3 bg-accent rounded-md">
-                    <div className="flex items-center gap-2 text-sm">
-                      <DollarSign className="size-4" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Nilai Konversi:</p>
-                        <p className="text-green-600">{formatCurrency(calculateIDR())}</p>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="editDate-desktop">Tanggal</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      id="editDate-desktop"
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left",
-                        !editDate && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 size-4" />
-                      {editDate ? format(new Date(editDate), "PPP") : <span>Pilih tanggal</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={editDate ? new Date(editDate) : undefined}
-                      onSelect={(date) => setEditDate(date ? date.toISOString().split('T')[0] : '')}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="editDeduction-desktop" className="flex items-center gap-2">
-                    <Minus className="size-3 text-red-600" />
-                    Potongan Individual (Opsional)
-                  </Label>
-                </div>
-                <Input
-                  id="editDeduction-desktop"
-                  type="number"
-                  value={editDeduction}
-                  onChange={(e) => setEditDeduction(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-
-              {(Number(editDeduction) || 0) > 0 && (
-                <div className="p-3 bg-accent rounded-md space-y-2">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Nilai Bersih (Net):</p>
-                    <p className="text-green-600">{formatCurrency(calculateIDR() - (Number(editDeduction) || 0))}</p>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Kotor: {formatCurrency(calculateIDR())}
-                  </div>
-                </div>
-              )}
-            </div>
+            <AdditionalIncomeForm
+              editMode={true}
+              initialValues={{
+                name: editingIncome.name,
+                amount: editingIncome.amount,
+                currency: editingIncome.currency,
+                exchangeRate: editingIncome.exchangeRate || null,
+                conversionType: editingIncome.conversionType || 'auto',
+                date: editingIncome.date,
+                deduction: editingIncome.deduction || 0,
+                pocketId: editingIncome.pocketId || POCKET_IDS.COLD_MONEY,
+                amountIDR: editingIncome.amountIDR || editingIncome.amount,
+              }}
+              onUpdateIncome={(incomeData) => {
+                onUpdateIncome(editingIncome.id, incomeData);
+                setEditingIncome(null);
+                toast.success("Pemasukan berhasil diupdate");
+              }}
+              pockets={pockets}
+              hideTargetPocket={false}
+              submitButtonText="Simpan"
+              inDialog={true}
+            />
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditingIncome(null)}>
                 <X className="size-4 mr-2" />
                 Batal
               </Button>
-              <Button onClick={handleSaveEdit}>
-                <Check className="size-4 mr-2" />
-                Simpan
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      )}
+      ))}
     </>
   );
 }

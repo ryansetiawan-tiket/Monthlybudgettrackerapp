@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter, SheetDescription } from "./ui/sheet";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
@@ -7,6 +7,8 @@ import { toast } from "sonner@2.0.3";
 import { EXPENSE_CATEGORIES } from "../constants";
 import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
 import type { ExpenseCategory } from "../types";
+import { useCategorySettings } from "../hooks/useCategorySettings";
+import { getAllCategories } from "../utils/categoryManager";
 
 interface Expense {
   id: string;
@@ -32,6 +34,10 @@ export function BulkEditCategoryDialog({
 }: BulkEditCategoryDialogProps) {
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | undefined>();
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Phase 8: Get custom categories
+  const { settings } = useCategorySettings();
+  const allCategories = useMemo(() => getAllCategories(settings), [settings]);
 
   const selectedExpenses = expenses.filter(e => selectedExpenseIds.includes(e.id));
 
@@ -81,11 +87,12 @@ export function BulkEditCategoryDialog({
                 <SelectValue placeholder="Pilih kategori" />
               </SelectTrigger>
               <SelectContent>
-                {EXPENSE_CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.value} value={cat.value}>
+                {allCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
                     <span className="flex items-center gap-2">
                       <span>{cat.emoji}</span>
                       <span>{cat.label}</span>
+                      {cat.isCustom && <span className="text-xs text-muted-foreground">(Custom)</span>}
                     </span>
                   </SelectItem>
                 ))}
@@ -100,7 +107,7 @@ export function BulkEditCategoryDialog({
                 {selectedExpenses.map((expense) => (
                   <div key={expense.id} className="flex items-center gap-2 text-sm">
                     {expense.category && (
-                      <span className="text-xs">{getCategoryEmoji(expense.category)}</span>
+                      <span className="text-xs">{getCategoryEmoji(expense.category, settings)}</span>
                     )}
                     <span className="truncate">{expense.name}</span>
                   </div>

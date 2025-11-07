@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, DollarSign, Minus, Lock, Unlock } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3 } from "lucide-react";
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -24,6 +24,13 @@ import { useIsMobile } from "./ui/use-mobile";
 import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
 import { EXPENSE_CATEGORIES } from "../constants";
 import { BulkEditCategoryDialog } from "./BulkEditCategoryDialog";
+import { CategoryFilterBadge } from "./CategoryFilterBadge";
+import { CategoryBreakdown } from "./CategoryBreakdown";
+import { useCategorySettings } from "../hooks/useCategorySettings";
+import { getAllCategories } from "../utils/categoryManager";
+import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { formatCurrency } from "../utils/currency";
+import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 
 interface ExpenseItem {
   name: string;
@@ -48,6 +55,20 @@ interface Expense {
   category?: string;
 }
 
+interface AdditionalIncome {
+  id: string;
+  name: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number | null;
+  amountIDR: number;
+  conversionType: string;
+  date: string;
+  deduction: number;
+  pocketId?: string;
+  createdAt?: string;
+}
+
 interface ExpenseListProps {
   expenses: Expense[];
   onDeleteExpense: (id: string) => void;
@@ -60,10 +81,65 @@ interface ExpenseListProps {
   isExcludeLocked?: boolean;
   onToggleExcludeLock?: () => void;
   pockets?: Array<{id: string; name: string}>;
+  categoryFilter?: Set<import('../types').ExpenseCategory>; // Phase 7
+  onClearFilter?: () => void; // Phase 7
+  // Income-related props
+  incomes?: AdditionalIncome[];
+  onDeleteIncome?: (id: string) => void;
+  onUpdateIncome?: (id: string, income: {
+    name: string;
+    amount: number;
+    currency: string;
+    exchangeRate: number | null;
+    amountIDR: number;
+    conversionType: string;
+    date: string;
+    deduction: number;
+    pocketId: string;
+  }) => void;
+  globalDeduction?: number;
+  onUpdateGlobalDeduction?: (deduction: number) => void;
+  excludedIncomeIds?: Set<string>;
+  onExcludedIncomeIdsChange?: (ids: Set<string>) => void;
+  isDeductionExcluded?: boolean;
+  onDeductionExcludedChange?: (excluded: boolean) => void;
+  onMoveToExpense?: (income: AdditionalIncome) => void;
 }
 
-function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulkDeleteExpenses, onBulkUpdateCategory, excludedExpenseIds: excludedExpenseIdsProp, onExcludedIdsChange, onMoveToIncome, isExcludeLocked = false, onToggleExcludeLock, pockets = [] }: ExpenseListProps) {
+function ExpenseListComponent({ 
+  expenses, 
+  onDeleteExpense, 
+  onEditExpense, 
+  onBulkDeleteExpenses, 
+  onBulkUpdateCategory, 
+  excludedExpenseIds: excludedExpenseIdsProp, 
+  onExcludedIdsChange, 
+  onMoveToIncome, 
+  isExcludeLocked = false, 
+  onToggleExcludeLock, 
+  pockets = [], 
+  categoryFilter = new Set(), 
+  onClearFilter,
+  // Income props
+  incomes = [],
+  onDeleteIncome,
+  onUpdateIncome,
+  globalDeduction = 0,
+  onUpdateGlobalDeduction,
+  excludedIncomeIds: excludedIncomeIdsProp,
+  onExcludedIncomeIdsChange,
+  isDeductionExcluded = false,
+  onDeductionExcludedChange,
+  onMoveToExpense
+}: ExpenseListProps) {
   const isMobile = useIsMobile();
+  
+  // Phase 8: Get custom category settings
+  const { settings } = useCategorySettings();
+  const allCategories = useMemo(() => {
+    return getAllCategories(settings);
+  }, [settings]);
+  
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -102,6 +178,18 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkEditCategoryDialog, setShowBulkEditCategoryDialog] = useState(false);
+  
+  // New states for Figma redesign
+  const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
+  
+  // Exclude from calculation states for income
+  const excludedIncomeIds = excludedIncomeIdsProp || new Set<string>();
+  const [showCategoryDrawer, setShowCategoryDrawer] = useState(false);
+  const [showGlobalDeductionInput, setShowGlobalDeductionInput] = useState(false);
+  
+  // Income editing states
+  const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
+  const [editingIncome, setEditingIncome] = useState<Partial<AdditionalIncome>>({});
   
   // Exclude from calculation states - use prop or default to empty Set
   const excludedExpenseIds = excludedExpenseIdsProp || new Set<string>();
@@ -329,6 +417,21 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
       return sum + expense.amount;
     }, 0);
 
+  // Calculate income totals
+  const totalGrossIncome = incomes
+    .filter(income => !excludedIncomeIds.has(income.id))
+    .reduce((sum, income) => sum + income.amountIDR, 0);
+  
+  const totalIndividualDeductions = incomes
+    .filter(income => !excludedIncomeIds.has(income.id))
+    .reduce((sum, income) => sum + (income.deduction || 0), 0);
+  
+  const subtotalAfterIndividualDeductions = totalGrossIncome - totalIndividualDeductions;
+  
+  const effectiveGlobalDeduction = isDeductionExcluded ? 0 : (globalDeduction || 0);
+  
+  const totalNetIncome = subtotalAfterIndividualDeductions - effectiveGlobalDeduction;
+
   // Fuzzy search function - checks if expense name, items, day name, or date matches
   const fuzzyMatch = (expense: Expense, query: string): boolean => {
     if (!query) return true;
@@ -363,9 +466,33 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
     return false;
   };
 
+  // Phase 7: Filter by category first, then by tab (expense/income)
+  const categoryFilteredExpenses = useMemo(() => {
+    let filtered = expenses;
+    
+    // Filter by tab (expense or income)
+    filtered = filtered.filter(expense => {
+      if (activeTab === 'expense') {
+        return !expense.fromIncome; // Show only expenses
+      } else {
+        return expense.fromIncome; // Show only income
+      }
+    });
+    
+    // Then filter by category if needed
+    if (categoryFilter.size > 0) {
+      filtered = filtered.filter(expense => {
+        const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
+        return categoryFilter.has(expCategory);
+      });
+    }
+    
+    return filtered;
+  }, [expenses, categoryFilter, activeTab]);
+
   // Sort and filter expenses
   const sortedAndFilteredExpenses = useMemo(() => {
-    return [...expenses]
+    return [...categoryFilteredExpenses]
       .sort((a, b) => {
         // First sort by date
         const dateCompare = sortOrder === 'asc' 
@@ -386,7 +513,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
         return dateCompare;
       })
       .filter((expense) => fuzzyMatch(expense, searchQuery));
-  }, [expenses, sortOrder, searchQuery]);
+  }, [categoryFilteredExpenses, sortOrder, searchQuery]);
 
   // Check if all filtered expenses are selected
   const isAllSelected = useMemo(() => {
@@ -886,7 +1013,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       )}
                       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                         <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
-                          {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
+                          {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
                           {expense.name}
                         </p>
                         {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -958,7 +1085,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       />
                     )}
                     <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
-                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
+                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1080,7 +1207,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col gap-0.5">
                     <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
-                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
+                      {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1165,7 +1292,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
               <div>
                 <div className="flex items-center gap-2">
                   <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
-                    {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category)}</span>}
+                    {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
                     {expense.name}
                   </p>
                   {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1278,7 +1405,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                     {formatDateShort(expense.date)}
                   </span>
                   <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>
-                    {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category)}</span>}
+                    {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category, settings)}</span>}
                     {expense.name}
                   </p>
                   {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1398,7 +1525,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>
-                  {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category)}</span>}
+                  {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category, settings)}</span>}
                   {expense.name}
                 </p>
               </div>
@@ -1493,50 +1620,70 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <CardTitle className="flex flex-col gap-2">
           {!isBulkSelectMode ? (
             // Normal Mode
             <>
-              <span className="text-base sm:text-lg">Daftar Pengeluaran</span>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {onToggleExcludeLock && (
-                  <Button
-                    variant={isExcludeLocked ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => onToggleExcludeLock()}
-                    className={`h-8 px-3 text-xs mr-1.5 ${isExcludeLocked ? 'bg-blue-600 hover:bg-blue-700 border-blue-600' : ''}`}
-                    title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
-                  >
-                    {isExcludeLocked ? <Lock className="size-3.5 mr-1.5" /> : <Unlock className="size-3.5 mr-1.5" />}
-                    {isExcludeLocked ? 'Locked' : 'Lock'}
-                  </Button>
-                )}
-                {expenses.length > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleActivateBulkMode}
-                    className="h-8 px-3 text-xs"
-                  >
-                    Pilih
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleSortOrder}
-                  className="h-8 w-8"
-                  title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
+              {/* Row 1: Title + Category Button */}
+              <div className="flex items-center justify-between">
+                <span className="text-base sm:text-lg">Daftar Transaksi</span>
+                <button
+                  onClick={() => setShowCategoryDrawer(true)}
+                  className="h-8 w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
+                  title="Lihat Breakdown Kategori"
                 >
-                  <ArrowUpDown className="size-4" />
-                </Button>
-                {excludedExpenseIds.size > 0 && (
-                  <Badge variant="secondary" className="text-xs h-6 px-1.5">
-                    {excludedExpenseIds.size} excluded
-                  </Badge>
-                )}
-                <span className={`text-sm whitespace-nowrap ${totalExpenses < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {totalExpenses < 0 ? '+' : ''}{formatCurrency(Math.abs(totalExpenses))}
+                  <span className="text-sm">📊</span>
+                </button>
+              </div>
+              
+              {/* Row 2: Action Buttons + Total */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {onToggleExcludeLock && (
+                    <button
+                      onClick={() => onToggleExcludeLock()}
+                      className="h-11 px-3 flex items-center gap-1.5 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
+                      title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
+                    >
+                      {isExcludeLocked ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
+                      <span className="text-xs text-neutral-50">Lock</span>
+                    </button>
+                  )}
+                  {expenses.length > 0 && (
+                    <button
+                      onClick={handleActivateBulkMode}
+                      className="h-11 px-3 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-xs text-neutral-50"
+                    >
+                      Pilih
+                    </button>
+                  )}
+                  <button
+                    onClick={toggleSortOrder}
+                    className="h-11 w-8 flex items-center justify-center rounded-lg hover:bg-[rgba(38,38,38,0.3)] transition-colors"
+                    title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
+                  >
+                    <ArrowUpDown className="size-4" />
+                  </button>
+                  {activeTab === 'expense' && excludedExpenseIds.size > 0 && (
+                    <Badge variant="secondary" className="text-xs h-6 px-1.5">
+                      {excludedExpenseIds.size} excluded
+                    </Badge>
+                  )}
+                  {activeTab === 'income' && excludedIncomeIds.size > 0 && (
+                    <Badge variant="secondary" className="text-xs h-6 px-1.5">
+                      {excludedIncomeIds.size} excluded
+                    </Badge>
+                  )}
+                </div>
+                <span className={`text-sm whitespace-nowrap ${
+                  activeTab === 'expense' 
+                    ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
+                    : 'text-green-600'
+                }`}>
+                  {activeTab === 'expense' 
+                    ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
+                    : `+${formatCurrency(totalNetIncome)}`
+                  }
                 </span>
               </div>
             </>
@@ -1587,6 +1734,17 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
             </>
           )}
         </CardTitle>
+        
+        {/* Phase 7: Category Filter Badge */}
+        {categoryFilter.size > 0 && onClearFilter && (
+          <div className="mt-3">
+            <CategoryFilterBadge
+              activeCategories={categoryFilter}
+              onClear={onClearFilter}
+              itemCount={categoryFilteredExpenses.length}
+            />
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {expenses.length === 0 ? (
@@ -1595,8 +1753,32 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
           </p>
         ) : (
           <div className="space-y-4">
+            {/* Tabs for Expense/Income - Figma Design */}
+            <div className="bg-neutral-800 rounded-[14px] p-[3px] flex gap-0 w-full">
+              <button
+                onClick={() => setActiveTab('expense')}
+                className={`flex-1 px-3 py-[6.5px] rounded-[10px] text-sm text-center transition-all ${
+                  activeTab === 'expense'
+                    ? 'bg-[rgba(255,76,76,0.1)] border border-[#ff4c4c] text-neutral-50'
+                    : 'bg-transparent border border-transparent text-[#a1a1a1]'
+                }`}
+              >
+                Pengeluaran
+              </button>
+              <button
+                onClick={() => setActiveTab('income')}
+                className={`flex-1 px-3 py-[6.5px] rounded-[10px] text-sm text-center transition-all ${
+                  activeTab === 'income'
+                    ? 'bg-[rgba(34,197,94,0.1)] border border-green-500 text-neutral-50'
+                    : 'bg-transparent border border-transparent text-[#a1a1a1]'
+                }`}
+              >
+                Pemasukan
+              </button>
+            </div>
+            
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#a1a1a1]" />
               <Input
                 type="text"
                 placeholder="Cari nama, hari, atau tanggal..."
@@ -1604,7 +1786,7 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 onChange={(e) => handleSearchChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 ref={searchInputRef}
-                className="pl-9"
+                className="pl-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
               />
               {showSuggestions && suggestions.length > 0 && (
                 <div
@@ -1629,10 +1811,12 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
               )}
             </div>
             
-            <div>
-              <Collapsible open={upcomingExpanded} onOpenChange={setUpcomingExpanded}>
-                <CollapsibleTrigger asChild>
-                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
+            {/* Conditional rendering based on active tab */}
+            {activeTab === 'expense' ? (
+              <div>
+                <Collapsible open={upcomingExpanded} onOpenChange={setUpcomingExpanded}>
+                  <CollapsibleTrigger asChild>
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
                     <div className="flex items-center gap-2">
                       {upcomingExpanded ? (
                         <ChevronUp className="size-4" />
@@ -1646,9 +1830,9 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       {upcomingTotal < 0 ? '+' : ''}{formatCurrency(Math.abs(upcomingTotal))}
                     </span>
                   </div>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="space-y-3 md:space-y-2 mt-3">
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-3 md:space-y-2 mt-3">
                     {upcomingExpenses.length === 0 ? (
                       <p className="text-center text-muted-foreground py-4 text-sm">
                         Tidak ada pengeluaran mendatang
@@ -1659,39 +1843,217 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                       )
                     )}
                   </div>
-                </CollapsibleContent>
-              </Collapsible>
-            </div>
-            
-            {historyExpenses.length > 0 && (
-              <div className="mt-2">
-                <Collapsible open={historyExpanded} onOpenChange={setHistoryExpanded}>
-                  <CollapsibleTrigger asChild>
-                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
-                      <div className="flex items-center gap-2">
-                        {historyExpanded ? (
-                          <ChevronUp className="size-4" />
-                        ) : (
-                          <ChevronDown className="size-4" />
-                        )}
-                        <span>Riwayat</span>
-                        <span className="text-xs text-muted-foreground">({historyExpenses.length})</span>
-                      </div>
-                      <span className={`text-sm ${historyTotal < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {historyTotal < 0 ? '+' : ''}{formatCurrency(Math.abs(historyTotal))}
-                      </span>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="space-y-3 md:space-y-2 mt-3">
-                      {Array.from(historyGrouped.entries())
-                        .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
-                        .map(([date, expenses]) => 
-                          renderGroupedExpenseItem(date, expenses)
-                        )}
-                    </div>
                   </CollapsibleContent>
                 </Collapsible>
+                
+                {historyExpenses.length > 0 && (
+                  <div className="mt-2">
+                    <Collapsible open={historyExpanded} onOpenChange={setHistoryExpanded}>
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
+                          <div className="flex items-center gap-2">
+                            {historyExpanded ? (
+                              <ChevronUp className="size-4" />
+                            ) : (
+                              <ChevronDown className="size-4" />
+                            )}
+                            <span>Riwayat</span>
+                            <span className="text-xs text-muted-foreground">({historyExpenses.length})</span>
+                          </div>
+                          <span className={`text-sm ${historyTotal < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {historyTotal < 0 ? '+' : ''}{formatCurrency(Math.abs(historyTotal))}
+                          </span>
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="space-y-3 md:space-y-2 mt-3">
+                          {Array.from(historyGrouped.entries())
+                            .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+                            .map(([date, expenses]) => 
+                              renderGroupedExpenseItem(date, expenses)
+                            )}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Income Tab Content */
+              <div className="space-y-2 mt-4">
+                {incomes.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    Belum ada pemasukan tambahan untuk bulan ini
+                  </p>
+                ) : (
+                  <>
+                    {incomes.map((income) => {
+                      const isExcluded = excludedIncomeIds.has(income.id);
+                      return (
+                        <div
+                          key={income.id}
+                          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
+                              <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                {new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(income.date))}
+                              </span>
+                            </div>
+                            {income.currency === "USD" && (
+                              <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                <DollarSign className="size-3" />
+                                <span className="text-xs">
+                                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
+                                  <span className="ml-1">({income.conversionType === "auto" ? "realtime" : "manual"})</span>
+                                </span>
+                              </div>
+                            )}
+                            {income.deduction > 0 && (
+                              <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between sm:justify-end gap-1">
+                            <div className="text-right">
+                              <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-0.5">
+                              <Button variant="ghost" size="icon" className="h-8 w-8"
+                                onClick={() => {
+                                  const wasExcluded = excludedIncomeIds.has(income.id);
+                                  const newSet = new Set(excludedIncomeIds);
+                                  if (wasExcluded) {
+                                    newSet.delete(income.id);
+                                    toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
+                                  } else {
+                                    newSet.add(income.id);
+                                    toast.info(`${income.name} dikecualikan dari hitungan`);
+                                  }
+                                  if (onExcludedIncomeIdsChange) onExcludedIncomeIdsChange(newSet);
+                                }}
+                                title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                              >
+                                {isExcluded ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5 text-muted-foreground" />}
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8"
+                                onClick={() => {
+                                  setEditingIncomeId(income.id);
+                                  // Convert date to YYYY-MM-DD format for input type="date"
+                                  const dateObj = new Date(income.date);
+                                  const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+                                  setEditingIncome({
+                                    ...income,
+                                    date: formattedDate
+                                  });
+                                }}
+                                title="Edit pemasukan"
+                              >
+                                <Pencil className="size-3.5 text-muted-foreground" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8"
+                                onClick={() => onMoveToExpense?.(income)}
+                                title="Pindahkan ke pengeluaran"
+                              >
+                                <ArrowLeft className="size-3.5 text-blue-500" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8"
+                                onClick={() => onDeleteIncome?.(income.id)}
+                                title="Hapus"
+                              >
+                                <Trash2 className="size-3.5 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    {/* Income Breakdown Section */}
+                    <div className="pt-4 border-t space-y-3 bg-muted/30 p-4 rounded-lg">
+                      <h4 className="text-sm font-medium mb-3">Ringkasan Pemasukan</h4>
+                      
+                      {/* Total Kotor */}
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Total Kotor</span>
+                        <span className="text-green-600">{formatCurrency(totalGrossIncome)}</span>
+                      </div>
+                      
+                      {/* Potongan Individual */}
+                      {totalIndividualDeductions > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <Minus className="size-3" />
+                            Potongan Individual
+                          </span>
+                          <span className="text-red-600">-{formatCurrency(totalIndividualDeductions)}</span>
+                        </div>
+                      )}
+                      
+                      {/* Subtotal */}
+                      <div className="flex items-center justify-between text-sm border-t pt-2">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="text-green-600">{formatCurrency(subtotalAfterIndividualDeductions)}</span>
+                      </div>
+                      
+                      {/* Potongan Global */}
+                      <div className={`space-y-2 ${isDeductionExcluded ? 'opacity-50' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm flex items-center gap-2 cursor-pointer" onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}>
+                            <Minus className="size-3 text-red-600" />
+                            <span className={isDeductionExcluded ? 'line-through' : ''}>Potongan Global</span>
+                            {isDeductionExcluded && <Badge variant="secondary" className="text-xs">excluded</Badge>}
+                          </Label>
+                          <div className="flex items-center gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="size-6"
+                              onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}
+                              title={showGlobalDeductionInput ? "Sembunyikan input" : "Tampilkan input"}
+                            >
+                              {showGlobalDeductionInput ? <EyeOff className="size-3 text-muted-foreground" /> : <Eye className="size-3 text-muted-foreground" />}
+                            </Button>
+                            <Button variant="ghost" size="icon" className="size-6"
+                              onClick={() => {
+                                const newValue = !isDeductionExcluded;
+                                if (onDeductionExcludedChange) onDeductionExcludedChange(newValue);
+                                toast.info(newValue ? "Potongan dikecualikan dari hitungan" : "Potongan dimasukkan dalam hitungan");
+                              }}
+                              title={isDeductionExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
+                            >
+                              {isDeductionExcluded ? <Lock className="size-3 text-muted-foreground" /> : <Unlock className="size-3 text-muted-foreground" />}
+                            </Button>
+                            <span className={`text-sm ${isDeductionExcluded ? 'line-through text-muted-foreground' : 'text-red-600'}`}>
+                              {effectiveGlobalDeduction > 0 ? '-' : ''}{formatCurrency(effectiveGlobalDeduction)}
+                            </span>
+                          </div>
+                        </div>
+                        {showGlobalDeductionInput && (
+                          <Input
+                            id="globalDeduction"
+                            type="text"
+                            inputMode="numeric"
+                            value={formatCurrencyInput(globalDeduction || "")}
+                            onChange={(e) => onUpdateGlobalDeduction?.(parseCurrencyInput(e.target.value))}
+                            placeholder="0"
+                            className={`text-sm ${isDeductionExcluded ? 'line-through' : ''}`}
+                          />
+                        )}
+                      </div>
+                      
+                      {/* Total Bersih */}
+                      <div className="flex items-center justify-between text-base font-medium border-t pt-3">
+                        <span>Total Bersih</span>
+                        <span className="text-green-600">{formatCurrency(totalNetIncome)}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -1720,9 +2082,10 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 <Label htmlFor="edit-amount">Jumlah</Label>
                 <Input
                   id="edit-amount"
-                  type="number"
-                  value={editingExpense.amount.toString()}
-                  onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseFloat(e.target.value) || 0 })}
+                  type="text"
+                  inputMode="numeric"
+                  value={formatCurrencyInput(editingExpense.amount)}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseCurrencyInput(e.target.value) })}
                 />
               </div>
             )}
@@ -1765,9 +2128,9 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <option value="">Pilih Kategori</option>
-                {EXPENSE_CATEGORIES.map(cat => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.emoji} {cat.label}
+                {allCategories.map(cat => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
                   </option>
                 ))}
               </select>
@@ -1852,9 +2215,10 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   <Label htmlFor="edit-amount-desktop">Jumlah</Label>
                   <Input
                     id="edit-amount-desktop"
-                    type="number"
-                    value={editingExpense.amount.toString()}
-                    onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseFloat(e.target.value) || 0 })}
+                    type="text"
+                    inputMode="numeric"
+                    value={formatCurrencyInput(editingExpense.amount)}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseCurrencyInput(e.target.value) })}
                   />
                 </div>
               )}
@@ -1897,9 +2261,9 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">Pilih Kategori</option>
-                  {EXPENSE_CATEGORIES.map(cat => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.emoji} {cat.label}
+                  {allCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
                     </option>
                   ))}
                 </select>
@@ -2049,6 +2413,109 @@ function ExpenseListComponent({ expenses, onDeleteExpense, onEditExpense, onBulk
           expenses={expenses}
           onUpdate={handleConfirmBulkEditCategory}
         />
+      )}
+      
+      {/* Category Breakdown Drawer */}
+      <Drawer open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
+        <DrawerContent className="max-h-[85vh]">
+          <DrawerHeader>
+            <DrawerTitle>Breakdown Kategori</DrawerTitle>
+          </DrawerHeader>
+          <div className="overflow-y-auto px-4 pb-6">
+            <CategoryBreakdown
+              expenses={expenses}
+              excludedExpenseIds={excludedExpenseIds}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
+      
+      {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}
+      {editingIncomeId && editingIncome && onUpdateIncome && (
+        isMobile ? (
+          <Drawer open={true} onOpenChange={(open) => !open && setEditingIncomeId(null)}>
+            <DrawerContent className="max-h-[90vh] flex flex-col">
+              <DrawerHeader className="text-left border-b">
+                <DrawerTitle>Edit Pemasukan</DrawerTitle>
+              </DrawerHeader>
+              <div className="flex-1 overflow-y-auto px-4 py-4">
+                <AdditionalIncomeForm
+                  editMode={true}
+                  initialValues={{
+                    name: editingIncome.name,
+                    amount: editingIncome.amount,
+                    currency: editingIncome.currency || 'IDR',
+                    exchangeRate: editingIncome.exchangeRate || null,
+                    conversionType: editingIncome.conversionType || 'auto',
+                    date: editingIncome.date,
+                    deduction: editingIncome.deduction || 0,
+                    pocketId: editingIncome.pocketId || 'pocket_daily',
+                    amountIDR: editingIncome.amountIDR || editingIncome.amount,
+                  }}
+                  onUpdateIncome={(incomeData) => {
+                    onUpdateIncome(editingIncomeId, incomeData);
+                    setEditingIncomeId(null);
+                    toast.success("Pemasukan berhasil diupdate");
+                  }}
+                  onSuccess={() => setEditingIncomeId(null)}
+                  inDialog={true}
+                  pockets={pockets}
+                  hideTargetPocket={false}
+                  submitButtonText="Simpan"
+                />
+              </div>
+              <div className="flex gap-2 p-4 border-t">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setEditingIncomeId(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </DrawerContent>
+          </Drawer>
+        ) : (
+          <Dialog open={true} onOpenChange={(open) => !open && setEditingIncomeId(null)}>
+            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Edit Pemasukan</DialogTitle>
+              </DialogHeader>
+              <AdditionalIncomeForm
+                editMode={true}
+                initialValues={{
+                  name: editingIncome.name,
+                  amount: editingIncome.amount,
+                  currency: editingIncome.currency || 'IDR',
+                  exchangeRate: editingIncome.exchangeRate || null,
+                  conversionType: editingIncome.conversionType || 'auto',
+                  date: editingIncome.date,
+                  deduction: editingIncome.deduction || 0,
+                  pocketId: editingIncome.pocketId || 'pocket_daily',
+                  amountIDR: editingIncome.amountIDR || editingIncome.amount,
+                }}
+                onUpdateIncome={(incomeData) => {
+                  onUpdateIncome(editingIncomeId, incomeData);
+                  setEditingIncomeId(null);
+                  toast.success("Pemasukan berhasil diupdate");
+                }}
+                onSuccess={() => setEditingIncomeId(null)}
+                inDialog={true}
+                pockets={pockets}
+                hideTargetPocket={false}
+                submitButtonText="Simpan"
+              />
+              <div className="flex gap-2 justify-end pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditingIncomeId(null)}
+                >
+                  Batal
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )
       )}
     </Card>
   );

@@ -170,9 +170,20 @@ export const projectFutureBalance = (
 
 /**
  * Get category emoji with fallback
+ * Phase 8: Now supports custom categories via settings parameter
  */
-export const getCategoryEmoji = (category?: string): string => {
+export const getCategoryEmoji = (category?: string, settings?: any): string => {
   if (!category) return '📦';
+  
+  // Phase 8: Check custom categories first
+  if (settings?.custom?.[category]) {
+    return settings.custom[category].emoji;
+  }
+  
+  // Phase 8: Check overrides for default categories
+  if (settings?.overrides?.[category]?.emoji) {
+    return settings.overrides[category].emoji;
+  }
   
   const categoryMap: Record<string, string> = {
     food: '🍔',
@@ -193,9 +204,20 @@ export const getCategoryEmoji = (category?: string): string => {
 
 /**
  * Get category label with fallback
+ * Phase 8: Now supports custom categories via settings parameter
  */
-export const getCategoryLabel = (category?: string): string => {
+export const getCategoryLabel = (category?: string, settings?: any): string => {
   if (!category) return 'Lainnya';
+  
+  // Phase 8: Check custom categories first
+  if (settings?.custom?.[category]) {
+    return settings.custom[category].label;
+  }
+  
+  // Phase 8: Check overrides for default categories
+  if (settings?.overrides?.[category]?.label) {
+    return settings.overrides[category].label;
+  }
   
   const labelMap: Record<string, string> = {
     food: 'Makanan',

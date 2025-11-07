@@ -28,6 +28,7 @@ const WishlistDialog = lazy(() =>
 );
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
+import { useConfirm } from "../hooks/useConfirm";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
 import { formatCurrency } from "../utils/currency";
 
@@ -97,6 +98,7 @@ const PRIORITY_LABELS = {
 
 export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey }: WishlistSimulationProps) {
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const { confirm, ConfirmDialog } = useConfirm();
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -168,7 +170,8 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
       if (!response.ok) throw new Error('Failed to add item');
 
       toast.success('Item ditambahkan ke wishlist');
-      loadData();
+      // Reload data to show updated wishlist (drawer utama tetap terbuka)
+      await loadData();
     } catch (error) {
       console.error('Error adding item:', error);
       toast.error('Gagal menambah item');
@@ -202,7 +205,15 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   };
 
   const handleDeleteItem = async (itemId: string) => {
-    if (!confirm('Hapus item dari wishlist?')) return;
+    const confirmed = await confirm({
+      title: "Hapus Item?",
+      description: "Apakah Anda yakin ingin menghapus item dari wishlist?",
+      confirmText: "Hapus",
+      cancelText: "Batal",
+      variant: "destructive",
+    });
+    
+    if (!confirmed) return;
 
     try {
       const response = await fetch(
@@ -224,7 +235,14 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
   };
 
   const handlePurchaseItem = async (itemId: string) => {
-    if (!confirm('Tandai item sebagai sudah dibeli? Item akan dikonversi jadi pengeluaran.')) return;
+    const confirmed = await confirm({
+      title: "Beli Item?",
+      description: "Tandai item sebagai sudah dibeli? Item akan dikonversi menjadi pengeluaran.",
+      confirmText: "Tandai Dibeli",
+      cancelText: "Batal",
+    });
+    
+    if (!confirmed) return;
 
     try {
       const response = await fetch(
@@ -639,6 +657,8 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
           />
         )}
       </Suspense>
+      
+      <ConfirmDialog />
     </>
   );
 }

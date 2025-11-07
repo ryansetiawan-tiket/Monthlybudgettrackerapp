@@ -8,14 +8,21 @@
 
 ```
 /planning/expense-categories/
-├── INDEX.md                    ← You are here
-├── DEVELOPER_QUICKSTART.md     ← START HERE! Quick implementation guide
-├── README.md                   ← Main planning document
-├── VISUAL_SUMMARY.md           ← Visual guide & mockups
-├── QUICK_REFERENCE.md          ← Fast lookup & code snippets
-├── IMPLEMENTATION_LOG.md       ← Track progress
-├── BULK_EDIT_DESIGN.md         ← Bulk edit feature design
-└── FUTURE_ANALYTICS.md         ← Future enhancements roadmap
+├── INDEX.md                           ← You are here
+├── DEVELOPER_QUICKSTART.md            ← START HERE! Quick implementation guide
+├── README.md                          ← Main planning document
+├── VISUAL_SUMMARY.md                  ← Visual guide & mockups
+├── QUICK_REFERENCE.md                 ← Fast lookup & code snippets
+├── IMPLEMENTATION_LOG.md              ← Track progress
+├── BULK_EDIT_DESIGN.md                ← Bulk edit feature design
+├── FUTURE_ANALYTICS.md                ← Future enhancements roadmap
+├── CATEGORY_BREAKDOWN_PLANNING.md     ← CategoryBreakdown planning (Phase 5)
+├── CATEGORY_BREAKDOWN_COMPLETE.md     ← CategoryBreakdown implementation summary ✅
+├── PHASE_7_8_REMINDER.md              ← Reminder for future features
+├── PHASE_7_PLANNING.md                ← Smart Filtering technical spec 🆕
+├── PHASE_8_PLANNING.md                ← Customization technical spec 🆕
+├── PHASE_7_8_ROADMAP.md               ← Complete implementation roadmap 🆕
+└── PHASE_7_8_VISUAL_SUMMARY.md        ← Visual planning guide 🆕
 ```
 
 ---
@@ -35,25 +42,51 @@
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Code snippets & patterns
 - **[BULK_EDIT_DESIGN.md](BULK_EDIT_DESIGN.md)** - Bulk edit technical design
 
+### 🆕 Phase 7 & 8 Planning (November 2025)
+- **[PHASE_7_8_ROADMAP.md](PHASE_7_8_ROADMAP.md)** - ⭐ START HERE for Phase 7 & 8!
+- **[PHASE_7_8_VISUAL_SUMMARY.md](PHASE_7_8_VISUAL_SUMMARY.md)** - Visual mockups & flows
+- **[PHASE_7_PLANNING.md](PHASE_7_PLANNING.md)** - Smart Filtering detailed spec
+- **[PHASE_8_PLANNING.md](PHASE_8_PLANNING.md)** - Customization detailed spec
+- **[PHASE_7_8_REMINDER.md](PHASE_7_8_REMINDER.md)** - Feature reminder for later
+
 ---
 
 ## 📋 Feature Summary
 
-### ✅ Core Features (Phase 1-4)
-1. **11 Categories** with emoji identifiers
-2. **Dropdown Selector** in AddExpenseForm
-3. **Emoji Display** in expense lists
-4. **Backward Compatible** - existing data safe
-5. **Bulk Edit** - update multiple at once
-6. **Template Categories** - sensible defaults
+### ✅ Core Features (Phase 1-4) - COMPLETE
+1. **11 Categories** with emoji identifiers ✅
+2. **Dropdown Selector** in AddExpenseForm ✅
+3. **Emoji Display** in expense lists ✅
+4. **Backward Compatible** - existing data safe ✅
+5. **Bulk Edit** - update multiple at once ✅
+6. **Template Categories** - sensible defaults ⏸️ (skipped)
 
-### 🚀 Future Enhancements (Phase 5-10)
-7. **Category Analytics** - Pie charts, trends
-8. **Budget Limits** - Per-category budgets
-9. **Smart Filtering** - Multi-category filters
-10. **Customization** - User-defined categories
-11. **Auto-Categorization** - AI suggestions
+### ✅ Phase 5 Analytics - COMPLETE!
+7. **Category Breakdown** - Pie chart visualization ✅
+   - Interactive pie chart with percentages
+   - Top 3 categories with medal ranking
+   - Full category list (collapsible)
+   - Mobile & desktop responsive
+
+### 🎯 Phase 7-8 - PLANNING COMPLETE! (Ready to Implement)
+8. **Smart Filtering (Phase 7)** - Click pie chart to filter expenses 📋
+   - Click pie slice → auto-filter ExpenseList
+   - Filter badge with clear button
+   - Active slice highlighting
+   - ~45-60 mins implementation
+   
+9. **Customization (Phase 8)** - Full category personalization 📋
+   - Create custom categories (emoji + color)
+   - Edit default categories
+   - Budget limits per category
+   - Category manager panel
+   - ~2-3 hours implementation
+
+### 🚀 Future Enhancements (Phase 9+)
+10. **Auto-Categorization** - AI-powered suggestions
+11. **Advanced Analytics** - Trends, predictions, insights
 12. **Export & Reports** - PDF, CSV, tax mapping
+13. **Social Features** - Share presets, community templates
 
 ---
 
@@ -192,6 +225,6 @@ A: No, it's optional for flexibility
 
 ---
 
-**Documentation Version**: 1.0  
-**Last Updated**: November 6, 2025  
-**Status**: Planning Complete ✅
+**Documentation Version**: 2.0  
+**Last Updated**: November 7, 2025  
+**Status**: Phase 7 & 8 Planning Complete ✅ - Ready to Implement! 🚀

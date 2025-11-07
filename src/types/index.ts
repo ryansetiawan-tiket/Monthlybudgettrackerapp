@@ -21,12 +21,60 @@ export type ExpenseCategory =
   | 'shopping'
   | 'other';
 
+// Category Filter State (Phase 7)
+export interface CategoryFilterState {
+  activeCategories: Set<ExpenseCategory>;
+  source: 'pie-chart' | 'dropdown' | 'manual';
+}
+
+// Phase 8: Custom Categories & Customization
+export interface CustomCategory {
+  id: string;
+  emoji: string;
+  label: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CategoryOverride {
+  emoji?: string;
+  label?: string;
+  color?: string;
+}
+
+export interface CategoryBudget {
+  limit: number;
+  warningAt: number; // percentage (e.g., 80 for 80%)
+  enabled: boolean;
+  resetDay: number; // 1-31, day of month
+}
+
+export interface CategorySettings {
+  version: number;
+  custom: Record<string, CustomCategory>;
+  overrides: Partial<Record<ExpenseCategory, CategoryOverride>>;
+  budgets: Record<string, CategoryBudget>; // key can be ExpenseCategory or custom ID
+  order: string[]; // category IDs in display order
+  keywords: Record<string, string[]>; // for auto-categorization
+  aliases: Record<string, string>; // alias -> category ID
+}
+
+export interface CategoryConfig {
+  id: string;
+  emoji: string;
+  label: string;
+  color: string;
+  isCustom: boolean;
+  budget?: CategoryBudget;
+}
+
 export interface Expense {
   id: string;
   name: string;
   amount: number;
   date: string;
-  category?: ExpenseCategory; // Updated to use ExpenseCategory type
+  category?: string; // Can be ExpenseCategory or custom category ID (Phase 8)
   categoryColor?: string;
   categoryIcon?: string;
   fromIncome?: boolean;

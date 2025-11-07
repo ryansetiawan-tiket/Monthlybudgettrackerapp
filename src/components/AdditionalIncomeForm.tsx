@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
+import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 
 interface Pocket {
   id: string;
@@ -20,32 +21,50 @@ interface Pocket {
   color?: string;
 }
 
+interface IncomeData {
+  name: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number | null;
+  amountIDR: number;
+  conversionType: string;
+  date: string;
+  deduction: number;
+  pocketId: string;
+}
+
 interface AdditionalIncomeFormProps {
-  onAddIncome: (income: {
-    name: string;
-    amount: number;
-    currency: string;
-    exchangeRate: number | null;
-    amountIDR: number;
-    conversionType: string;
-    date: string;
-    deduction: number;
-    pocketId: string;
-  }) => void;
-  isAdding: boolean;
+  onAddIncome?: (income: IncomeData) => void;
+  onUpdateIncome?: (income: IncomeData) => void;
+  isAdding?: boolean;
   onSuccess?: () => void;
   inDialog?: boolean;
   pockets?: Pocket[];
   defaultTargetPocket?: string;
+  // Edit mode props
+  editMode?: boolean;
+  initialValues?: Partial<IncomeData> & {
+    name?: string;
+    amount?: number;
+    currency?: string;
+    date?: string;
+  };
+  hideTargetPocket?: boolean; // For main income which can't change pocket
+  submitButtonText?: string;
 }
 
 export function AdditionalIncomeForm({
   onAddIncome,
-  isAdding,
+  onUpdateIncome,
+  isAdding = false,
   onSuccess,
   inDialog = false,
   pockets = [],
   defaultTargetPocket,
+  editMode = false,
+  initialValues,
+  hideTargetPocket = false,
+  submitButtonText,
 }: AdditionalIncomeFormProps) {
   // Get local date (not UTC) for default value
   const getLocalDateString = () => {
@@ -55,19 +74,32 @@ export function AdditionalIncomeForm({
     const day = String(now.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
+
+  // Convert ISO date to YYYY-MM-DD format
+  const convertISOToDateString = (isoDate: string) => {
+    const dateObj = new Date(isoDate);
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<"IDR" | "USD">("IDR");
-  const [conversionType, setConversionType] = useState<"auto" | "manual">("auto");
-  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
-  const [manualRate, setManualRate] = useState("");
+  const [name, setName] = useState(initialValues?.name || "");
+  const [amount, setAmount] = useState(initialValues?.amount?.toString() || "");
+  const [currency, setCurrency] = useState<"IDR" | "USD">((initialValues?.currency as "IDR" | "USD") || "IDR");
+  const [conversionType, setConversionType] = useState<"auto" | "manual">((initialValues?.conversionType as "auto" | "manual") || "auto");
+  const [exchangeRate, setExchangeRate] = useState<number | null>(initialValues?.exchangeRate || null);
+  const [manualRate, setManualRate] = useState(initialValues?.exchangeRate?.toString() || "");
   const [loadingRate, setLoadingRate] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [date, setDate] = useState(getLocalDateString());
-  const [deduction, setDeduction] = useState("");
-  const [targetPocketId, setTargetPocketId] = useState("");
+  const [date, setDate] = useState(
+    initialValues?.date 
+      ? convertISOToDateString(initialValues.date)
+      : getLocalDateString()
+  );
+  const [deduction, setDeduction] = useState(initialValues?.deduction?.toString() || "");
+  const [targetPocketId, setTargetPocketId] = useState(initialValues?.pocketId || "");
 
   const baseUrl = getBaseUrl(projectId);
 
@@ -159,7 +191,7 @@ export function AdditionalIncomeForm({
       return;
     }
 
-    if (!targetPocketId) {
+    if (!hideTargetPocket && !targetPocketId) {
       toast.error("Kantong tujuan harus dipilih");
       return;
     }
@@ -184,7 +216,7 @@ export function AdditionalIncomeForm({
     const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
     const fullTimestamp = dateWithTime.toISOString();
 
-    onAddIncome({
+    const incomeData: IncomeData = {
       name: name.trim(),
       amount: Number(amount),
       currency,
@@ -193,17 +225,25 @@ export function AdditionalIncomeForm({
       conversionType: currency === "USD" ? conversionType : "manual",
       date: fullTimestamp,
       deduction: Number(deduction) || 0,
-      pocketId: targetPocketId,
-    });
+      pocketId: targetPocketId || initialValues?.pocketId || 'pocket_daily',
+    };
 
-    // Reset form
-    setName("");
-    setAmount("");
-    setCurrency("IDR");
-    setConversionType("auto");
-    setManualRate("");
-    setDeduction("");
-    setTargetPocketId(defaultTargetPocket || (pockets.length > 0 ? pockets[0].id : ""));
+    if (editMode && onUpdateIncome) {
+      onUpdateIncome(incomeData);
+    } else if (onAddIncome) {
+      onAddIncome(incomeData);
+    }
+
+    // Reset form only in add mode
+    if (!editMode) {
+      setName("");
+      setAmount("");
+      setCurrency("IDR");
+      setConversionType("auto");
+      setManualRate("");
+      setDeduction("");
+      setTargetPocketId(defaultTargetPocket || (pockets.length > 0 ? pockets[0].id : ""));
+    }
     
     // Call onSuccess callback if provided (for dialog)
     if (onSuccess) {
@@ -306,9 +346,10 @@ export function AdditionalIncomeForm({
           </Label>
           <Input
             id="incomeAmount"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            type="text"
+            inputMode="numeric"
+            value={formatCurrencyInput(amount)}
+            onChange={(e) => setAmount(parseCurrencyInput(e.target.value).toString())}
             placeholder="0"
           />
         </div>
@@ -341,9 +382,10 @@ export function AdditionalIncomeForm({
                 <Label htmlFor="manualRate">Kurs Manual (1 USD = ... IDR)</Label>
                 <Input
                   id="manualRate"
-                  type="number"
-                  value={manualRate}
-                  onChange={(e) => setManualRate(e.target.value)}
+                  type="text"
+                  inputMode="numeric"
+                  value={formatCurrencyInput(manualRate)}
+                  onChange={(e) => setManualRate(parseCurrencyInput(e.target.value).toString())}
                   placeholder="Contoh: 15000"
                 />
               </div>
@@ -356,7 +398,7 @@ export function AdditionalIncomeForm({
           </>
         )}
 
-        {pockets.length > 0 && (
+        {!hideTargetPocket && pockets.length > 0 && (
           <div className="space-y-2">
             <Label>Ke Kantong</Label>
             <Select value={targetPocketId} onValueChange={setTargetPocketId}>
@@ -415,9 +457,10 @@ export function AdditionalIncomeForm({
           <Label htmlFor="incomeDeduction">Potongan Individual (Optional)</Label>
           <Input
             id="incomeDeduction"
-            type="number"
-            value={deduction}
-            onChange={(e) => setDeduction(e.target.value)}
+            type="text"
+            inputMode="numeric"
+            value={formatCurrencyInput(deduction)}
+            onChange={(e) => setDeduction(parseCurrencyInput(e.target.value).toString())}
             placeholder="0"
           />
           {deduction && Number(deduction) > 0 && (
@@ -433,8 +476,8 @@ export function AdditionalIncomeForm({
           disabled={!name.trim() || !amount || isAdding}
           className="w-full"
         >
-          <Plus className="size-4 mr-2" />
-          {isAdding ? "Menambahkan..." : "Tambah Pemasukan"}
+          {!editMode && <Plus className="size-4 mr-2" />}
+          {submitButtonText || (isAdding ? "Menambahkan..." : editMode ? "Simpan" : "Tambah Pemasukan")}
         </Button>
       </div>
   );

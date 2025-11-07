@@ -5,6 +5,8 @@ import { Label } from "./ui/label";
 import { Plus, Trash2, Edit2, X, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { toast } from "sonner@2.0.3";
+import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { useConfirm } from "../hooks/useConfirm";
 
 export interface FixedExpenseItem {
   name: string;
@@ -31,6 +33,7 @@ function FixedExpenseTemplatesComponent({
   onUpdateTemplate,
   onDeleteTemplate,
 }: FixedExpenseTemplatesProps) {
+  const { confirm, ConfirmDialog } = useConfirm();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<FixedExpenseTemplate | null>(null);
   const [templateName, setTemplateName] = useState("");
@@ -196,8 +199,15 @@ function FixedExpenseTemplatesComponent({
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => {
-                          if (confirm(`Hapus template "${template.name}"?`)) {
+                        onClick={async () => {
+                          const confirmed = await confirm({
+                            title: "Hapus Template?",
+                            description: `Apakah Anda yakin ingin menghapus template "${template.name}"?`,
+                            confirmText: "Hapus",
+                            cancelText: "Batal",
+                            variant: "destructive",
+                          });
+                          if (confirmed) {
                             onDeleteTemplate(template.id);
                             toast.success("Template berhasil dihapus");
                           }
@@ -271,10 +281,11 @@ function FixedExpenseTemplatesComponent({
                         className="flex-1"
                       />
                       <Input
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
                         placeholder="Nominal"
-                        value={item.amount || ""}
-                        onChange={(e) => handleItemChange(index, "amount", e.target.value)}
+                        value={formatCurrencyInput(item.amount || "")}
+                        onChange={(e) => handleItemChange(index, "amount", parseCurrencyInput(e.target.value))}
                         className="flex-1"
                       />
                     </div>
@@ -344,6 +355,8 @@ function FixedExpenseTemplatesComponent({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      <ConfirmDialog />
     </>
   );
 }

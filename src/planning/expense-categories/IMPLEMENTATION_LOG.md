@@ -11,8 +11,9 @@ Phase 1: Foundation          [✓]  3/3
 Phase 2: UI Components       [✓]  2/2
 Phase 3: Templates & Bulk    [✓]  1/2 (Templates skipped, Bulk edit DONE!)
 Phase 4: Testing & Docs      [ ]  0/1
+Phase 5: Analytics (BONUS!)  [✓]  1/1 (CategoryBreakdown implemented!)
 
-Total: 6/8 tasks complete (Bulk Edit implemented!)
+Total: 7/8 tasks complete + 1 bonus feature!
 ```
 
 ---
@@ -191,11 +192,49 @@ _Will add screenshots/recordings during testing phase_
 - ✅ Emoji display in expense lists (mobile + desktop)
 - ✅ Backward compatibility with fallback to 'other' emoji
 
+### 2025-11-07 - Implementation Session 2 (CategoryBreakdown Feature)
+- ✅ Created CategoryBreakdown component (`/components/CategoryBreakdown.tsx`)
+- ✅ Implemented pie chart visualization with recharts
+- ✅ Created Top 3 categories widget with medal icons
+- ✅ Added collapsible full category list (all 11 categories)
+- ✅ Integrated with App.tsx as new "📊 Kategori" tab
+- ✅ Mobile & desktop responsive layouts
+- ✅ Empty state handling
+- ✅ Category color coding for pie chart
+- ✅ Custom tooltip with transaction count
+- ✅ Percentage calculations for all categories
+
+### 2025-11-07 - Bug Fix Session (CategoryBreakdown Data Issue)
+- 🐛 **CRITICAL BUG FOUND**: CategoryBreakdown showing empty state despite expenses existing
+- 🔍 **ROOT CAUSE**: Incorrect filtering logic (was filtering `amount <= 0`, should be `amount > 0`)
+- ✅ **FIXED**: Changed filter to `expenses.filter(exp => exp.amount > 0)` 
+- ✅ **IMPROVED**: Enhanced empty state message to distinguish:
+  - No expenses at all vs
+  - Expenses exist but no categories assigned
+- ✅ **VERIFIED**: Data model clarification documented
+  - Positive amounts = Expenses (shown with `-`)
+  - Negative amounts = Income (shown with `+`)
+- 📝 **DOCUMENTED**: Created `/docs/changelog/CATEGORY_BREAKDOWN_BUG_FIX.md`
+
+### 2025-11-07 - Bug Fix Session 2 (Duplicate "Lainnya" Issue)
+- 🐛 **BUG FOUND**: Many duplicate "Lainnya" rows with Rp 0 in full category list
+- 🔍 **ROOT CAUSE**: Code was showing ALL 11 categories including those with 0 data
+  - Line 130-151 in CategoryBreakdown: `allCategoriesData` included zero-amount categories
+  - Created 5+ duplicate "Lainnya" rows with Rp 0
+- ✅ **FIXED**: Only show categories with actual transactions
+  - Changed `allCategoriesData` to return only `categoryData` (removed zero-fill logic)
+  - Updated counter: "Semua Kategori (11)" → "Semua Kategori (X)" where X = actual count
+- ✅ **RESULT**: Clean list showing only categories that have data
+- 🎯 **REMINDER SET**: User wants Phase 7 & 8 later:
+  - Phase 7: Smart filtering (click pie slice to filter)
+  - Phase 8: Custom categories & color picker
+
 ### Next Steps
-- [ ] Test with real data
-- [ ] Implement bulk edit category dialog (Phase 3.2)
-- [ ] Add template category support (Phase 3.1) - optional
-- [ ] Future: Category analytics (Phase 5+)
+- [ ] Test CategoryBreakdown with real expense data
+- [ ] Add loading skeleton for better UX
+- [ ] Future: Add drill-down functionality (click pie slice to filter)
+- [ ] Future: Month-over-month trend comparison
+- [ ] Future: Category budget limits (Phase 6)
 
 ---
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
@@ -14,9 +14,11 @@ import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
 import { EXPENSE_CATEGORIES } from "../constants";
 import type { ExpenseCategory } from "../types";
+import { useCategorySettings } from "../hooks/useCategorySettings";
+import { getAllCategories } from "../utils/categoryManager";
 
 interface AddExpenseFormProps {
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: ExpenseCategory) => Promise<any>;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onSuccess?: () => void;
@@ -30,10 +32,14 @@ interface ExpenseEntry {
   amount: string;
   calculatedAmount: number | null;
   pocketId: string;
-  category?: ExpenseCategory;
+  category?: string; // Can be ExpenseCategory or custom category ID
 }
 
 export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances }: AddExpenseFormProps) {
+  // Phase 8: Get custom categories
+  const { settings } = useCategorySettings();
+  const allCategories = useMemo(() => getAllCategories(settings), [settings]);
+  
   // Get local date (not UTC) for default value
   const getLocalDateString = () => {
     const now = new Date();
@@ -440,15 +446,21 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
                 <Label>Kategori (Opsional)</Label>
                 <Select 
                   value={entry.category || ""} 
-                  onValueChange={(value) => updateEntryField(entry.id, 'category', value as ExpenseCategory)}
+                  onValueChange={(value) => updateEntryField(entry.id, 'category', value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih kategori" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EXPENSE_CATEGORIES.map((cat) => (
-                      <SelectItem key={cat.value} value={cat.value}>
-                        {cat.emoji} {cat.label}
+                    {allCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        <span className="flex items-center gap-2">
+                          <span>{cat.emoji}</span>
+                          <span>{cat.label}</span>
+                          {cat.isCustom && (
+                            <span className="text-xs text-muted-foreground">(Custom)</span>
+                          )}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>

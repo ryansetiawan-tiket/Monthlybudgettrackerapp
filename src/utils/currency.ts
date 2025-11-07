@@ -43,6 +43,26 @@ export const parseCurrency = (value: string): number => {
 };
 
 /**
+ * Format number for currency input field (with thousand separators)
+ */
+export const formatCurrencyInput = (value: number | string): string => {
+  if (value === '' || value === null || value === undefined) return '';
+  const num = typeof value === 'string' ? parseCurrencyInput(value) : value;
+  if (isNaN(num)) return '';
+  return num.toLocaleString('id-ID');
+};
+
+/**
+ * Parse currency input field value to number (removes thousand separators)
+ */
+export const parseCurrencyInput = (value: string): number => {
+  if (!value) return 0;
+  // Remove all dots (thousand separators) and parse
+  const cleaned = value.replace(/\./g, '');
+  return parseFloat(cleaned) || 0;
+};
+
+/**
  * Format number as percentage
  */
 export const formatPercentage = (value: number): string => {

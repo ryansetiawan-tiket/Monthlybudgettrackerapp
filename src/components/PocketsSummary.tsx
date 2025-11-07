@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings, Calendar, BarChart3, Info, MoreVertical } from "lucide-react";
+import { Wallet, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, Target, Trash2, Plus, Pencil, Settings, Calendar, BarChart3, Info, MoreVertical, Sliders } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
@@ -11,11 +11,14 @@ import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner@2.0.3";
 import { PocketTimeline } from "./PocketTimeline";
+import { PocketDetailPage } from "./PocketDetailPage";
+import { EditPocketDrawer } from "./EditPocketDrawer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import { useIsMobile } from "./ui/use-mobile";
 import svgPaths from "../imports/svg-f312o1132i";
 import { Skeleton } from "./ui/skeleton";
 import { motion } from "motion/react";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "./ui/carousel";
 
 interface Pocket {
   id: string;
@@ -42,6 +45,7 @@ interface PocketsSummaryProps {
   onTransferClick: (defaultFromPocket?: string, defaultToPocket?: string) => void;
   onAddIncomeClick?: (targetPocketId?: string) => void;
   onManagePocketsClick?: () => void;
+  onCreatePocketClick?: () => void;
   onEditPocketClick?: (pocket: Pocket) => void;
   onOpenBudgetSettings?: () => void;
   onRefresh?: () => void;
@@ -87,7 +91,7 @@ function HeartIcon({ className = "size-4" }: { className?: string }) {
   );
 }
 
-export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, onManagePocketsClick, onEditPocketClick, onOpenBudgetSettings, onRefresh, baseUrl, publicAnonKey }: PocketsSummaryProps) {
+export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, onManagePocketsClick, onCreatePocketClick, onEditPocketClick, onOpenBudgetSettings, onRefresh, baseUrl, publicAnonKey }: PocketsSummaryProps) {
   const [pockets, setPockets] = useState<Pocket[]>([]);
   const [balances, setBalances] = useState<Map<string, PocketBalance>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -98,6 +102,11 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pocketToDelete, setPocketToDelete] = useState<Pocket | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDetailPage, setShowDetailPage] = useState(false);
+  const [detailPagePocket, setDetailPagePocket] = useState<Pocket | null>(null);
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const [pocketToEdit, setPocketToEdit] = useState<Pocket | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const isMobile = useIsMobile();
   
   // Timeline prefetch cache
@@ -109,8 +118,10 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   // Realtime mode state (per pocket) - default ON
   const [realtimeMode, setRealtimeMode] = useState<Map<string, boolean>>(new Map());
   
-  // Expanded cards state (for mobile compact view)
-  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  // Carousel state for paging dots
+  const [carouselApi, setCarouselApi] = useState<any>(null);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [slideCount, setSlideCount] = useState(0);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -120,6 +131,24 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       maximumFractionDigits: 0,
     }).format(amount);
   };
+
+  // Setup carousel API listeners for paging dots
+  useEffect(() => {
+    if (!carouselApi) return;
+
+    setSlideCount(carouselApi.scrollSnapList().length);
+    setCurrentSlide(carouselApi.selectedScrollSnap());
+
+    const onSelect = () => {
+      setCurrentSlide(carouselApi.selectedScrollSnap());
+    };
+
+    carouselApi.on('select', onSelect);
+
+    return () => {
+      carouselApi.off('select', onSelect);
+    };
+  }, [carouselApi]);
 
   // Load realtime mode from localStorage and prefetch timeline data
   useEffect(() => {
@@ -259,16 +288,15 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   }, [onRefresh]);
 
   const getIcon = (iconName?: string) => {
-    // If it's an emoji, render it directly
-    if (iconName && iconName.length <= 2 && /[\u{1F300}-\u{1F9FF}]/u.test(iconName)) {
-      return <span className="text-xl">{iconName}</span>;
+    // Check if it's a Lucide icon name
+    if (iconName === 'Wallet') {
+      return <Wallet className="size-5" />;
     }
-    // Fallback for old Lucide icon names
-    switch (iconName) {
-      case 'Wallet': return <Wallet className="size-5" />;
-      case 'Sparkles': return <Sparkles className="size-5" />;
-      default: return <Wallet className="size-5" />;
+    if (iconName === 'Sparkles') {
+      return <Sparkles className="size-5" />;
     }
+    // Otherwise, treat as emoji
+    return <span className="text-xl">{iconName || '💰'}</span>;
   };
 
   const handleToggleWishlist = async (pocketId: string, currentValue: boolean) => {
@@ -338,7 +366,8 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       });
       
       if (!response.ok) {
-        throw new Error(`Failed to prefetch timeline: ${response.status}`);
+        // Silently fail for prefetch - it's not critical
+        return;
       }
       
       const data = await response.json();
@@ -347,7 +376,13 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
         setTimelineCache(prev => new Map(prev).set(pocketId, data.data.entries));
       }
     } catch (error) {
-      console.error('Error prefetching timeline:', error);
+      // Silently fail for prefetch - network errors are expected during development
+      // Only log if it's not a typical network error
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        // Network error - expected during dev, don't log
+      } else {
+        console.error('Error prefetching timeline:', error);
+      }
     } finally {
       // Clear loading state
       setTimelineLoading(prev => new Map(prev).set(pocketId, false));
@@ -368,7 +403,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     setIsDeleting(true);
     try {
       const [year, month] = monthKey.split('-');
-      const response = await fetch(`${baseUrl}/pockets/${year}/${month}/archive`, {
+      const response = await fetch(`${baseUrl}/archive/${year}/${month}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -405,6 +440,48 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     }
   };
 
+  const handleEditPocket = async (pocketId: string, updates: Partial<Pocket>) => {
+    setIsSavingEdit(true);
+    try {
+      const [year, month] = monthKey.split('-');
+      const response = await fetch(`${baseUrl}/pockets/${year}/${month}/update`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${publicAnonKey}`,
+        },
+        body: JSON.stringify({ 
+          pocketId,
+          updates
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update pocket');
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success('Kantong berhasil diperbarui');
+        // Close drawer
+        setShowEditDrawer(false);
+        setPocketToEdit(null);
+        // Refresh pockets
+        await fetchPockets();
+        if (onRefresh) {
+          onRefresh();
+        }
+      }
+    } catch (error: any) {
+      console.error('Error updating pocket:', error);
+      toast.error(error.message || 'Gagal memperbarui kantong');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   if (loading) {
     return (
       <motion.div
@@ -413,88 +490,125 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
         transition={{ delay: 0.25 }}
       >
         <Card>
-          <CardHeader className="pb-3 px-4 pt-4 md:px-6 md:pt-6">
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <Skeleton className="h-5 w-32 md:h-6 md:w-36" />
+              <Skeleton className="h-6 w-36" />
               <div className="flex gap-2">
                 <Skeleton className="size-8 rounded-md" />
                 <Skeleton className="size-8 rounded-md" />
               </div>
             </div>
           </CardHeader>
-          <CardContent className="px-4 pb-4 md:px-6 md:pb-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-              {[1, 2].map(i => (
-                <motion.div
-                  key={i}
-                  initial={{ scale: 0.95, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.3 + i * 0.1 }}
-                >
-                  <Card className="border border-border/50">
-                    <CardContent className="p-3 md:p-4 space-y-3">
-                      {/* Header with icon and title */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Skeleton className="size-8 md:size-9 rounded-md" />
-                          <div className="space-y-1">
-                            <Skeleton className="h-4 w-24 md:w-32" />
-                            <Skeleton className="h-3 w-16 md:w-24" />
+          <CardContent>
+            {isMobile ? (
+              /* MOBILE SKELETON - Carousel Layout */
+              <Carousel
+                opts={{
+                  align: "start",
+                  loop: false,
+                  dragFree: false,
+                  containScroll: "trimSnaps",
+                  skipSnaps: false,
+                }}
+                className="w-full"
+              >
+                <CarouselContent className="-ml-2 md:-ml-4">
+                  {[1, 2].map(i => (
+                    <CarouselItem key={i} className="pl-2 md:pl-4 basis-[92%] md:basis-[48%] lg:basis-[31%]">
+                      <motion.div
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ delay: 0.3 + i * 0.1 }}
+                        className="border rounded-lg bg-neutral-950 border-neutral-800 text-white p-3 h-full"
+                      >
+                        <div className="space-y-2">
+                          {/* Compact Header - Icon + Name */}
+                          <div className="flex items-center gap-2 pb-2 border-b border-neutral-800">
+                            <Skeleton className="size-5 rounded-md bg-neutral-800" />
+                            <Skeleton className="h-4 w-28 bg-neutral-800" />
+                          </div>
+
+                          {/* Compact Balance Section */}
+                          <div className="space-y-0.5">
+                            <Skeleton className="h-3 w-24 bg-neutral-800" />
+                            <div className="flex items-center justify-between gap-2">
+                              <Skeleton className="h-8 w-36 bg-neutral-800" />
+                              <Skeleton className="h-7 w-20 rounded-lg bg-neutral-800" />
+                            </div>
+                            <Skeleton className="h-2.5 w-32 bg-neutral-800 mt-0.5" />
                           </div>
                         </div>
-                        <Skeleton className="size-7 rounded-full" />
-                      </div>
-
-                      {/* Realtime Toggle */}
-                      <div className="flex items-center justify-between py-2 border-t border-b">
-                        <Skeleton className="h-3 w-16" />
-                        <Skeleton className="h-5 w-10 rounded-full" />
-                      </div>
-
-                      {/* Balance */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-baseline">
-                          <Skeleton className="h-3 w-20" />
-                          <Skeleton className="h-6 w-28 md:h-7 md:w-32" />
-                        </div>
-                        <Skeleton className="h-2.5 w-32" />
-                      </div>
-
-                      {/* Breakdown */}
-                      <div className="space-y-2 pt-2 border-t">
-                        <div className="flex justify-between">
-                          <Skeleton className="h-3 w-20" />
-                          <Skeleton className="h-3 w-24" />
-                        </div>
-                        <div className="flex justify-between">
-                          <Skeleton className="h-3 w-24" />
-                          <Skeleton className="h-3 w-20" />
-                        </div>
-                        <div className="flex justify-between">
-                          <Skeleton className="h-3 w-20" />
-                          <Skeleton className="h-3 w-24" />
-                        </div>
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex gap-2 pt-3 border-t">
-                        <Skeleton className="h-9 flex-1 rounded-md" />
-                        <Skeleton className="h-9 flex-1 rounded-md" />
-                      </div>
-
-                      {/* Wishlist Section */}
-                      <div className="space-y-2 pt-3 border-t">
+                      </motion.div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <div className="hidden md:block">
+                  <CarouselPrevious />
+                  <CarouselNext />
+                </div>
+              </Carousel>
+            ) : (
+              /* DESKTOP SKELETON - Grid Layout */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3].map(i => (
+                  <motion.div
+                    key={i}
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.3 + i * 0.1 }}
+                  >
+                    <Card className="border border-border/50">
+                      <CardContent className="p-4 space-y-3">
+                        {/* Header with icon and title */}
                         <div className="flex items-center justify-between">
-                          <Skeleton className="h-3 w-24" />
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="size-9 rounded-md" />
+                            <div className="space-y-1">
+                              <Skeleton className="h-4 w-32" />
+                              <Skeleton className="h-3 w-24" />
+                            </div>
+                          </div>
+                          <Skeleton className="size-7 rounded-full" />
+                        </div>
+
+                        {/* Realtime Toggle */}
+                        <div className="flex items-center justify-between py-2 border-t border-b">
+                          <Skeleton className="h-3 w-16" />
                           <Skeleton className="h-5 w-10 rounded-full" />
                         </div>
-                        <Skeleton className="h-9 w-full rounded-md" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
+
+                        {/* Balance */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-baseline">
+                            <Skeleton className="h-3 w-20" />
+                            <Skeleton className="h-7 w-32" />
+                          </div>
+                          <Skeleton className="h-2.5 w-32" />
+                        </div>
+
+                        {/* Breakdown */}
+                        <div className="space-y-1 pt-2 border-t">
+                          <div className="flex justify-between">
+                            <Skeleton className="h-3 w-20" />
+                            <Skeleton className="h-3 w-24" />
+                          </div>
+                          <div className="flex justify-between">
+                            <Skeleton className="h-3 w-24" />
+                            <Skeleton className="h-3 w-20" />
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-2 pt-3 border-t">
+                          <Skeleton className="h-9 flex-1 rounded-md" />
+                          <Skeleton className="h-9 flex-1 rounded-md" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>
@@ -508,9 +622,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           <CardTitle className="flex items-center justify-between">
             <span>Ringkasan Kantong</span>
             <div className="flex gap-2">
-              {onManagePocketsClick && (
+              {onCreatePocketClick && (
                 <Button 
-                  onClick={() => onManagePocketsClick?.()} 
+                  onClick={() => onCreatePocketClick()} 
                   variant="outline" 
                   size="sm"
                   title="Tambah Kantong"
@@ -519,72 +633,71 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                   <Plus className="size-4" />
                 </Button>
               )}
-              <Button 
-                onClick={() => onTransferClick()} 
-                variant="outline" 
-                size="sm"
-                title="Transfer"
-                aria-label="Transfer"
-              >
-                <ArrowRightLeft className="size-4" />
-              </Button>
+              {onManagePocketsClick && (
+                <Button 
+                  onClick={() => onManagePocketsClick()} 
+                  variant="outline" 
+                  size="sm"
+                  title="Kelola Kantong"
+                  aria-label="Kelola Kantong"
+                >
+                  <Settings className="size-4" />
+                </Button>
+              )}
             </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {pockets.map(pocket => {
+          <Carousel
+            opts={{
+              align: "start",
+              loop: false,
+              dragFree: false,
+              containScroll: "trimSnaps",
+              skipSnaps: false,
+            }}
+            setApi={setCarouselApi}
+            className="w-full"
+          >
+            <CarouselContent className="-ml-2 md:-ml-4 [&>*]:touch-pan-x">
+              {pockets.map(pocket => {
               const balance = balances.get(pocket.id);
               if (!balance) return null;
 
               const isPositive = balance.availableBalance >= 0;
               const balanceColor = isPositive ? 'text-green-600' : 'text-red-600';
 
-              const isExpanded = expandedCards.has(pocket.id);
-              const showCompact = isMobile && !isExpanded;
-
               return (
-                <div 
-                  key={pocket.id} 
-                  className={`border rounded-lg p-4 transition-shadow relative ${
-                    showCompact 
-                      ? 'bg-neutral-950 border-neutral-800 text-white cursor-pointer' 
-                      : 'hover:shadow-md cursor-pointer'
-                  }`}
-                  onMouseEnter={() => prefetchTimeline(pocket.id)}
-                  onTouchStart={() => prefetchTimeline(pocket.id)}
-                  onClick={(e) => {
-                    // Always allow opening timeline on card click
-                    setTimelinePocket(pocket);
-                    setShowTimeline(true);
-                  }}
-                >
-                  {showCompact ? (
+                <CarouselItem key={pocket.id} className="pl-2 md:pl-4 basis-[92%] md:basis-[48%] lg:basis-[31%]">
+                  <div 
+                    className={`border rounded-lg transition-shadow relative h-full cursor-pointer ${
+                      isMobile 
+                        ? 'bg-neutral-950 border-neutral-800 text-white p-3' 
+                        : 'hover:shadow-md p-4'
+                    }`}
+                    onMouseEnter={() => prefetchTimeline(pocket.id)}
+                    onTouchStart={() => prefetchTimeline(pocket.id)}
+                    onClick={(e) => {
+                      // Always allow opening timeline on card click
+                      setTimelinePocket(pocket);
+                      setShowTimeline(true);
+                    }}
+                  >
+                  {isMobile ? (
                     /* COMPACT VIEW - Mobile Only */
-                    <div className="space-y-3">
-                      {/* Compact Header - Icon + Name + Info Button */}
-                      <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
-                        <div className="flex items-center gap-2">
-                          <div className="text-white">
-                            {getIcon(pocket.icon)}
-                          </div>
-                          <h3 className="text-base font-medium tracking-tight">{pocket.name}</h3>
+                    <div className="space-y-2">
+                      {/* Compact Header - Icon + Name */}
+                      <div className="flex items-center gap-2 pb-2 border-b border-neutral-800">
+                        <div className="text-white text-xl">
+                          {getIcon(pocket.icon)}
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleToggleCardExpand(pocket.id);
-                          }}
-                          className="size-6 rounded-full flex items-center justify-center hover:bg-neutral-800 transition-colors"
-                        >
-                          <Info className="size-4 text-white" />
-                        </button>
+                        <h3 className="font-medium tracking-tight">{pocket.name}</h3>
                       </div>
 
                       {/* Compact Balance Section */}
-                      <div className="space-y-1">
+                      <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
-                          <p className="text-xs text-neutral-400">
+                          <p className="text-[11px] text-neutral-400">
                             {realtimeMode.get(pocket.id) ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
                           </p>
                           {/* Loading indicator - shown when fetching timeline */}
@@ -592,12 +705,12 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                             <div className="size-3 border-2 border-neutral-600 border-t-white rounded-full animate-spin" />
                           )}
                         </div>
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center justify-between gap-2">
                           <div className="flex-1">
                             {timelineLoading.get(pocket.id) ? (
-                              <Skeleton className="h-7 w-32 bg-neutral-800" />
+                              <Skeleton className="h-8 w-32 bg-neutral-800" />
                             ) : (
-                              <p className={`text-lg font-semibold tracking-tight ${
+                              <p className={`text-2xl font-semibold tracking-tight ${
                                 (() => {
                                   const isRealtime = realtimeMode.get(pocket.id);
                                   const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
@@ -618,20 +731,20 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                           {pocket.enableWishlist && (
                             <div onClick={(e) => e.stopPropagation()}>
                               <button
-                                className="bg-neutral-800/30 border border-neutral-800 rounded-lg px-4 py-2 flex items-center justify-center gap-2 hover:bg-neutral-800/50 transition-colors whitespace-nowrap"
+                                className="bg-neutral-800/30 border border-neutral-800 rounded-lg px-3 py-1.5 flex items-center justify-center gap-1.5 hover:bg-neutral-800/50 transition-colors whitespace-nowrap shrink-0"
                                 onClick={() => {
                                   setSelectedPocket(pocket);
                                   setShowWishlist(true);
                                 }}
                               >
-                                <HeartIcon className="size-[11.62px] text-white" />
-                                <span className="text-[10.17px] font-medium tracking-tight">Wishlist</span>
+                                <HeartIcon className="size-3.5 text-white" />
+                                <span className="text-[10px] font-medium tracking-tight">Wishlist</span>
                               </button>
                             </div>
                           )}
                         </div>
                         {realtimeMode.get(pocket.id) && !timelineLoading.get(pocket.id) && (
-                          <p className="text-[10px] text-neutral-400 tracking-wide">
+                          <p className="text-[10px] text-neutral-400 tracking-wide mt-0.5">
                             Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </p>
                         )}
@@ -654,36 +767,6 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          {/* Collapse button - Mobile Only */}
-                          {isMobile && isExpanded && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 rounded-full"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleCardExpand(pocket.id);
-                              }}
-                              title="Tutup Detail"
-                            >
-                              <Info className="size-4" />
-                            </Button>
-                          )}
-                          {/* Settings button - only for Sehari-hari pocket */}
-                          {pocket.name === 'Sehari-hari' && onOpenBudgetSettings && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 rounded-full hover:bg-background/50"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenBudgetSettings();
-                              }}
-                              title="Pengaturan Budget"
-                            >
-                              <Settings className="size-4" />
-                            </Button>
-                          )}
                           {/* More options dropdown - only for custom pockets */}
                           {pocket.type === 'custom' && (
                             <DropdownMenu>
@@ -701,6 +784,16 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTransferClick(pocket.id, undefined);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <ArrowRightLeft className="size-4 mr-2" />
+                                  Transfer Dana
+                                </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -890,10 +983,34 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                       </div>
                     </>
                   )}
-                </div>
+                  </div>
+                </CarouselItem>
               );
             })}
-          </div>
+            </CarouselContent>
+            <CarouselPrevious className="hidden md:flex -left-12" />
+            <CarouselNext className="hidden md:flex -right-12" />
+          </Carousel>
+          
+          {/* Paging Dots */}
+          {slideCount > 1 && (
+            <div className="flex justify-center gap-1 pt-3 pb-2">
+              {Array.from({ length: slideCount }).map((_, index) => (
+                <div
+                  key={index}
+                  className={`h-1 rounded-full transition-all duration-300 ${
+                    index === currentSlide 
+                      ? isMobile 
+                        ? 'w-4 bg-white' 
+                        : 'w-6 bg-neutral-900'
+                      : isMobile
+                        ? 'w-1 bg-neutral-600'
+                        : 'w-1.5 bg-neutral-300'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -901,7 +1018,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       {isMobile ? (
         <Drawer open={showWishlist} onOpenChange={setShowWishlist} dismissible={true}>
           <DrawerContent 
-            className="h-[85vh] flex flex-col rounded-t-2xl p-0 z-[102]"
+            className="h-[85vh] flex flex-col rounded-t-2xl p-0 z-[50]"
             aria-describedby={undefined}
           >
             <DrawerHeader className="px-4 pt-6 pb-4 border-b">
@@ -957,6 +1074,46 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           onTimelineLoaded={(entries) => {
             // Update cache when timeline loads new data
             setTimelineCache(prev => new Map(prev).set(timelinePocket.id, entries));
+          }}
+          pocketDescription={timelinePocket.description}
+          pocketIcon={timelinePocket.icon}
+          pocketColor={timelinePocket.color}
+          pocketType={timelinePocket.type}
+          enableWishlist={timelinePocket.enableWishlist}
+          balance={balances.get(timelinePocket.id)}
+          realtimeBalance={realtimeMode.get(timelinePocket.id) ? calculateRealtimeBalance(timelinePocket.id, true) : null}
+          onToggleRealtime={() => {
+            const isCurrentlyRealtime = realtimeMode.get(timelinePocket.id) || false;
+            const newValue = !isCurrentlyRealtime;
+            
+            // Update state
+            setRealtimeMode(prev => {
+              const newMap = new Map(prev);
+              newMap.set(timelinePocket.id, newValue);
+              return newMap;
+            });
+            
+            // Save to localStorage
+            localStorage.setItem(`pocket_realtime_${timelinePocket.id}`, JSON.stringify(newValue));
+          }}
+          onToggleWishlist={() => handleToggleWishlist(timelinePocket.id, timelinePocket.enableWishlist || false)}
+          onTransfer={() => onTransferClick(timelinePocket.id)}
+          onAddFunds={() => onAddIncomeClick?.(timelinePocket.id)}
+          onShowDetailPage={() => {
+            // Close timeline drawer first, then open detail page
+            setShowTimeline(false);
+            setDetailPagePocket(timelinePocket);
+            setShowDetailPage(true);
+          }}
+          onEditPocket={() => {
+            setShowTimeline(false);
+            setPocketToEdit(timelinePocket);
+            setShowEditDrawer(true);
+          }}
+          onDeletePocket={() => {
+            setShowTimeline(false);
+            setPocketToDelete(timelinePocket);
+            setShowDeleteConfirm(true);
           }}
         />
       )}
@@ -1027,6 +1184,66 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           </AlertDialogContent>
         </AlertDialog>
       )}
+
+      {/* Pocket Detail Page (Mobile Only) */}
+      {isMobile && detailPagePocket && (
+        <PocketDetailPage
+          open={showDetailPage}
+          onClose={() => {
+            setShowDetailPage(false);
+            // Reopen timeline drawer when detail page closes
+            setShowTimeline(true);
+            // Don't set detailPagePocket to null immediately to allow smooth exit animation
+            setTimeout(() => setDetailPagePocket(null), 300);
+          }}
+          pocketName={detailPagePocket.name}
+          pocketIcon={detailPagePocket.icon}
+          pocketColor={detailPagePocket.color}
+          pocketType={detailPagePocket.type}
+          pocketId={detailPagePocket.id}
+          balance={balances.get(detailPagePocket.id)}
+          realtimeBalance={realtimeMode.get(detailPagePocket.id) ? calculateRealtimeBalance(detailPagePocket.id, true) : null}
+          isRealtimeMode={realtimeMode.get(detailPagePocket.id) || false}
+          onToggleRealtime={() => {
+            const isCurrentlyRealtime = realtimeMode.get(detailPagePocket.id) || false;
+            const newValue = !isCurrentlyRealtime;
+            
+            // Update state
+            setRealtimeMode(prev => {
+              const newMap = new Map(prev);
+              newMap.set(detailPagePocket.id, newValue);
+              return newMap;
+            });
+            
+            // Save to localStorage
+            localStorage.setItem(`pocket_realtime_${detailPagePocket.id}`, JSON.stringify(newValue));
+          }}
+          onTransfer={() => {
+            setShowDetailPage(false);
+            onTransferClick(detailPagePocket.id);
+          }}
+          onAddFunds={() => {
+            setShowDetailPage(false);
+            onAddIncomeClick?.(detailPagePocket.id);
+          }}
+          enableWishlist={detailPagePocket.enableWishlist}
+          onToggleWishlist={() => handleToggleWishlist(detailPagePocket.id, detailPagePocket.enableWishlist || false)}
+          onOpenWishlist={() => {
+            setShowDetailPage(false);
+            setSelectedPocket(detailPagePocket);
+            setShowWishlist(true);
+          }}
+        />
+      )}
+
+      {/* Edit Pocket Drawer */}
+      <EditPocketDrawer
+        open={showEditDrawer}
+        onOpenChange={setShowEditDrawer}
+        pocket={pocketToEdit}
+        onSave={handleEditPocket}
+        isSaving={isSavingEdit}
+      />
     </>
   );
 }

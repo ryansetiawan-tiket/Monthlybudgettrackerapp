@@ -212,3 +212,20 @@ html {
     height: 1.25rem !important; /* h-5 */
   }
 }
+
+/* Fix for nested dialogs - ensure wishlist dialog is above drawer */
+[data-vaul-drawer][data-state="open"] {
+  pointer-events: none !important;
+}
+
+[data-vaul-drawer][data-state="open"] > * {
+  pointer-events: auto;
+}
+
+/* Ensure dialog inputs are always clickable */
+[role="dialog"] input,
+[role="dialog"] textarea,
+[role="dialog"] select,
+[role="dialog"] button {
+  pointer-events: auto !important;
+}

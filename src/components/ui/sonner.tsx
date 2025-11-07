@@ -10,6 +10,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      position="top-center"
+      toastOptions={{
+        style: {
+          marginTop: '60px', // Account for sticky header
+        },
+      }}
       style={
         {
           "--normal-bg": "var(--popover)",

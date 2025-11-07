@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { getBaseUrl } from '../utils/api';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { handleError, retryWithBackoff } from '../utils/errorHandler';
 
 interface BudgetData {
   initialBudget: number;
@@ -123,20 +124,30 @@ export function useBudgetData() {
     setIsLoading(true);
     
     try {
-      const response = await fetch(
-        `${baseUrl}/budget/${year}/${month}`,
-        {
-          headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-        }
+      // Retry with exponential backoff for network resilience
+      const data = await retryWithBackoff(
+        async () => {
+          const response = await fetch(
+            `${baseUrl}/budget/${year}/${month}`,
+            {
+              headers: {
+                Authorization: `Bearer ${publicAnonKey}`,
+              },
+            }
+          );
+
+          if (!response.ok) {
+            if (response.status >= 500) {
+              throw new Error("Server error");
+            }
+            throw response;
+          }
+
+          return await response.json();
+        },
+        3, // max retries
+        1000 // initial delay
       );
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch budget data");
-      }
-
-      const data = await response.json();
 
       setBudget(data.budget || { initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 });
       setExpenses(data.expenses || []);
@@ -151,7 +162,13 @@ export function useBudgetData() {
         previousMonthRemaining: data.previousMonthRemaining ?? null,
       };
     } catch (error) {
-      console.error("Error fetching budget data:", error);
+      handleError(error, "Gagal memuat data budget");
+      
+      // Set default empty state on error
+      setBudget({ initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 });
+      setExpenses([]);
+      setAdditionalIncomes([]);
+      setPreviousMonthRemaining(null);
     } finally {
       setIsLoading(false);
     }

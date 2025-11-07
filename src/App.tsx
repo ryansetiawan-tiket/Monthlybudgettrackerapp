@@ -8,6 +8,7 @@ import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { PocketsSummary } from "./components/PocketsSummary";
 import { FloatingActionButton } from "./components/FloatingActionButton";
+import { CategoryBreakdown } from "./components/CategoryBreakdown";
 
 // Lazy load heavy dialogs for better initial bundle size (200-300KB reduction)
 const AddExpenseDialog = lazy(() => 
@@ -22,14 +23,16 @@ const TransferDialog = lazy(() =>
 const ManagePocketsDialog = lazy(() => 
   import("./components/ManagePocketsDialog").then(m => ({ default: m.ManagePocketsDialog }))
 );
+const CategoryManager = lazy(() => 
+  import("./components/CategoryManager").then(m => ({ default: m.CategoryManager }))
+);
 import DialogSkeleton from "./components/DialogSkeleton";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { useRealtimeSubscription } from "./utils/supabase/useRealtimeSubscription";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
-import { Plus, DollarSign } from "lucide-react";
+import { Plus, DollarSign, Settings, Sliders } from "lucide-react";
 import { Button } from "./components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { funnyQuotes } from "./data/funny-quotes";
 import { motion, AnimatePresence } from "motion/react";
 import { getBaseUrl, createAuthHeaders } from "./utils/api";
@@ -42,6 +45,9 @@ import { useMobileBackButton } from "./hooks/useMobileBackButton";
 import { usePullToRefresh } from "./hooks/usePullToRefresh";
 import { PullToRefreshIndicator } from "./components/PullToRefreshIndicator";
 import { useIsMobile } from "./components/ui/use-mobile";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import { handleError } from "./utils/errorHandler";
 
 interface BudgetData {
   initialBudget: number;
@@ -117,6 +123,9 @@ interface MonthCache {
 function AppContent() {
   // Setup mobile back button handler (for Capacitor/Android)
   useMobileBackButton();
+  
+  // Monitor online/offline status
+  useOnlineStatus();
 
   // Random funny quote
   const [randomQuote, setRandomQuote] = useState("");
@@ -228,12 +237,19 @@ function AppContent() {
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
+  const [managePocketsInitialMode, setManagePocketsInitialMode] = useState<'list' | 'create'>('list');
   
   // Show/Hide Pockets state (persistent)
   const [showPockets, setShowPockets] = useState(() => {
     const saved = localStorage.getItem('showPockets');
     return saved !== null ? JSON.parse(saved) : true;
   });
+
+  // Phase 7: Category Filter State
+  const [categoryFilter, setCategoryFilter] = useState<Set<import('./types').ExpenseCategory>>(new Set());
+  
+  // Phase 8: Category Manager State
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
 
   const baseUrl = getBaseUrl(projectId);
   const isMobile = useIsMobile();
@@ -357,7 +373,7 @@ function AppContent() {
         invalidateCache(selectedYear, selectedMonth);
       }
     } catch (error: any) {
-      toast.error(error.message || "Gagal mengarsipkan kantong");
+      handleError(error, "Gagal mengarsipkan kantong");
       throw error;
     }
   };
@@ -392,7 +408,7 @@ function AppContent() {
         invalidateCache(selectedYear, selectedMonth);
       }
     } catch (error: any) {
-      toast.error(error.message || "Gagal memulihkan kantong");
+      handleError(error, "Gagal memulihkan kantong");
       throw error;
     }
   };
@@ -973,12 +989,22 @@ function AppContent() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets]);
 
-  const handleOpenIncomeDialog = useCallback((targetPocketId?: string) => {
+  const handleOpenTransferDialog = useCallback((targetPocketId?: string) => {
     startTransition(() => {
-      setDefaultTargetPocket(targetPocketId);
-      setIsIncomeDialogOpen(true);
+      setDefaultToPocket(targetPocketId);
+      setIsTransferDialogOpen(true);
     });
-  }, [setDefaultTargetPocket]);
+  }, [setDefaultToPocket, setIsTransferDialogOpen]);
+
+  const handlePocketTransfer = useCallback(async (transferData: {
+    fromPocketId: string;
+    toPocketId: string;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => {
+    await transferBetweenPockets(selectedYear, selectedMonth, transferData);
+  }, [transferBetweenPockets, selectedYear, selectedMonth]);
 
   const handleDeleteIncome = useCallback(async (id: string) => {
     try {
@@ -1274,6 +1300,15 @@ function AppContent() {
     handleTogglePockets();
   }, [handleTogglePockets]);
 
+  // Phase 7: Category Filter Handlers
+  const handleCategoryClick = useCallback((category: import('./types').ExpenseCategory) => {
+    setCategoryFilter(new Set([category]));
+  }, []);
+
+  const handleClearFilter = useCallback(() => {
+    setCategoryFilter(new Set());
+  }, []);
+
   const handleUpdateGlobalDeduction = useCallback(async (deduction: number) => {
     const newBudget = { ...budget, incomeDeduction: deduction };
     setBudget(newBudget);
@@ -1383,9 +1418,21 @@ function AppContent() {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="text-center space-y-2 pt-2"
+              className="text-center space-y-2 pt-2 relative"
             >
               <h1>Budget Tracker</h1>
+              {/* Settings button - Mobile only, positioned at top right */}
+              {isMobile && (
+                <Button 
+                  variant="ghost" 
+                  size="icon"
+                  className="absolute top-0 right-0 h-9 w-9"
+                  onClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
+                  title="Pengaturan Budget"
+                >
+                  <Sliders className="size-4" />
+                </Button>
+              )}
               <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
             </motion.div>
 
@@ -1398,6 +1445,7 @@ function AppContent() {
                 selectedMonth={selectedMonth}
                 selectedYear={selectedYear}
                 onMonthChange={handleMonthChange}
+                onSettingsClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
               />
             </motion.div>
           </div>
@@ -1433,10 +1481,18 @@ function AppContent() {
                   setIsTransferDialogOpen(true);
                 });
               }}
-              onAddIncomeClick={handleOpenIncomeDialog}
+              onAddIncomeClick={handleOpenTransferDialog}
+              onCreatePocketClick={() => {
+                startTransition(() => {
+                  setEditingPocket(null);
+                  setManagePocketsInitialMode('create');
+                  setIsManagePocketsDialogOpen(true);
+                });
+              }}
               onManagePocketsClick={() => {
                 startTransition(() => {
                   setEditingPocket(null);
+                  setManagePocketsInitialMode('list');
                   setIsManagePocketsDialogOpen(true);
                 });
               }}
@@ -1490,6 +1546,7 @@ function AppContent() {
                 onUnarchivePocket={handleUnarchivePocket}
                 archivedPockets={archivedPockets}
                 editPocket={editingPocket}
+                initialMode={managePocketsInitialMode}
               />
             )}
           </Suspense>
@@ -1540,76 +1597,57 @@ function AppContent() {
             )}
           </Suspense>
 
+          <Suspense fallback={<DialogSkeleton />}>
+            {isTransferDialogOpen && (
+              <TransferDialog
+                open={isTransferDialogOpen}
+                onOpenChange={(open) => {
+                  setIsTransferDialogOpen(open);
+                  if (!open) {
+                    setDefaultFromPocket(undefined);
+                    setDefaultToPocket(undefined);
+                  }
+                }}
+                pockets={pockets}
+                balances={balances}
+                onTransfer={handlePocketTransfer}
+                defaultFromPocket={defaultFromPocket}
+                defaultToPocket={defaultToPocket}
+              />
+            )}
+          </Suspense>
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 }}
           >
-            <Tabs defaultValue="expenses" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger 
-                  value="expenses"
-                  className="data-[state=active]:bg-[rgba(255,76,76,0.1)] data-[state=active]:border-[#ff4c4c] data-[state=active]:text-neutral-50"
-                >
-                  Pengeluaran
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="income"
-                  className="data-[state=active]:bg-[rgba(34,197,94,0.1)] data-[state=active]:border-[#22c55e] data-[state=active]:text-neutral-50"
-                >
-                  Pemasukan Tambahan
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="expenses" className="space-y-3 mt-4">
-                <Button 
-                  onClick={() => startTransition(() => setIsExpenseDialogOpen(true))}
-                  variant="outline"
-                  className="w-full border-red-500/30 hover:bg-red-500/10 hover:border-red-500/50 text-red-600 dark:text-red-400"
-                >
-                  <Plus className="size-4 mr-2" />
-                  Tambah Pengeluaran
-                </Button>
-                <ExpenseList 
-                  expenses={expenses} 
-                  onDeleteExpense={handleDeleteExpense} 
-                  onEditExpense={handleEditExpense}
-                  onBulkDeleteExpenses={handleBulkDeleteExpenses}
-                  onBulkUpdateCategory={handleBulkUpdateCategory}
-                  excludedExpenseIds={excludedExpenseIds}
-                  onExcludedIdsChange={updateExcludedExpenseIds}
-                  onMoveToIncome={handleMoveExpenseToIncome}
-                  isExcludeLocked={isExcludeLocked}
-                  onToggleExcludeLock={() => toggleExcludeLock(selectedYear, selectedMonth)}
-                  pockets={pockets}
-                />
-              </TabsContent>
-
-              <TabsContent value="income" className="space-y-3 mt-4">
-                <Button 
-                  onClick={() => startTransition(() => setIsIncomeDialogOpen(true))}
-                  variant="outline"
-                  className="w-full border-green-500/30 hover:bg-green-500/10 hover:border-green-500/50 text-green-600 dark:text-green-400"
-                >
-                  <DollarSign className="size-4 mr-2" />
-                  Tambah Pemasukan
-                </Button>
-                <AdditionalIncomeList 
-                  incomes={additionalIncomes} 
-                  onDeleteIncome={handleDeleteIncome} 
-                  onUpdateIncome={handleUpdateIncome} 
-                  globalDeduction={budget.incomeDeduction || 0}
-                  onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
-                  excludedIncomeIds={excludedIncomeIds}
-                  onExcludedIdsChange={updateExcludedIncomeIds}
-                  isDeductionExcluded={isDeductionExcluded}
-                  onDeductionExcludedChange={toggleDeductionExcluded}
-                  onMoveToExpense={handleMoveIncomeToExpense}
-                  isExcludeLocked={isExcludeLocked}
-                  onToggleExcludeLock={() => toggleExcludeLock(selectedYear, selectedMonth)}
-                />
-              </TabsContent>
-            </Tabs>
+            <ExpenseList 
+              expenses={expenses} 
+              onDeleteExpense={handleDeleteExpense} 
+              onEditExpense={handleEditExpense}
+              onBulkDeleteExpenses={handleBulkDeleteExpenses}
+              onBulkUpdateCategory={handleBulkUpdateCategory}
+              excludedExpenseIds={excludedExpenseIds}
+              onExcludedIdsChange={updateExcludedExpenseIds}
+              onMoveToIncome={handleMoveExpenseToIncome}
+              isExcludeLocked={isExcludeLocked}
+              onToggleExcludeLock={() => toggleExcludeLock(selectedYear, selectedMonth)}
+              pockets={pockets}
+              categoryFilter={categoryFilter}
+              onClearFilter={handleClearFilter}
+              // Income props
+              incomes={additionalIncomes}
+              onDeleteIncome={handleDeleteIncome}
+              onUpdateIncome={handleUpdateIncome}
+              globalDeduction={budget.incomeDeduction || 0}
+              onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
+              excludedIncomeIds={excludedIncomeIds}
+              onExcludedIncomeIdsChange={updateExcludedIncomeIds}
+              isDeductionExcluded={isDeductionExcluded}
+              onDeductionExcludedChange={toggleDeductionExcluded}
+              onMoveToExpense={handleMoveIncomeToExpense}
+            />
           </motion.div>
         </div>
         
@@ -1619,6 +1657,16 @@ function AppContent() {
           onAddIncome={handleFABAddIncome}
           onToggleSummary={handleFABToggleSummary}
         />
+        
+        {/* Phase 8: Category Manager Dialog */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isCategoryManagerOpen && (
+            <CategoryManager
+              open={isCategoryManagerOpen}
+              onOpenChange={setIsCategoryManagerOpen}
+            />
+          )}
+        </Suspense>
         
         <Toaster />
       </motion.div>
@@ -1633,8 +1681,10 @@ export default function App() {
   }, []);
 
   return (
-    <DialogStackProvider>
-      <AppContent />
-    </DialogStackProvider>
+    <ErrorBoundary>
+      <DialogStackProvider>
+        <AppContent />
+      </DialogStackProvider>
+    </ErrorBoundary>
   );
 }
