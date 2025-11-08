@@ -26,6 +26,9 @@ const ManagePocketsDialog = lazy(() =>
 const CategoryManager = lazy(() => 
   import("./components/CategoryManager").then(m => ({ default: m.CategoryManager }))
 );
+const UnifiedTransactionDialog = lazy(() =>
+  import("./components/UnifiedTransactionDialog").then(m => ({ default: m.UnifiedTransactionDialog }))
+);
 import DialogSkeleton from "./components/DialogSkeleton";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { useRealtimeSubscription } from "./utils/supabase/useRealtimeSubscription";
@@ -237,6 +240,7 @@ function AppContent() {
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
+  const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false); // Desktop unified dialog
   const [managePocketsInitialMode, setManagePocketsInitialMode] = useState<'list' | 'create'>('list');
   
   // Show/Hide Pockets state (persistent)
@@ -840,6 +844,8 @@ function AppContent() {
 
   const handleEditExpense = useCallback(async (id: string, updatedExpense: Omit<Expense, 'id'>) => {
     try {
+      console.log('[App] Editing expense - Sending category:', updatedExpense.category);
+      
       const response = await fetch(
         `${baseUrl}/expenses/${selectedYear}/${selectedMonth}/${id}`,
         {
@@ -857,9 +863,20 @@ function AppContent() {
       }
 
       const result = await response.json();
-      // Preserve fromIncome flag if it exists in the update
-      const updatedData = updatedExpense.fromIncome ? { ...result.data, fromIncome: true } : result.data;
-      const newExpenses = expenses.map((expense) => (expense.id === id ? updatedData : expense));
+      console.log('[App] Server response category:', result.data?.category);
+      
+      // 🔧 CRITICAL FIX: Always create new object to ensure React detects changes
+      const updatedData = { 
+        ...result.data, 
+        ...(updatedExpense.fromIncome ? { fromIncome: true } : {}) 
+      };
+      
+      console.log('[App] Final updatedData category:', updatedData?.category);
+      
+      // 🔧 CRITICAL FIX: Force new array and new object reference for React to detect changes
+      const newExpenses = expenses.map((expense) => 
+        expense.id === id ? { ...updatedData } : expense
+      );
       setExpenses(newExpenses);
       
       // Update cache
@@ -1503,6 +1520,7 @@ function AppContent() {
                 onDeleteTemplate={handleDeleteTemplate}
                 pockets={pockets}
                 balances={balances}
+                currentExpenses={expenses}
               />
             )}
           </Suspense>
@@ -1519,6 +1537,7 @@ function AppContent() {
                 isAdding={isAddingIncome}
                 defaultTargetPocket={defaultTargetPocket}
                 pockets={pockets}
+                balances={balances}
               />
             )}
           </Suspense>
@@ -1574,6 +1593,8 @@ function AppContent() {
               onDeductionExcludedChange={toggleDeductionExcluded}
               // Phase 8: Category Manager
               onOpenCategoryManager={() => startTransition(() => setIsCategoryManagerOpen(true))}
+              // Desktop: Transaction entry
+              onOpenAddTransaction={() => startTransition(() => setIsTransactionDialogOpen(true))}
             />
           </motion.div>
         </div>
@@ -1591,6 +1612,27 @@ function AppContent() {
             <CategoryManager
               open={isCategoryManagerOpen}
               onOpenChange={setIsCategoryManagerOpen}
+            />
+          )}
+        </Suspense>
+        
+        {/* Desktop: Unified Transaction Dialog */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isTransactionDialogOpen && (
+            <UnifiedTransactionDialog
+              open={isTransactionDialogOpen}
+              onOpenChange={setIsTransactionDialogOpen}
+              onAddExpense={handleAddExpense}
+              isAddingExpense={isAdding}
+              templates={templates}
+              onAddTemplate={handleAddTemplate}
+              onUpdateTemplate={handleUpdateTemplate}
+              onDeleteTemplate={handleDeleteTemplate}
+              onAddIncome={handleAddIncome}
+              isAddingIncome={isAddingIncome}
+              pockets={pockets}
+              balances={balances}
+              currentExpenses={expenses}
             />
           )}
         </Suspense>

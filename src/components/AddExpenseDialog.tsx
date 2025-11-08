@@ -20,6 +20,7 @@ interface AddExpenseDialogProps {
   onDeleteTemplate: (id: string) => void;
   pockets?: Array<{id: string; name: string}>;
   balances?: Map<string, {availableBalance: number}>;
+  currentExpenses?: Array<{ category?: string; amount: number }>; // Phase 9: For budget alerts
 }
 
 export function AddExpenseDialog({
@@ -33,6 +34,7 @@ export function AddExpenseDialog({
   onDeleteTemplate,
   pockets,
   balances,
+  currentExpenses,
 }: AddExpenseDialogProps) {
   const [activeTab, setActiveTab] = useState("manual");
   const isMobile = useIsMobile();
@@ -64,6 +66,7 @@ export function AddExpenseDialog({
             onSuccess={handleManualExpenseSuccess}
             pockets={pockets}
             balances={balances}
+            currentExpenses={currentExpenses}
           />
         </TabsContent>
         <TabsContent value="template" className="mt-4">

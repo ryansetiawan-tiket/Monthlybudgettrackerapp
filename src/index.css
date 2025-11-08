@@ -178,6 +178,7 @@
     --default-mono-font-family: var(--font-mono);
     --default-mono-font-feature-settings: var(--font-mono--font-feature-settings);
     --default-mono-font-variation-settings: var(--font-mono--font-variation-settings);
+    --color-primary: var(--primary);
   }
 }
 
@@ -494,6 +495,10 @@
 @layer utilities {
   .\@container\/card-header {
     container: card-header / inline-size;
+  }
+
+  .pointer-events-auto {
+    pointer-events: auto;
   }
 
   .pointer-events-none {
@@ -842,6 +847,10 @@
     margin-left: calc(var(--spacing) * 2);
   }
 
+  .ml-4 {
+    margin-left: calc(var(--spacing) * 4);
+  }
+
   .ml-\[0px\] {
     margin-left: 0;
   }
@@ -1107,6 +1116,10 @@
     max-height: calc(var(--spacing) * 96);
   }
 
+  .max-h-\[60vh\] {
+    max-height: 60vh;
+  }
+
   .max-h-\[70vh\] {
     max-height: 70vh;
   }
@@ -1121,6 +1134,10 @@
 
   .max-h-\[90vh\] {
     max-height: 90vh;
+  }
+
+  .max-h-\[240px\] {
+    max-height: 240px;
   }
 
   .min-h-0 {
@@ -1414,6 +1431,10 @@
 
   .rotate-90 {
     rotate: 90deg;
+  }
+
+  .rotate-180 {
+    rotate: 180deg;
   }
 
   .transform {
@@ -1769,6 +1790,11 @@
     border-left-width: 1px;
   }
 
+  .border-dashed {
+    --tw-border-style: dashed;
+    border-style: dashed;
+  }
+
   .border-\[\#ff4c4c\] {
     border-color: #ff4c4c;
   }
@@ -1780,6 +1806,16 @@
   @supports (color: color-mix(in lab, red, red)) {
     .border-amber-500\/20 {
       border-color: color-mix(in oklab, var(--color-amber-500) 20%, transparent);
+    }
+  }
+
+  .border-amber-500\/30 {
+    border-color: color-mix(in srgb, oklch(.769 .188 70.08) 30%, transparent);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-amber-500\/30 {
+      border-color: color-mix(in oklab, var(--color-amber-500) 30%, transparent);
     }
   }
 
@@ -1885,6 +1921,10 @@
     .border-primary\/20 {
       border-color: color-mix(in oklab, var(--primary) 20%, transparent);
     }
+  }
+
+  .border-red-500 {
+    border-color: var(--color-red-500);
   }
 
   .border-red-500\/20 {
@@ -2191,16 +2231,6 @@
 
   .bg-primary {
     background-color: var(--primary);
-  }
-
-  .bg-primary\/5 {
-    background-color: var(--primary);
-  }
-
-  @supports (color: color-mix(in lab, red, red)) {
-    .bg-primary\/5 {
-      background-color: color-mix(in oklab, var(--primary) 5%, transparent);
-    }
   }
 
   .bg-primary\/20 {
@@ -2636,6 +2666,11 @@
     line-height: 1;
   }
 
+  .leading-relaxed {
+    --tw-leading: var(--leading-relaxed);
+    line-height: var(--leading-relaxed);
+  }
+
   .font-bold {
     --tw-font-weight: var(--font-weight-bold);
     font-weight: var(--font-weight-bold);
@@ -2692,6 +2727,10 @@
 
   .text-\[\#00c950\] {
     color: #00c950;
+  }
+
+  .text-\[\#EF4444\] {
+    color: #ef4444;
   }
 
   .text-\[\#a1a1a1\] {
@@ -2798,6 +2837,10 @@
     color: var(--color-neutral-50);
   }
 
+  .text-neutral-300 {
+    color: var(--color-neutral-300);
+  }
+
   .text-neutral-400 {
     color: var(--color-neutral-400);
   }
@@ -2862,6 +2905,10 @@
     color: var(--color-white);
   }
 
+  .text-yellow-500 {
+    color: var(--color-yellow-500);
+  }
+
   .italic {
     font-style: italic;
   }
@@ -2872,10 +2919,6 @@
 
   .underline-offset-4 {
     text-underline-offset: 4px;
-  }
-
-  .opacity-0 {
-    opacity: 0;
   }
 
   .opacity-30 {
@@ -2894,8 +2937,8 @@
     opacity: .7;
   }
 
-  .opacity-100 {
-    opacity: 1;
+  .opacity-75 {
+    opacity: .75;
   }
 
   .shadow-2xl {
@@ -2949,16 +2992,6 @@
 
   .ring-primary {
     --tw-ring-color: var(--primary);
-  }
-
-  .ring-primary\/50 {
-    --tw-ring-color: var(--primary);
-  }
-
-  @supports (color: color-mix(in lab, red, red)) {
-    .ring-primary\/50 {
-      --tw-ring-color: color-mix(in oklab, var(--primary) 50%, transparent);
-    }
   }
 
   .ring-ring\/50 {
@@ -3095,7 +3128,7 @@
     user-select: none;
   }
 
-  .fade-in-0 {
+  .fade-in, .fade-in-0 {
     --tw-enter-opacity: 0;
   }
 
@@ -3103,14 +3136,12 @@
     animation-play-state: running;
   }
 
-  .zoom-in-95 {
-    --tw-enter-scale: .95;
+  .slide-in-from-top-2 {
+    --tw-enter-translate-y: calc(2 * var(--spacing) * -1);
   }
 
-  @media (hover: hover) {
-    .group-hover\:opacity-100:is(:where(.group):hover *) {
-      opacity: 1;
-    }
+  .zoom-in-95 {
+    --tw-enter-scale: .95;
   }
 
   .group-data-\[disabled\=true\]\:pointer-events-none:is(:where(.group)[data-disabled="true"] *) {
@@ -3308,6 +3339,18 @@
   }
 
   @media (hover: hover) {
+    .hover\:bg-amber-500\/20:hover {
+      background-color: color-mix(in srgb, oklch(.769 .188 70.08) 20%, transparent);
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-amber-500\/20:hover {
+        background-color: color-mix(in oklab, var(--color-amber-500) 20%, transparent);
+      }
+    }
+  }
+
+  @media (hover: hover) {
     .hover\:bg-background:hover {
       background-color: var(--background);
     }
@@ -3358,18 +3401,6 @@
   @media (hover: hover) {
     .hover\:bg-muted:hover {
       background-color: var(--muted);
-    }
-  }
-
-  @media (hover: hover) {
-    .hover\:bg-muted\/30:hover {
-      background-color: var(--muted);
-    }
-
-    @supports (color: color-mix(in lab, red, red)) {
-      .hover\:bg-muted\/30:hover {
-        background-color: color-mix(in oklab, var(--muted) 30%, transparent);
-      }
     }
   }
 
@@ -3633,6 +3664,16 @@
     --tw-scale-y: 95%;
     --tw-scale-z: 95%;
     scale: var(--tw-scale-x) var(--tw-scale-y);
+  }
+
+  .active\:bg-muted\/50:active {
+    background-color: var(--muted);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .active\:bg-muted\/50:active {
+      background-color: color-mix(in oklab, var(--muted) 50%, transparent);
+    }
   }
 
   .disabled\:pointer-events-none:disabled {
@@ -4063,12 +4104,6 @@
       .supports-\[backdrop-filter\]\:bg-background\/60 {
         background-color: color-mix(in oklab, var(--background) 60%, transparent);
       }
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .motion-reduce\:transition-none {
-      transition-property: none;
     }
   }
 
@@ -5015,6 +5050,10 @@ html {
 
 [role="dialog"] input, [role="dialog"] textarea, [role="dialog"] select, [role="dialog"] button {
   pointer-events: auto !important;
+}
+
+[data-slot="progress"] [data-slot="indicator"] {
+  background-color: var(--progress-background, var(--color-primary)) !important;
 }
 
 @property --tw-translate-x {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
@@ -16,6 +16,11 @@ import { EXPENSE_CATEGORIES } from "../constants";
 import type { ExpenseCategory } from "../types";
 import { useCategorySettings } from "../hooks/useCategorySettings";
 import { getAllCategories } from "../utils/categoryManager";
+import { showBudgetAlertIfNeeded, calculateCategoryTotal } from "../utils/budgetAlerts";
+import { BudgetExceedDialog, BudgetExceedInfo } from "./BudgetExceedDialog";
+import { getCategoryLabel } from "../utils/calculations";
+import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
+import { formatCurrency } from "../utils/currency";
 
 interface AddExpenseFormProps {
   onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string) => Promise<any>;
@@ -24,6 +29,7 @@ interface AddExpenseFormProps {
   onSuccess?: () => void;
   pockets?: Array<{id: string; name: string}>;
   balances?: Map<string, {availableBalance: number}>;
+  currentExpenses?: Array<{ category?: string; amount: number }>; // For budget alert calculations
 }
 
 interface ExpenseEntry {
@@ -35,10 +41,28 @@ interface ExpenseEntry {
   category?: string; // Can be ExpenseCategory or custom category ID
 }
 
-export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances }: AddExpenseFormProps) {
+export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances, currentExpenses = [] }: AddExpenseFormProps) {
   // Phase 8: Get custom categories
   const { settings } = useCategorySettings();
   const allCategories = useMemo(() => getAllCategories(settings), [settings]);
+  
+  // Phase 9: Budget Alert System state
+  const [showBudgetDialog, setShowBudgetDialog] = useState(false);
+  const [exceedingCategories, setExceedingCategories] = useState<BudgetExceedInfo[]>([]);
+  const [pendingSubmit, setPendingSubmit] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Balance validation state
+  const [balanceErrors, setBalanceErrors] = useState<Map<string, string>>(new Map());
+  const [insufficientBalances, setInsufficientBalances] = useState<Set<string>>(new Set());
+  
+  // Reactive validation dialog state
+  const [showInsufficientDialog, setShowInsufficientDialog] = useState(false);
+  const [insufficientDetails, setInsufficientDetails] = useState<{
+    pocketName: string;
+    availableBalance: number;
+    attemptedAmount: number;
+  } | null>(null);
   
   // Get local date (not UTC) for default value
   const getLocalDateString = () => {
@@ -206,11 +230,9 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     // Calculate total amount
     const totalAmount = getTotalTemplateAmount();
     
-    // Create full ISO timestamp with current local time
-    const [year, month, day] = date.split('-').map(Number);
-    const now = new Date();
-    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
-    const fullTimestamp = dateWithTime.toISOString();
+    // 🔧 FIX: Keep date in YYYY-MM-DD format to avoid timezone conversion
+    // Just use the date string directly - backend will handle time if needed
+    const fullTimestamp = date;
     
     // Send as single expense with items and color
     if (totalAmount > 0) {
@@ -240,29 +262,116 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
 
     if (validEntries.length === 0) return;
 
-    // Generate groupId for multiple entries added together
+    // 🚨 PHASE 9: Check if any entries will exceed budget BEFORE saving
+    const exceeding: BudgetExceedInfo[] = [];
+    
+    for (const entry of validEntries) {
+      if (entry.category && settings?.budgets?.[entry.category]) {
+        const budgetConfig = settings.budgets[entry.category];
+        
+        // Calculate current total for this category
+        const currentTotal = calculateCategoryTotal(entry.category, currentExpenses);
+        
+        const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+        const projectedTotal = currentTotal + finalAmount;
+        
+        // Will it exceed the limit?
+        if (projectedTotal > budgetConfig.limit) {
+          const excess = projectedTotal - budgetConfig.limit;
+          const currentPercent = Math.round((currentTotal / budgetConfig.limit) * 100);
+          const projectedPercent = Math.round((projectedTotal / budgetConfig.limit) * 100);
+          
+          exceeding.push({
+            categoryId: entry.category,
+            categoryLabel: getCategoryLabel(entry.category, settings),
+            currentTotal,
+            projectedTotal,
+            limit: budgetConfig.limit,
+            excess,
+            currentPercent,
+            projectedPercent
+          });
+        }
+      }
+    }
+    
+    // If any will exceed, show dialog first (Feature 2: Confirmation Dialog)
+    if (exceeding.length > 0) {
+      setExceedingCategories(exceeding);
+      setShowBudgetDialog(true);
+      setPendingSubmit(true);
+      return; // Stop here, wait for user confirmation
+    }
+    
+    // If no budget exceeded, proceed normally
+    await proceedWithSubmit();
+  };
+  
+  // Actual submit logic (called after confirmation or if no exceed)
+  const proceedWithSubmit = async () => {
+    setIsProcessing(true); // 🔥 Start processing state
+    
+    const validEntries = entries.filter(entry => {
+      const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+      return finalAmount > 0;
+    });
+
+    // BALANCE VALIDATION (Reactive fail-safe)
+    if (balances) {
+      for (const entry of validEntries) {
+        const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+        const pocket = balances.get(entry.pocketId);
+        
+        if (pocket && finalAmount > pocket.availableBalance) {
+          const pocketName = pockets.find(p => p.id === entry.pocketId)?.name || 'kantong ini';
+          setInsufficientDetails({
+            pocketName,
+            availableBalance: pocket.availableBalance,
+            attemptedAmount: finalAmount,
+          });
+          setShowInsufficientDialog(true);
+          setIsProcessing(false);
+          return; // BLOCK SUBMISSION!
+        }
+      }
+    }
+
     const groupId = validEntries.length > 1 ? crypto.randomUUID() : undefined;
     const isBatch = validEntries.length > 1;
-    
-    // Create full ISO timestamp with current local time
-    // Parse the date string and add current time
-    const [year, month, day] = date.split('-').map(Number);
-    const now = new Date();
-    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
-    const fullTimestamp = dateWithTime.toISOString();
+    const fullTimestamp = date;
 
     try {
       // Submit each entry individually with groupId
-      // Using sequential calls to maintain order and ensure proper state updates
       for (let i = 0; i < validEntries.length; i++) {
         const entry = validEntries[i];
         const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
         const finalName = entry.name.trim() || formatDateToIndonesian(date);
         const isLast = i === validEntries.length - 1;
         
+        // 🔥 PHASE 9: Get old total BEFORE save (for Feature 1: Toast Alert)
+        let oldTotal = 0;
+        if (entry.category && settings?.budgets?.[entry.category]) {
+          oldTotal = calculateCategoryTotal(entry.category, currentExpenses);
+        }
+        
         // Wait for each to complete before moving to next
-        // Use silent mode for batch to avoid multiple toasts, except for the last one
         await onAddExpense(finalName, finalAmount, fullTimestamp, undefined, undefined, entry.pocketId, groupId, !isLast && isBatch, entry.category);
+        
+        // 🔥 PHASE 9: Show budget alert if needed (Feature 1: Toast Alert)
+        if (entry.category && settings?.budgets?.[entry.category]) {
+          const budgetConfig = settings.budgets[entry.category];
+          const newTotal = oldTotal + finalAmount;
+          const categoryLabel = getCategoryLabel(entry.category, settings);
+          
+          showBudgetAlertIfNeeded({
+            categoryId: entry.category,
+            categoryLabel,
+            oldTotal,
+            newTotal,
+            limit: budgetConfig.limit,
+            warningAt: budgetConfig.warningAt
+          });
+        }
       }
 
       // Show success toast for batch
@@ -276,6 +385,9 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     } catch (error) {
       const { toast } = await import("sonner@2.0.3");
       toast.error("Gagal menambahkan pengeluaran");
+    } finally {
+      setPendingSubmit(false);
+      setIsProcessing(false); // 🔥 End processing state
     }
   };
 
@@ -289,6 +401,130 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
       pocketId: defaultPocket
     }]);
     setDate(getLocalDateString());
+  };
+
+  /**
+   * Validates if expense amount exceeds pocket balance
+   * Shows inline error and disables submit if insufficient
+   */
+  const validateEntryBalance = useCallback((
+    entryId: string,
+    amount: number,
+    pocketId: string
+  ) => {
+    // Skip validation if no pocket selected or no amount
+    if (!pocketId || !amount || amount <= 0) {
+      setBalanceErrors(prev => {
+        const next = new Map(prev);
+        next.delete(entryId);
+        return next;
+      });
+      setInsufficientBalances(prev => {
+        const next = new Set(prev);
+        next.delete(entryId);
+        return next;
+      });
+      return true;
+    }
+
+    // Skip if balances not loaded yet
+    if (!balances) {
+      setBalanceErrors(prev => {
+        const next = new Map(prev);
+        next.delete(entryId);
+        return next;
+      });
+      setInsufficientBalances(prev => {
+        const next = new Set(prev);
+        next.delete(entryId);
+        return next;
+      });
+      return true;
+    }
+
+    // Get pocket balance
+    const pocket = balances.get(pocketId);
+    if (!pocket) {
+      // Pocket not found in balances (shouldn't happen, but be safe)
+      setBalanceErrors(prev => {
+        const next = new Map(prev);
+        next.delete(entryId);
+        return next;
+      });
+      setInsufficientBalances(prev => {
+        const next = new Set(prev);
+        next.delete(entryId);
+        return next;
+      });
+      return true;
+    }
+
+    const available = pocket.availableBalance;
+    
+    // Check if amount exceeds available balance
+    if (amount > available) {
+      const pocketName = pockets.find(p => p.id === pocketId)?.name || 'kantong ini';
+      const errorMsg = `Waduh, Bos! Duit di kantong '${pocketName}' (sisa ${formatCurrency(available)}) ` +
+        `nggak cukup buat bayar ${formatCurrency(amount)}.`;
+      
+      setBalanceErrors(prev => {
+        const next = new Map(prev);
+        next.set(entryId, errorMsg);
+        return next;
+      });
+      setInsufficientBalances(prev => {
+        const next = new Set(prev);
+        next.add(entryId);
+        return next;
+      });
+      return false;
+    }
+
+    // All good!
+    setBalanceErrors(prev => {
+      const next = new Map(prev);
+      next.delete(entryId);
+      return next;
+    });
+    setInsufficientBalances(prev => {
+      const next = new Set(prev);
+      next.delete(entryId);
+      return next;
+    });
+    return true;
+  }, [balances, pockets]);
+
+  // Validate all entries when amounts or pockets change (debounced)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      entries.forEach(entry => {
+        const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+        validateEntryBalance(entry.id, finalAmount, entry.pocketId);
+      });
+    }, 300); // Debounce 300ms
+
+    return () => clearTimeout(timeoutId);
+  }, [entries, validateEntryBalance]);
+
+  // Validate immediately when pocket changes
+  useEffect(() => {
+    entries.forEach(entry => {
+      if (entry.pocketId) {
+        const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount);
+        validateEntryBalance(entry.id, finalAmount, entry.pocketId);
+      }
+    });
+  }, [entries.map(e => e.pocketId).join(','), validateEntryBalance]);
+
+  // Phase 9: Budget Exceed Dialog Handlers
+  const handleBudgetConfirm = async () => {
+    await proceedWithSubmit();
+  };
+
+  const handleBudgetCancel = () => {
+    setPendingSubmit(false);
+    setExceedingCategories([]);
+    // Stay in form, don't reset entries
   };
 
   const handleKeyPress = (e: React.KeyboardEvent, entryId: string) => {
@@ -318,15 +554,6 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     const newMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
     const newDay = String(currentDate.getDate()).padStart(2, '0');
     setDate(`${newYear}-${newMonth}-${newDay}`);
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
   };
 
   const getTotalAmount = () => {
@@ -475,11 +702,19 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
                   onChange={(e) => updateEntryCalculation(entry.id, e.target.value)}
                   onKeyPress={(e) => handleKeyPress(e, entry.id)}
                   placeholder="0 atau 50000+4000-20%"
+                  className={balanceErrors.has(entry.id) ? "border-red-500" : ""}
                 />
                 {showCalculation && (
                   <div className="p-2 bg-accent rounded-md">
                     <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
                     <p className="text-primary">{formatCurrency(entry.calculatedAmount!)}</p>
+                  </div>
+                )}
+                {/* Balance Error Message */}
+                {balanceErrors.has(entry.id) && (
+                  <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2 duration-200">
+                    <span className="text-red-500 text-lg flex-shrink-0">⛔️</span>
+                    <p className="text-sm text-red-500 leading-relaxed">{balanceErrors.get(entry.id)}</p>
                   </div>
                 )}
               </div>
@@ -537,7 +772,7 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
         {/* Submit Multiple Entries */}
         <Button 
           onClick={handleSubmitMultiple} 
-          disabled={!hasValidEntries || isAdding}
+          disabled={!hasValidEntries || isAdding || insufficientBalances.size > 0}
           className="w-full"
         >
           <Plus className="size-4 mr-2" />
@@ -619,6 +854,27 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
             {isAdding ? "Menambahkan..." : "Tambah Pengeluaran dari Template"}
           </Button>
         </div>
+      )}
+
+      {/* Phase 9: Budget Exceed Confirmation Dialog */}
+      <BudgetExceedDialog
+        open={showBudgetDialog}
+        onOpenChange={setShowBudgetDialog}
+        exceedingCategories={exceedingCategories}
+        onConfirm={handleBudgetConfirm}
+        onCancel={handleBudgetCancel}
+        isLoading={isProcessing}
+      />
+      
+      {/* Insufficient Balance Dialog (Reactive Fail-safe) */}
+      {insufficientDetails && (
+        <InsufficientBalanceDialog
+          open={showInsufficientDialog}
+          onOpenChange={setShowInsufficientDialog}
+          pocketName={insufficientDetails.pocketName}
+          availableBalance={insufficientDetails.availableBalance}
+          attemptedAmount={insufficientDetails.attemptedAmount}
+        />
       )}
     </div>
   );

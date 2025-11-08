@@ -2,9 +2,23 @@
 
 **Status**: ✅ Production Ready  
 **Version**: 2.0  
-**Last Updated**: November 5, 2025  
+**Last Updated**: November 8, 2025  
 
 A comprehensive monthly budget tracking application with advanced features including pocket system, wishlist simulation, real-time collaboration, and professional performance optimization.
+
+---
+
+## ⚠️🚨 CRITICAL - DEVELOPERS & AI READ THIS! 🚨⚠️
+
+**BEFORE changing ANY data schema or format:**
+
+**👉 READ:** [⚠️_BACKWARD_COMPATIBILITY_WARNING.md](/⚠️_BACKWARD_COMPATIBILITY_WARNING.md)  
+**👉 READ:** [BACKWARD_COMPATIBILITY_MUST_READ.md](/BACKWARD_COMPATIBILITY_MUST_READ.md)
+
+> **"JIKA ADA YANG BUTUH BACKWARD COMPATIBILITY, ITU HARUS DI-HANDLE! JANGAN DIABAIKAN!"**
+
+**Real disaster happened Nov 8, 2025 - 70% data broke!** Full docs available.  
+**This is NOT optional. See files above for complete guidelines.**
 
 ---
 

@@ -7,6 +7,7 @@ import { Progress } from "./ui/progress";
 import { Separator } from "./ui/separator";
 import { ScrollArea } from "./ui/scroll-area";
 import { Skeleton } from "./ui/skeleton";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "./ui/tooltip";
 import { useIsMobile } from "./ui/use-mobile";
@@ -23,8 +24,18 @@ import {
   Trash2,
   ExternalLink,
   DollarSign,
-  X as XIcon
+  X as XIcon,
+  MoreVertical,
+  Eye,
+  EyeOff,
+  ChevronDown
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 // Lazy load wishlist dialog for better performance
 const WishlistDialog = lazy(() => 
@@ -302,31 +313,88 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
     value?: 1 | 2 | 3;
   }>({ type: 'all' });
   
-  // ✅ NEW: Platform detection & swipe state
+  // ✅ Platform detection
   const isMobile = useIsMobile();
-  const [swipedItemId, setSwipedItemId] = useState<string | null>(null);
+  
+  // ✅ Track hidden items (excluded from simulation)
+  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set());
+  
+  // ✅ Show/hide hidden items section
+  const [showHiddenItems, setShowHiddenItems] = useState(false);
 
   const [year, month] = monthKey.split('-');
   const baseUrl = getBaseUrl(projectId);
   
-  // ✅ NEW: Calculate affordable items
-  const affordableItems = useMemo(() => {
-    if (!simulation) return [];
-    return wishlist.filter(item => simulation.affordableNow.includes(item.id));
-  }, [wishlist, simulation]);
+  // ✅ Filter simulation to exclude hidden items from ALL calculations
+  const filteredSimulation = useMemo<SimulationResult | null>(() => {
+    if (!simulation) return null;
+    
+    // Get visible items only
+    const visibleItems = wishlist.filter(item => !hiddenItemIds.has(item.id));
+    const visibleItemIds = new Set(visibleItems.map(item => item.id));
+    
+    // Recalculate totals for visible items only
+    const visibleTotal = visibleItems.reduce((sum, item) => sum + item.amount, 0);
+    const visibleCount = visibleItems.length;
+    
+    // Recalculate by priority
+    const byPriority = {
+      high: {
+        count: visibleItems.filter(i => i.priority === 1).length,
+        total: visibleItems.filter(i => i.priority === 1).reduce((sum, i) => sum + i.amount, 0)
+      },
+      medium: {
+        count: visibleItems.filter(i => i.priority === 2).length,
+        total: visibleItems.filter(i => i.priority === 2).reduce((sum, i) => sum + i.amount, 0)
+      },
+      low: {
+        count: visibleItems.filter(i => i.priority === 3).length,
+        total: visibleItems.filter(i => i.priority === 3).reduce((sum, i) => sum + i.amount, 0)
+      }
+    };
+    
+    return {
+      ...simulation,
+      wishlist: {
+        total: visibleTotal,
+        count: visibleCount,
+        byPriority
+      },
+      affordableNow: simulation.affordableNow.filter(id => visibleItemIds.has(id)),
+      affordableSoon: simulation.affordableSoon.filter(s => visibleItemIds.has(s.itemId)),
+      notAffordable: simulation.notAffordable.filter(id => visibleItemIds.has(id)),
+      scenarios: simulation.scenarios.filter(s => visibleItemIds.has(s.itemId))
+    };
+  }, [simulation, wishlist, hiddenItemIds]);
   
-  // ✅ NEW: Apply filters to get filtered items
+  // ✅ Calculate affordable items (excluding hidden)
+  const affordableItems = useMemo(() => {
+    if (!filteredSimulation) return [];
+    return wishlist.filter(item => 
+      filteredSimulation.affordableNow.includes(item.id) && !hiddenItemIds.has(item.id)
+    );
+  }, [wishlist, filteredSimulation, hiddenItemIds]);
+  
+  // ✅ Get hidden items list
+  const hiddenItems = useMemo(() => {
+    return wishlist.filter(item => hiddenItemIds.has(item.id));
+  }, [wishlist, hiddenItemIds]);
+  
+  // ✅ Apply filters to get filtered items (visible only)
   const filteredItems = useMemo(() => {
+    // First filter by visibility
+    let items = wishlist.filter(item => !hiddenItemIds.has(item.id));
+    
     if (filterState.type === 'affordable') {
-      return affordableItems;
+      return items.filter(item => filteredSimulation?.affordableNow.includes(item.id));
     }
     
     if (filterState.type === 'priority' && filterState.value) {
-      return wishlist.filter(item => item.priority === filterState.value);
+      return items.filter(item => item.priority === filterState.value);
     }
     
-    return wishlist;
-  }, [wishlist, affordableItems, filterState]);
+    return items;
+  }, [wishlist, hiddenItemIds, filteredSimulation, filterState]);
 
   const fetchWishlist = async () => {
     try {
@@ -520,6 +588,20 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
     }
   };
 
+  const handleToggleVisibility = (itemId: string) => {
+    setHiddenItemIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+        toast.success('Item ditampilkan di simulasi');
+      } else {
+        newSet.add(itemId);
+        toast.success('Item disembunyikan dari simulasi');
+      }
+      return newSet;
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -606,17 +688,17 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
     <>
       <div className="space-y-6">
           {/* ✅ NEW: Centralized Summary Header with Cycling Quotes! */}
-          {simulation && (
+          {filteredSimulation && (
             <SummaryHeader
-              currentBalance={simulation.currentBalance}
-              totalWishlist={simulation.wishlist.total}
-              itemCount={simulation.wishlist.count}
+              currentBalance={filteredSimulation.currentBalance}
+              totalWishlist={filteredSimulation.wishlist.total}
+              itemCount={filteredSimulation.wishlist.count}
               quoteKey={quoteKey}
             />
           )}
 
           {/* ✅ NEW: Interactive Filters */}
-          {simulation && wishlist.length > 0 && (
+          {filteredSimulation && wishlist.length > 0 && (
             <div className="space-y-3">
               <QuickInsightButton
                 affordableCount={affordableItems.length}
@@ -636,6 +718,43 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
             </div>
           )}
 
+          {/* ✅ Hidden Items Notice */}
+          {hiddenItemIds.size > 0 && (
+            <Alert 
+              className="border-amber-500/30 bg-amber-500/10 cursor-pointer hover:bg-amber-500/20 transition-colors" 
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowHiddenItems(true);
+                // Scroll to hidden section
+                setTimeout(() => {
+                  const hiddenSection = document.querySelector('[data-hidden-section]');
+                  if (hiddenSection) {
+                    hiddenSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }
+                }, 100);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setShowHiddenItems(true);
+                }
+              }}
+              aria-label="Klik untuk lihat item yang disembunyikan"
+            >
+              <EyeOff className="h-4 w-4 text-amber-500 pointer-events-none" />
+              <AlertDescription className="text-amber-500 flex items-center justify-between pointer-events-none">
+                <span>
+                  {hiddenItemIds.size} item disembunyikan dan tidak termasuk dalam simulasi budget
+                </span>
+                <span className="text-xs opacity-75">
+                  Klik untuk lihat →
+                </span>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <Separator />
 
           {/* Wishlist Items */}
@@ -643,11 +762,10 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-xl font-semibold flex-1 min-w-0">
                 Items Wishlist
-                {filterState.type !== 'all' && (
-                  <span className="text-sm text-muted-foreground ml-2">
-                    ({filteredItems.length} dari {wishlist.length})
-                  </span>
-                )}
+                <span className="text-sm text-muted-foreground ml-2">
+                  ({filteredItems.length} 
+                  {hiddenItemIds.size > 0 && ` + ${hiddenItemIds.size} hidden`})
+                </span>
               </h3>
               {/* ✅ MOBILE: Icon only | DESKTOP: Full button */}
               {isMobile ? (
@@ -720,31 +838,19 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
               </div>
             ) : (
               <>
-                {/* ✅ MOBILE: Hint untuk tap card */}
-                {isMobile && filteredItems.length > 0 && !swipedItemId && (
-                  <div className="bg-muted/30 border border-muted rounded-lg p-3 mb-4">
-                    <p className="text-xs text-muted-foreground text-center">
-                      💡 <span className="font-medium">Tips:</span> Tap kartu item untuk menampilkan tombol Edit & Hapus
-                    </p>
-                  </div>
-                )}
-                
                 <ScrollArea className="h-[500px]">
                   <div className="space-y-4 pr-4">
                     {filteredItems.sort((a, b) => a.priority - b.priority).map((item) => {
-                    const scenario = simulation?.scenarios.find(s => s.itemId === item.id);
-                    const isAffordable = simulation?.affordableNow.includes(item.id);
-                    const isSoon = simulation?.affordableSoon.find(s => s.itemId === item.id);
+                    const scenario = filteredSimulation?.scenarios.find(s => s.itemId === item.id);
+                    const isAffordable = filteredSimulation?.affordableNow.includes(item.id);
+                    const isSoon = filteredSimulation?.affordableSoon.find(s => s.itemId === item.id);
 
+                    const isHidden = hiddenItemIds.has(item.id);
+                    
                     return (
                       <Card 
                         key={item.id}
-                        className={`
-                          ${!isMobile ? "group" : "relative overflow-hidden cursor-pointer"}
-                          ${isMobile && swipedItemId === item.id ? "ring-2 ring-primary/50 bg-primary/5" : ""}
-                          transition-all duration-200
-                        `}
-                        onClick={() => isMobile && handleSwipeLeft(item.id)}
+                        className={`transition-all duration-200 ${isHidden ? 'opacity-50 border-dashed' : ''}`}
                       >
                         <CardContent className="pt-6">
                           <div className="space-y-4">
@@ -755,6 +861,12 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
                                   <Badge variant={PRIORITY_LABELS[item.priority].color} className="shrink-0">
                                     {PRIORITY_LABELS[item.priority].label}
                                   </Badge>
+                                  {isHidden && (
+                                    <Badge variant="outline" className="shrink-0 text-xs">
+                                      <EyeOff className="h-3 w-3 mr-1" />
+                                      Hidden
+                                    </Badge>
+                                  )}
                                 </div>
                                 <p className="text-xl">
                                   Rp {item.amount.toLocaleString('id-ID')}
@@ -766,53 +878,60 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
                                 )}
                               </div>
 
-                              {/* ✅ DESKTOP: Hover to show actions | MOBILE: Tap to toggle */}
-                              <div className={`flex gap-1 shrink-0 ${
-                                isMobile 
-                                  ? (swipedItemId === item.id ? 'opacity-100' : 'opacity-0')
-                                  : 'opacity-0 group-hover:opacity-100'
-                              } transition-opacity duration-200 motion-reduce:transition-none`}>
-                                {item.url && (
+                              {/* ✅ More Menu Button (always visible) */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      window.open(item.url, '_blank');
-                                    }}
-                                    aria-label={`Buka link untuk ${item.name}`}
-                                    title="Buka Link"
-                                    className="min-w-[44px] min-h-[44px]"
+                                    className="shrink-0 min-w-[44px] min-h-[44px]"
+                                    aria-label="More options"
                                   >
-                                    <ExternalLink className="h-5 w-5" aria-hidden="true" />
+                                    <MoreVertical className="h-5 w-5" />
                                   </Button>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingItem(item);
-                                    setShowDialog(true);
-                                  }}
-                                  aria-label={`Edit ${item.name}`}
-                                  className="min-w-[44px] min-h-[44px]"
-                                >
-                                  <Edit className="h-5 w-5" aria-hidden="true" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteItem(item.id);
-                                  }}
-                                  aria-label={`Hapus ${item.name} dari wishlist`}
-                                  className="min-w-[44px] min-h-[44px]"
-                                >
-                                  <Trash2 className="h-5 w-5" aria-hidden="true" />
-                                </Button>
-                              </div>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem
+                                    onClick={() => handleToggleVisibility(item.id)}
+                                  >
+                                    {isHidden ? (
+                                      <>
+                                        <Eye className="h-4 w-4 mr-2" />
+                                        Tampilkan Item
+                                      </>
+                                    ) : (
+                                      <>
+                                        <EyeOff className="h-4 w-4 mr-2" />
+                                        Sembunyikan Item
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                  {item.url && (
+                                    <DropdownMenuItem
+                                      onClick={() => window.open(item.url, '_blank')}
+                                    >
+                                      <ExternalLink className="h-4 w-4 mr-2" />
+                                      Buka Link
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setEditingItem(item);
+                                      setShowDialog(true);
+                                    }}
+                                  >
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit Item
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeleteItem(item.id)}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Hapus Item
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
 
                             {/* ✅ DECLUTTERED: Only show contextual info */}
@@ -849,7 +968,7 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
                                 itemId={item.id}
                                 itemName={item.name}
                                 isAffordable={!!isAffordable}
-                                shortage={isSoon?.amountNeeded || Math.max(0, item.amount - (simulation?.currentBalance || 0))}
+                                shortage={isSoon?.amountNeeded || Math.max(0, item.amount - (filteredSimulation?.currentBalance || 0))}
                                 onPurchase={handlePurchaseItem}
                               />
                             )}
@@ -863,6 +982,131 @@ export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey
               </>
             )}
           </div>
+
+          {/* ✅ Hidden Items Section (Collapsible) */}
+          {hiddenItems.length > 0 && (
+            <Collapsible 
+              open={showHiddenItems} 
+              onOpenChange={setShowHiddenItems}
+              className="space-y-4"
+              data-hidden-section
+            >
+              <div className="flex items-center justify-between">
+                <CollapsibleTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-between min-h-[44px]"
+                    aria-label={showHiddenItems ? "Hide hidden items" : "Show hidden items"}
+                  >
+                    <span className="flex items-center gap-2">
+                      <EyeOff className="h-4 w-4" />
+                      Hidden Items ({hiddenItems.length})
+                    </span>
+                    <ChevronDown 
+                      className={`h-4 w-4 transition-transform duration-200 ${
+                        showHiddenItems ? 'rotate-180' : ''
+                      }`} 
+                    />
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+
+              <CollapsibleContent className="space-y-4">
+                <div className="bg-muted/30 border border-muted rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground">
+                    💡 Item yang disembunyikan tidak termasuk dalam simulasi budget. 
+                    Klik tombol More (⋮) untuk menampilkan kembali.
+                  </p>
+                </div>
+
+                <ScrollArea className="h-[400px]">
+                  <div className="space-y-4 pr-4">
+                    {hiddenItems.sort((a, b) => a.priority - b.priority).map((item) => {
+                      return (
+                        <Card 
+                          key={item.id}
+                          className="opacity-50 border-dashed"
+                        >
+                          <CardContent className="pt-6">
+                            <div className="space-y-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <h4 className="text-lg font-semibold truncate">{item.name}</h4>
+                                    <Badge variant={PRIORITY_LABELS[item.priority].color} className="shrink-0">
+                                      {PRIORITY_LABELS[item.priority].label}
+                                    </Badge>
+                                    <Badge variant="outline" className="shrink-0 text-xs">
+                                      <EyeOff className="h-3 w-3 mr-1" />
+                                      Hidden
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xl">
+                                    Rp {item.amount.toLocaleString('id-ID')}
+                                  </p>
+                                  {item.description && (
+                                    <p className="text-muted-foreground mt-2">
+                                      {item.description}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* ✅ More Menu for Hidden Items */}
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="shrink-0 min-w-[44px] min-h-[44px]"
+                                      aria-label="More options"
+                                    >
+                                      <MoreVertical className="h-5 w-5" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    <DropdownMenuItem
+                                      onClick={() => handleToggleVisibility(item.id)}
+                                    >
+                                      <Eye className="h-4 w-4 mr-2" />
+                                      Tampilkan Item
+                                    </DropdownMenuItem>
+                                    {item.url && (
+                                      <DropdownMenuItem
+                                        onClick={() => window.open(item.url, '_blank')}
+                                      >
+                                        <ExternalLink className="h-4 w-4 mr-2" />
+                                        Buka Link
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        setEditingItem(item);
+                                        setShowDialog(true);
+                                      }}
+                                    >
+                                      <Edit className="h-4 w-4 mr-2" />
+                                      Edit Item
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleDeleteItem(item.id)}
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Hapus Item
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
       </div>
 
       <Suspense fallback={null}>

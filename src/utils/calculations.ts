@@ -185,6 +185,23 @@ export const getCategoryEmoji = (category?: string, settings?: any): string => {
     return settings.overrides[category].emoji;
   }
   
+  // 🔥 BACKWARD COMPATIBILITY: Map old numeric index to category name
+  const indexToCategoryMap: Record<string, string> = {
+    '0': 'food',
+    '1': 'transport',
+    '2': 'savings',
+    '3': 'bills',
+    '4': 'health',
+    '5': 'loan',
+    '6': 'family',
+    '7': 'entertainment',
+    '8': 'installment',
+    '9': 'shopping',
+    '10': 'other'
+  };
+  
+  const categoryName = indexToCategoryMap[category] || category.toLowerCase();
+  
   const categoryMap: Record<string, string> = {
     food: '🍔',
     transport: '🚗',
@@ -199,7 +216,7 @@ export const getCategoryEmoji = (category?: string, settings?: any): string => {
     other: '📦'
   };
   
-  return categoryMap[category] || '📦';
+  return categoryMap[categoryName] || '📦';
 };
 
 /**
@@ -219,6 +236,23 @@ export const getCategoryLabel = (category?: string, settings?: any): string => {
     return settings.overrides[category].label;
   }
   
+  // 🔥 BACKWARD COMPATIBILITY: Map old numeric index to category name
+  const indexToCategoryMap: Record<string, string> = {
+    '0': 'food',
+    '1': 'transport',
+    '2': 'savings',
+    '3': 'bills',
+    '4': 'health',
+    '5': 'loan',
+    '6': 'family',
+    '7': 'entertainment',
+    '8': 'installment',
+    '9': 'shopping',
+    '10': 'other'
+  };
+  
+  const categoryName = indexToCategoryMap[category] || category.toLowerCase();
+  
   const labelMap: Record<string, string> = {
     food: 'Makanan',
     transport: 'Transportasi',
@@ -233,5 +267,66 @@ export const getCategoryLabel = (category?: string, settings?: any): string => {
     other: 'Lainnya'
   };
   
-  return labelMap[category] || 'Lainnya';
+  return labelMap[categoryName] || 'Lainnya';
 };
+
+/**
+ * CATEGORY BREAKDOWN REFACTOR - Budget Status Helpers
+ * Phase 8: Budget limit status calculations
+ */
+
+export type BudgetStatus = 'safe' | 'warning' | 'danger' | 'exceeded';
+
+/**
+ * Calculate budget status based on spending percentage
+ * Matches the logic from BudgetLimitEditor Status Indicators
+ */
+export function getBudgetStatus(
+  spent: number,
+  limit: number,
+  warningAt: number = 80
+): BudgetStatus {
+  if (limit === 0) return 'safe';
+  
+  const percentage = (spent / limit) * 100;
+  
+  if (percentage >= 100) return 'exceeded';
+  if (percentage >= 90) return 'danger';
+  if (percentage >= warningAt) return 'warning';
+  return 'safe';
+}
+
+/**
+ * Get color for budget status
+ * Colors match BudgetLimitEditor indicators
+ */
+export function getBudgetStatusColor(status: BudgetStatus): string {
+  const colors: Record<BudgetStatus, string> = {
+    safe: '#10B981',      // green-500
+    warning: '#F59E0B',   // amber-500
+    danger: '#F97316',    // orange-500
+    exceeded: '#EF4444'   // red-500
+  };
+  return colors[status];
+}
+
+/**
+ * Get label for budget status
+ */
+export function getBudgetStatusLabel(status: BudgetStatus, warningAt: number = 80): string {
+  const labels: Record<BudgetStatus, string> = {
+    safe: `Safe (below ${warningAt}%)`,
+    warning: `Warning (${warningAt}% - 89%)`,
+    danger: 'Danger (90% - 99%)',
+    exceeded: 'Exceeded (100%+)'
+  };
+  return labels[status];
+}
+
+/**
+ * Calculate budget percentage
+ */
+export function getBudgetPercentage(spent: number, limit: number): number {
+  if (limit === 0) return 0;
+  return (spent / limit) * 100;
+}

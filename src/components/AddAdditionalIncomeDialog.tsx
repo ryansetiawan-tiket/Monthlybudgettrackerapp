@@ -28,6 +28,7 @@ interface AddAdditionalIncomeDialogProps {
   }) => void;
   isAdding: boolean;
   pockets?: Pocket[];
+  balances?: Map<string, {availableBalance: number}>;
   defaultTargetPocket?: string;
 }
 
@@ -37,6 +38,7 @@ export function AddAdditionalIncomeDialog({
   onAddIncome,
   isAdding,
   pockets = [],
+  balances,
   defaultTargetPocket,
 }: AddAdditionalIncomeDialogProps) {
   const isMobile = useIsMobile();
@@ -60,6 +62,7 @@ export function AddAdditionalIncomeDialog({
       onSuccess={handleIncomeSuccess}
       inDialog={true}
       pockets={pockets}
+      balances={balances}
       defaultTargetPocket={defaultTargetPocket}
     />
   );

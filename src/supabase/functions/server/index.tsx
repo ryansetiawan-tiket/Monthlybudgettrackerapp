@@ -1144,7 +1144,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       ...(conversionType ? { conversionType } : {}),
       ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
       ...(groupId ? { groupId } : {}),
-      ...(category ? { category } : {}),
+      ...(category !== undefined ? { category } : {}), // 🔧 FIX: Allow empty string
       createdAt: new Date().toISOString(),
     };
     
@@ -1215,7 +1215,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
         ...(conversionType ? { conversionType } : {}),
         ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
         ...(groupId ? { groupId } : {}),
-        ...(category ? { category } : {}),
+        ...(category !== undefined ? { category } : {}), // 🔧 FIX: Allow empty string
         createdAt: currentTime.toISOString(),
       };
       
@@ -1263,6 +1263,7 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     // Get existing expense to preserve createdAt, pocketId, and groupId if not provided
     const existingExpense = await kv.get(key);
     
+    console.log(`[Edit Expense ${id}] Received category:`, category, '| Existing category:', existingExpense?.category);
     console.log(`[Edit Expense ${id}] Received date:`, date, '| Existing date:', existingExpense?.date);
     
     // Parse date: if date is in YYYY-MM-DD format, preserve the original time or add current time
@@ -1330,6 +1331,9 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     
     console.log(`[Edit Expense ${id}] Final expense date:`, expenseDate, '| Date changed:', dateChanged, '| GroupId:', finalGroupId);
     
+    // 🔧 CRITICAL FIX: Preserve category from existing expense if not provided in update
+    const finalCategory = category !== undefined ? category : existingExpense?.category;
+    
     const expenseData = {
       id,
       name,
@@ -1337,18 +1341,20 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
       date: expenseDate,
       pocketId: pocketId || existingExpense?.pocketId || POCKET_IDS.DAILY,
       ...(items && items.length > 0 ? { items } : {}),
-      ...(color ? { color } : {}),
+      ...(color !== undefined ? { color } : existingExpense?.color ? { color: existingExpense.color } : {}),
       ...(fromIncome ? { fromIncome: true } : {}),
-      ...(currency ? { currency } : {}),
-      ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
-      ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : {}),
-      ...(conversionType ? { conversionType } : {}),
-      ...(deduction !== undefined ? { deduction: Number(deduction) } : {}),
+      ...(currency !== undefined ? { currency } : existingExpense?.currency ? { currency: existingExpense.currency } : {}),
+      ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : existingExpense?.originalAmount !== undefined ? { originalAmount: existingExpense.originalAmount } : {}),
+      ...(exchangeRate !== undefined ? { exchangeRate: Number(exchangeRate) } : existingExpense?.exchangeRate !== undefined ? { exchangeRate: existingExpense.exchangeRate } : {}),
+      ...(conversionType !== undefined ? { conversionType } : existingExpense?.conversionType ? { conversionType: existingExpense.conversionType } : {}),
+      ...(deduction !== undefined ? { deduction: Number(deduction) } : existingExpense?.deduction !== undefined ? { deduction: existingExpense.deduction } : {}),
       ...(finalGroupId ? { groupId: finalGroupId } : {}),
-      ...(category ? { category } : {}),
+      ...(finalCategory !== undefined ? { category: finalCategory } : {}), // Include category
       createdAt: existingExpense?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    
+    console.log(`[Edit Expense ${id}] Final category being saved:`, finalCategory);
     
     await kv.set(key, expenseData);
     

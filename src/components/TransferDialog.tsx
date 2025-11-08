@@ -9,12 +9,13 @@ import { Calendar } from "./ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { CalendarIcon, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "./ui/utils";
 import { useIsMobile } from "./ui/use-mobile";
 import { formatCurrency } from "../utils/currency";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
+import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
 
 interface Pocket {
   id: string;
@@ -61,6 +62,18 @@ export function TransferDialog({
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
+  
+  // Balance validation state
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [isInsufficientBalance, setIsInsufficientBalance] = useState(false);
+  
+  // Reactive validation dialog state
+  const [showInsufficientDialog, setShowInsufficientDialog] = useState(false);
+  const [insufficientDetails, setInsufficientDetails] = useState<{
+    pocketName: string;
+    availableBalance: number;
+    attemptedAmount: number;
+  } | null>(null);
 
   // Register dialog for back button handling
   useDialogRegistration(
@@ -139,6 +152,21 @@ export function TransferDialog({
   const handleSubmit = async () => {
     if (!isValid) return;
 
+    // BALANCE VALIDATION (Reactive fail-safe)
+    if (fromPocketId) {
+      const pocket = balances.get(fromPocketId);
+      if (pocket && amountNum > pocket.availableBalance) {
+        const pocketName = pockets.find(p => p.id === fromPocketId)?.name || 'kantong ini';
+        setInsufficientDetails({
+          pocketName,
+          availableBalance: pocket.availableBalance,
+          attemptedAmount: amountNum,
+        });
+        setShowInsufficientDialog(true);
+        return; // BLOCK TRANSFER!
+      }
+    }
+
     setLoading(true);
     try {
       await onTransfer({
@@ -173,8 +201,67 @@ export function TransferDialog({
       setCalculatedAmount(null);
       setDate(new Date());
       setNote('');
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
     }
   }, [open]);
+
+  /**
+   * Validates if transfer amount exceeds FROM pocket balance
+   */
+  const validateTransferBalance = useCallback((
+    amount: number,
+    fromPocketId: string
+  ) => {
+    // Skip validation if no FROM pocket selected or no amount
+    if (!fromPocketId || !amount || amount <= 0) {
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
+      return true;
+    }
+
+    // Get FROM pocket balance
+    const fromPocket = balances.get(fromPocketId);
+    if (!fromPocket) {
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
+      return true;
+    }
+
+    const available = fromPocket.availableBalance;
+    
+    // Check if transfer amount exceeds available balance
+    if (amount > available) {
+      const pocketName = pockets.find(p => p.id === fromPocketId)?.name || 'kantong ini';
+      setBalanceError(
+        `Waduh, Bos! Duit di kantong '${pocketName}' (sisa ${formatCurrency(available)}) ` +
+        `nggak cukup buat transfer ${formatCurrency(amount)}.`
+      );
+      setIsInsufficientBalance(true);
+      return false;
+    }
+
+    // All good!
+    setBalanceError(null);
+    setIsInsufficientBalance(false);
+    return true;
+  }, [balances, pockets]);
+
+  // Validate when amount changes (debounced)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      validateTransferBalance(amountNum, fromPocketId);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [amountNum, fromPocketId, validateTransferBalance]);
+
+  // Validate when FROM pocket changes (immediate)
+  useEffect(() => {
+    if (fromPocketId) {
+      validateTransferBalance(amountNum, fromPocketId);
+    }
+  }, [fromPocketId, amountNum, validateTransferBalance]);
 
   const formContent = (
     <div className="space-y-4 py-4">
@@ -243,6 +330,7 @@ export function TransferDialog({
               placeholder="0 atau 100000+50000-20%"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
+              className={balanceError ? "border-red-500" : ""}
             />
             {showCalculation && (
               <div className="p-2 bg-accent rounded-md">
@@ -250,10 +338,12 @@ export function TransferDialog({
                 <p className="text-primary">{formatCurrency(calculatedAmount)}</p>
               </div>
             )}
-            {insufficientBalance && (
-              <p className="text-xs text-red-600">
-                Saldo tidak cukup
-              </p>
+            {/* Balance Error Message */}
+            {balanceError && (
+              <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2 duration-200">
+                <span className="text-red-500 text-lg flex-shrink-0">⛔️</span>
+                <p className="text-sm text-red-500 leading-relaxed">{balanceError}</p>
+              </div>
             )}
           </div>
 
@@ -294,7 +384,7 @@ export function TransferDialog({
       </Button>
       <Button 
         onClick={handleSubmit} 
-        disabled={!isValid || insufficientBalance || loading}
+        disabled={!isValid || isInsufficientBalance || loading}
       >
         {loading ? 'Memproses...' : 'Transfer'}
       </Button>
@@ -303,36 +393,62 @@ export function TransferDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
-        <DrawerContent 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0"
-          aria-describedby={undefined}
-        >
-          <DrawerHeader className="px-4 pt-6 pb-4 border-b">
-            <DrawerTitle>Transfer Antar Kantong</DrawerTitle>
-          </DrawerHeader>
-          <div className="flex-1 overflow-y-auto px-4">
-            {formContent}
-          </div>
-          <div className="flex gap-2 p-4 border-t">
-            {footerButtons}
-          </div>
-        </DrawerContent>
-      </Drawer>
+      <>
+        <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+          <DrawerContent 
+            className="h-[75vh] flex flex-col rounded-t-2xl p-0"
+            aria-describedby={undefined}
+          >
+            <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+              <DrawerTitle>Transfer Antar Kantong</DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4">
+              {formContent}
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              {footerButtons}
+            </div>
+          </DrawerContent>
+        </Drawer>
+        
+        {/* Insufficient Balance Dialog (Reactive Fail-safe) */}
+        {insufficientDetails && (
+          <InsufficientBalanceDialog
+            open={showInsufficientDialog}
+            onOpenChange={setShowInsufficientDialog}
+            pocketName={insufficientDetails.pocketName}
+            availableBalance={insufficientDetails.availableBalance}
+            attemptedAmount={insufficientDetails.attemptedAmount}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]" aria-describedby={undefined}>
-        <DialogHeader>
-          <DialogTitle>Transfer Antar Kantong</DialogTitle>
-        </DialogHeader>
-        {formContent}
-        <DialogFooter>
-          {footerButtons}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[600px]" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>Transfer Antar Kantong</DialogTitle>
+          </DialogHeader>
+          {formContent}
+          <DialogFooter>
+            {footerButtons}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Insufficient Balance Dialog (Reactive Fail-safe) */}
+      {insufficientDetails && (
+        <InsufficientBalanceDialog
+          open={showInsufficientDialog}
+          onOpenChange={setShowInsufficientDialog}
+          pocketName={insufficientDetails.pocketName}
+          availableBalance={insufficientDetails.availableBalance}
+          attemptedAmount={insufficientDetails.attemptedAmount}
+        />
+      )}
+    </>
   );
 }

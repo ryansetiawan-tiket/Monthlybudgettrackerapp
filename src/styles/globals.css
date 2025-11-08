@@ -229,3 +229,9 @@ html {
 [role="dialog"] button {
   pointer-events: auto !important;
 }
+
+/* Category Breakdown: Dynamic Progress Bar Colors */
+/* Support for --progress-background custom property */
+[data-slot="progress"] [data-slot="indicator"] {
+  background-color: var(--progress-background, var(--color-primary)) !important;
+}

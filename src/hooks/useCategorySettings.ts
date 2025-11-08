@@ -105,6 +105,11 @@ export function useCategorySettings() {
       setSettings(newSettings);
       localStorage.setItem(CACHE_KEY, JSON.stringify(newSettings));
       
+      // 🔧 FIX: Emit event so all components can react to category changes
+      window.dispatchEvent(new CustomEvent('categoriesUpdated', { 
+        detail: newSettings 
+      }));
+      
       return true;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save settings';
@@ -321,6 +326,21 @@ export function useCategorySettings() {
     if (!settings) {
       loadSettings();
     }
+  }, []);
+
+  // 🔧 FIX: Listen for category updates from other components
+  useEffect(() => {
+    const handleCategoriesUpdated = (event: CustomEvent<CategorySettings>) => {
+      console.log('[useCategorySettings] Categories updated event received');
+      setSettings(event.detail);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(event.detail));
+    };
+
+    window.addEventListener('categoriesUpdated', handleCategoriesUpdated as EventListener);
+    
+    return () => {
+      window.removeEventListener('categoriesUpdated', handleCategoriesUpdated as EventListener);
+    };
   }, []);
 
   return {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -12,7 +12,8 @@ import { format } from "date-fns";
 import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
-import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { formatCurrencyInput, parseCurrencyInput, formatCurrency } from "../utils/currency";
+import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
 
 interface Pocket {
   id: string;
@@ -40,6 +41,7 @@ interface AdditionalIncomeFormProps {
   onSuccess?: () => void;
   inDialog?: boolean;
   pockets?: Pocket[];
+  balances?: Map<string, {availableBalance: number}>;
   defaultTargetPocket?: string;
   // Edit mode props
   editMode?: boolean;
@@ -60,6 +62,7 @@ export function AdditionalIncomeForm({
   onSuccess,
   inDialog = false,
   pockets = [],
+  balances,
   defaultTargetPocket,
   editMode = false,
   initialValues,
@@ -100,6 +103,18 @@ export function AdditionalIncomeForm({
   );
   const [deduction, setDeduction] = useState(initialValues?.deduction?.toString() || "");
   const [targetPocketId, setTargetPocketId] = useState(initialValues?.pocketId || "");
+
+  // Balance validation state (for deduction validation)
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [isInsufficientBalance, setIsInsufficientBalance] = useState(false);
+  
+  // Reactive validation dialog state
+  const [showInsufficientDialog, setShowInsufficientDialog] = useState(false);
+  const [insufficientDetails, setInsufficientDetails] = useState<{
+    pocketName: string;
+    availableBalance: number;
+    attemptedAmount: number;
+  } | null>(null);
 
   const baseUrl = getBaseUrl(projectId);
 
@@ -164,14 +179,72 @@ export function AdditionalIncomeForm({
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+  /**
+   * Validates if deduction amount exceeds target pocket balance
+   * Shows inline error and disables submit if insufficient
+   */
+  const validateDeductionBalance = useCallback((
+    deduction: number,
+    targetPocketId: string
+  ) => {
+    // Skip validation if no deduction or no target pocket
+    if (!targetPocketId || !deduction || deduction <= 0) {
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
+      return true;
+    }
+
+    // Skip if balances not loaded yet
+    if (!balances) {
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
+      return true;
+    }
+
+    // Get target pocket balance
+    const pocket = balances.get(targetPocketId);
+    if (!pocket) {
+      setBalanceError(null);
+      setIsInsufficientBalance(false);
+      return true;
+    }
+
+    const available = pocket.availableBalance;
+    
+    // Check if deduction exceeds available balance
+    if (deduction > available) {
+      const pocketName = pockets.find(p => p.id === targetPocketId)?.name || 'kantong ini';
+      setBalanceError(
+        `Waduh, Bos! Duit di kantong '${pocketName}' (sisa ${formatCurrency(available)}) ` +
+        `nggak cukup buat potong ${formatCurrency(deduction)}.`
+      );
+      setIsInsufficientBalance(true);
+      return false;
+    }
+
+    // All good!
+    setBalanceError(null);
+    setIsInsufficientBalance(false);
+    return true;
+  }, [balances, pockets]);
+
+  // Validate when deduction changes (debounced)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const deductionAmount = Number(deduction) || 0;
+      validateDeductionBalance(deductionAmount, targetPocketId);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [deduction, targetPocketId, validateDeductionBalance]);
+
+  // Validate when target pocket changes (immediate)
+  useEffect(() => {
+    if (targetPocketId && deduction) {
+      const deductionAmount = Number(deduction) || 0;
+      validateDeductionBalance(deductionAmount, targetPocketId);
+    }
+  }, [targetPocketId, deduction, validateDeductionBalance]);
 
   const calculateIDR = () => {
     if (currency === "IDR") {
@@ -206,15 +279,29 @@ export function AdditionalIncomeForm({
       return;
     }
 
+    // DEDUCTION BALANCE VALIDATION (Reactive fail-safe)
+    const deductionAmount = Number(deduction) || 0;
+    if (targetPocketId && deductionAmount > 0 && balances) {
+      const pocket = balances.get(targetPocketId);
+      if (pocket && deductionAmount > pocket.availableBalance) {
+        const pocketName = pockets.find(p => p.id === targetPocketId)?.name || 'kantong ini';
+        setInsufficientDetails({
+          pocketName,
+          availableBalance: pocket.availableBalance,
+          attemptedAmount: deductionAmount,
+        });
+        setShowInsufficientDialog(true);
+        return; // BLOCK SUBMISSION!
+      }
+    }
+
     const rate = conversionType === "auto" 
       ? exchangeRate 
       : (currency === "USD" ? Number(manualRate) : null);
 
-    // Create full ISO timestamp with current local time
-    const [year, month, day] = date.split('-').map(Number);
-    const now = new Date();
-    const dateWithTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
-    const fullTimestamp = dateWithTime.toISOString();
+    // 🔧 FIX: Keep date in YYYY-MM-DD format to avoid timezone conversion
+    // Just use the date string directly - backend will handle time if needed
+    const finalDate = date;
 
     const incomeData: IncomeData = {
       name: name.trim(),
@@ -223,7 +310,7 @@ export function AdditionalIncomeForm({
       exchangeRate: rate,
       amountIDR: calculateIDR(),
       conversionType: currency === "USD" ? conversionType : "manual",
-      date: fullTimestamp,
+      date: finalDate,
       deduction: Number(deduction) || 0,
       pocketId: targetPocketId || initialValues?.pocketId || 'pocket_daily',
     };
@@ -462,6 +549,7 @@ export function AdditionalIncomeForm({
             value={formatCurrencyInput(deduction)}
             onChange={(e) => setDeduction(parseCurrencyInput(e.target.value).toString())}
             placeholder="0"
+            className={balanceError ? "border-red-500" : ""}
           />
           {deduction && Number(deduction) > 0 && (
             <div className="p-2 bg-accent rounded-md">
@@ -469,11 +557,18 @@ export function AdditionalIncomeForm({
               <p className="text-green-600">{formatCurrency(amountIDR - (Number(deduction) || 0))}</p>
             </div>
           )}
+          {/* Deduction Balance Error Message */}
+          {balanceError && (
+            <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2 duration-200">
+              <span className="text-red-500 text-lg flex-shrink-0">⛔️</span>
+              <p className="text-sm text-red-500 leading-relaxed">{balanceError}</p>
+            </div>
+          )}
         </div>
 
         <Button 
           onClick={handleSubmit} 
-          disabled={!name.trim() || !amount || isAdding}
+          disabled={!name.trim() || !amount || isAdding || isInsufficientBalance}
           className="w-full"
         >
           {!editMode && <Plus className="size-4 mr-2" />}
@@ -484,17 +579,45 @@ export function AdditionalIncomeForm({
 
   // Return with or without Card wrapper based on inDialog prop
   if (inDialog) {
-    return formContent;
+    return (
+      <>
+        {formContent}
+        
+        {/* Insufficient Balance Dialog (Reactive Fail-safe) */}
+        {insufficientDetails && (
+          <InsufficientBalanceDialog
+            open={showInsufficientDialog}
+            onOpenChange={setShowInsufficientDialog}
+            pocketName={insufficientDetails.pocketName}
+            availableBalance={insufficientDetails.availableBalance}
+            attemptedAmount={insufficientDetails.attemptedAmount}
+          />
+        )}
+      </>
+    );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Tambah Pemasukan Tambahan</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {formContent}
-      </CardContent>
-    </Card>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Tambah Pemasukan Tambahan</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {formContent}
+        </CardContent>
+      </Card>
+      
+      {/* Insufficient Balance Dialog (Reactive Fail-safe) */}
+      {insufficientDetails && (
+        <InsufficientBalanceDialog
+          open={showInsufficientDialog}
+          onOpenChange={setShowInsufficientDialog}
+          pocketName={insufficientDetails.pocketName}
+          availableBalance={insufficientDetails.availableBalance}
+          attemptedAmount={insufficientDetails.attemptedAmount}
+        />
+      )}
+    </>
   );
 }

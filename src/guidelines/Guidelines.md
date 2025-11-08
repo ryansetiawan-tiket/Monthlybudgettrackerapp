@@ -1,4 +1,39 @@
 **Add your own guidelines here**
+
+---
+
+## ⚠️ CRITICAL - BACKWARD COMPATIBILITY WARNING!
+
+**🚨 WAJIB DIBACA SEBELUM MENGUBAH DATA SCHEMA!**
+
+**BEFORE making ANY changes to:**
+- Database schema or data format
+- Type definitions for stored data
+- Constants that affect data structure
+- Enum values for database fields
+
+**👉 YOU MUST READ:**
+1. **[BACKWARD_COMPATIBILITY_RULES.md](BACKWARD_COMPATIBILITY_RULES.md)** - Complete rules & guidelines
+2. **[/⚠️_BACKWARD_COMPATIBILITY_WARNING.md](/⚠️_BACKWARD_COMPATIBILITY_WARNING.md)** - Root warning file
+3. **[/planning/expense-categories/AI_CRITICAL_RULES_BACKWARD_COMPAT.md](/planning/expense-categories/AI_CRITICAL_RULES_BACKWARD_COMPAT.md)** - AI mandatory checklist
+
+**⚠️ CRITICAL RULE:**
+> **"Jika ada yang butuh backward compatibility, ITU HARUS DI-HANDLE! JANGAN DIABAIKAN!"**
+
+**IF YOU IGNORE THIS → 70% OF DATA WILL BREAK!**  
+(Real disaster happened November 8, 2025 - fully documented)
+
+**Quick Checklist:**
+```
+[ ] Query database to check current data format
+[ ] Implement backward compatibility layer
+[ ] Test with REAL old data (not just fresh data!)
+[ ] Document why compat layer exists
+```
+
+**See full documentation in the files above. This is NOT optional!**
+
+---
 <!--
 
 System Guidelines
