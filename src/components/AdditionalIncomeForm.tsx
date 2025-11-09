@@ -78,8 +78,15 @@ export function AdditionalIncomeForm({
     return `${year}-${month}-${day}`;
   };
 
-  // Convert ISO date to YYYY-MM-DD format
+  // Convert ISO date to YYYY-MM-DD format (timezone-safe)
   const convertISOToDateString = (isoDate: string) => {
+    // FIX: Extract date part directly without Date object to avoid timezone shift
+    const datePart = isoDate.split('T')[0];
+    // Validate it's in YYYY-MM-DD format
+    if (datePart && /^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      return datePart;
+    }
+    // Fallback to manual parsing if timestamp format is different
     const dateObj = new Date(isoDate);
     const year = dateObj.getFullYear();
     const month = String(dateObj.getMonth() + 1).padStart(2, '0');

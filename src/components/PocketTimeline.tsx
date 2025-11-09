@@ -1,7 +1,7 @@
 import { Badge } from "./ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
-import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2, DollarSign } from "lucide-react";
+import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, Minus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2, DollarSign } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -20,6 +20,8 @@ import {
 } from "./ui/dropdown-menu";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
+import { useCategorySettings } from "../hooks/useCategorySettings";
+import { getCategoryConfig } from "../utils/categoryManager";
 
 interface TimelineEntry {
   id: string;
@@ -110,6 +112,9 @@ export function PocketTimeline({
   );
   const [viewMode, setViewMode] = useState<'timeline' | 'info'>('timeline');
   const isMobile = useIsMobile();
+  
+  // Phase 8: Get category settings for emoji display
+  const { settings } = useCategorySettings();
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -255,20 +260,37 @@ export function PocketTimeline({
     return { groupedEntries: grouped, sortedDateKeys: sorted };
   }, [entries]);
 
-  const getIcon = (iconName?: string) => {
+  const getIcon = (entry: TimelineEntry) => {
+    const iconClass = "size-4";
+    
+    // Universal icons based on transaction type
+    switch (entry.type) {
+      case 'income':
+        return <Plus className={iconClass} />;
+      case 'expense':
+        return <Minus className={iconClass} />;
+      case 'transfer':
+        // Use direction-specific arrow for transfers
+        if (entry.metadata?.direction === 'in') {
+          return <ArrowLeft className={iconClass} />;
+        } else {
+          return <ArrowRight className={iconClass} />;
+        }
+      default:
+        return <Plus className={iconClass} />;
+    }
+  };
+  
+  // Helper to render pocket icon/emoji
+  const renderPocketIcon = (iconOrEmoji?: string) => {
     const iconClass = "size-4";
     // Check if it's a Lucide icon name
-    switch (iconName) {
+    switch (iconOrEmoji) {
       case 'Wallet': return <Wallet className={iconClass} />;
       case 'Sparkles': return <Sparkles className={iconClass} />;
-      case 'DollarSign': return <DollarSign className={iconClass} />;
-      case 'ShoppingBag': return <ShoppingBag className={iconClass} />;
-      case 'ArrowRight': return <ArrowRight className={iconClass} />;
-      case 'ArrowLeft': return <ArrowLeft className={iconClass} />;
-      case 'TrendingUp': return <TrendingUp className={iconClass} />;
       default:
-        // If not a known icon name, treat as emoji
-        return <span className="text-base">{iconName || '💰'}</span>;
+        // Treat as emoji
+        return <span className="text-base">{iconOrEmoji || '💰'}</span>;
     }
   };
 
@@ -364,35 +386,48 @@ export function PocketTimeline({
                 const isPast = isEntryInPast(entry.date);
                 const showFutureStyle = isRealtimeMode && !isPast;
                 
+                // Get category emoji for expenses
+                const categoryId = entry.metadata?.category;
+                const categoryConfig = categoryId ? getCategoryConfig(categoryId, settings) : null;
+                const categoryEmoji = categoryConfig?.emoji || '';
+                
                 return (
                   <div 
                     key={entry.id}
                     className={`flex gap-3 pb-3 border-b last:border-b-0 ${showFutureStyle ? 'opacity-50' : ''}`}
                   >
-                    {/* Icon */}
+                    {/* Universal Icon (+ / - / →) */}
                     <div className={`rounded-full p-2 h-fit flex-shrink-0 ${getColorClass(entry.color)}`}>
-                      {getIcon(entry.icon)}
+                      {getIcon(entry)}
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-3">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium break-words">{entry.description}</p>
+                          {/* Description with Category Emoji */}
+                          <p className="font-medium break-words">
+                            {categoryEmoji && <span className="mr-1">{categoryEmoji}</span>}
+                            {entry.description}
+                          </p>
+                          
+                          {/* Metadata: Badge + Date & Time (1 baris) */}
+                          <p className="text-xs text-muted-foreground">
                             {showFutureStyle && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                Akan Datang
-                              </Badge>
+                              <span className="inline-block">Akan Datang • </span>
                             )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{formatDate(entry.date)}</p>
+                            {formatDate(entry.date)}
+                          </p>
+                          
+                          {/* Transfer/Income Note */}
                           {entry.metadata?.note && (
                             <p className="text-xs text-muted-foreground italic mt-1 break-words">
                               {entry.metadata.note}
                             </p>
                           )}
                         </div>
+                        
+                        {/* Amount & Balance (Kanan) */}
                         <div className="text-right flex-shrink-0">
                           <p className={`font-semibold whitespace-nowrap ${getColorClass(entry.color, true)}`}>
                             {entry.amount > 0 ? '+' : ''}{formatCurrency(entry.amount)}
@@ -420,7 +455,7 @@ export function PocketTimeline({
       {/* Pocket Header */}
       <div className="flex items-center gap-3">
         <div className={`text-${pocketColor || 'blue'}-600`}>
-          {getIcon(pocketIcon)}
+          {renderPocketIcon(pocketIcon)}
         </div>
         <div>
           <h3 className="font-semibold">{pocketName}</h3>

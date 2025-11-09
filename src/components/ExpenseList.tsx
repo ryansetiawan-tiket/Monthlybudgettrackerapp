@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3, Settings, MoreVertical, ListChecks } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3, Settings, MoreVertical, ListChecks, Info } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +37,15 @@ import { getAllCategories } from "../utils/categoryManager";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { formatCurrency } from "../utils/currency";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
+import { formatDateSafe } from "../utils/date-helpers";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
+import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { DialogPriority } from "../constants";
 
 interface ExpenseItem {
   name: string;
@@ -75,6 +84,15 @@ interface AdditionalIncome {
   createdAt?: string;
 }
 
+interface PocketBalance {
+  pocketId: string;
+  originalAmount: number;
+  transferIn: number;
+  transferOut: number;
+  expenses: number;
+  availableBalance: number;
+}
+
 interface ExpenseListProps {
   expenses: Expense[];
   onDeleteExpense: (id: string) => void;
@@ -87,6 +105,7 @@ interface ExpenseListProps {
   isExcludeLocked?: boolean;
   onToggleExcludeLock?: () => void;
   pockets?: Array<{id: string; name: string}>;
+  balances?: PocketBalance[];
   categoryFilter?: Set<import('../types').ExpenseCategory>; // Phase 7
   onClearFilter?: () => void; // Phase 7
   // Income-related props
@@ -124,7 +143,8 @@ function ExpenseListComponent({
   onMoveToIncome, 
   isExcludeLocked = false, 
   onToggleExcludeLock, 
-  pockets = [], 
+  pockets = [],
+  balances = [],
   categoryFilter = new Set(), 
   onClearFilter,
   // Income props
@@ -141,6 +161,15 @@ function ExpenseListComponent({
   onOpenAddTransaction
 }: ExpenseListProps) {
   const isMobile = useIsMobile();
+  
+  // Convert balances array to Map for AdditionalIncomeForm
+  const balancesMap = useMemo(() => {
+    const map = new Map<string, {availableBalance: number}>();
+    balances.forEach(balance => {
+      map.set(balance.pocketId, { availableBalance: balance.availableBalance });
+    });
+    return map;
+  }, [balances]);
   
   // 🔍 DEBUG: Log when expenses prop changes
   useEffect(() => {
@@ -209,7 +238,58 @@ function ExpenseListComponent({
   
   // Income editing states
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
+  
+  // Register edit income drawer for back button handling
+  useDialogRegistration(
+    !!editingIncomeId,
+    (open) => {
+      if (!open) {
+        setEditingIncomeId(null);
+      }
+    },
+    DialogPriority.MEDIUM,
+    'edit-income-drawer'
+  );
   const [editingIncome, setEditingIncome] = useState<Partial<AdditionalIncome>>({});
+  
+  // Register edit expense drawer for back button handling
+  useDialogRegistration(
+    editingExpenseId !== null,
+    (open) => {
+      if (!open) {
+        handleCloseEditDialog();
+      }
+    },
+    DialogPriority.MEDIUM,
+    'edit-expense-drawer'
+  );
+  
+  // Register category breakdown drawer for back button handling
+  useDialogRegistration(
+    showCategoryDrawer,
+    (open) => {
+      if (!open) {
+        setShowCategoryDrawer(false);
+      }
+    },
+    DialogPriority.MEDIUM,
+    'category-breakdown-drawer'
+  );
+  
+  // Progressive disclosure for income items
+  const [expandedIncomeIds, setExpandedIncomeIds] = useState<Set<string>>(new Set());
+  
+  const toggleExpandIncome = (id: string) => {
+    setExpandedIncomeIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
   
   // Exclude from calculation states - use prop or default to empty Set
   const excludedExpenseIds = excludedExpenseIdsProp || new Set<string>();
@@ -376,20 +456,8 @@ function ExpenseListComponent({
       return newSet;
     });
     
-    // ✅ CRITICAL FIX: Force close the drawer/dialog after clicking
-    console.log('Closing category drawer...');
+    // ✅ V4 FIX: Simply close the drawer - Vaul will handle cleanup properly
     setShowCategoryDrawer(false);
-    
-    // ✅ Additional safety: Force cleanup after short delay
-    setTimeout(() => {
-      const overlays = document.querySelectorAll('[data-vaul-overlay]');
-      console.log('Found stuck overlays:', overlays.length);
-      overlays.forEach(overlay => {
-        overlay.remove();
-      });
-      // Restore pointer events
-      document.body.style.pointerEvents = '';
-    }, 200);
   };
 
   const formatCurrency = (amount: number) => {
@@ -485,7 +553,7 @@ function ExpenseListComponent({
   };
 
   const handleSelectAllExpenses = () => {
-    const visibleExpenses = activeTab === 'expense' ? filteredExpenses : [];
+    const visibleExpenses = activeTab === 'expense' ? sortedAndFilteredExpenses : [];
     if (selectedExpenseIds.size === visibleExpenses.length) {
       setSelectedExpenseIds(new Set());
     } else {
@@ -769,18 +837,16 @@ function ExpenseListComponent({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isBulkSelectMode, handleCancelBulkMode, showCategoryDrawer]);
 
-  // ✅ CRITICAL FIX: Cleanup stuck drawer overlays when state changes
+  // ✅ V9 FIX: Aggressive cleanup of stuck drawer overlays when state changes
   useEffect(() => {
     if (!showCategoryDrawer) {
       // Force cleanup any stuck Vaul drawer overlays
       const cleanupOverlays = () => {
         const overlays = document.querySelectorAll('[data-vaul-overlay], [data-vaul-drawer-wrapper]');
         overlays.forEach(overlay => {
-          const style = window.getComputedStyle(overlay);
-          // Only remove if drawer is truly closed (opacity 0 or display none)
-          if (style.opacity === '0' || style.display === 'none') {
-            overlay.remove();
-          }
+          // ✅ V9 FIX: Hapus paksa tanpa cek opacity - lebih agresif!
+          // If condition terlalu "pintar" dan gagal cleanup overlay stuck di tengah animasi
+          overlay.remove();
         });
         
         // Also remove any stuck pointer-events blocking
@@ -967,16 +1033,41 @@ function ExpenseListComponent({
   // GroupId is preserved for metadata/tracking, but grouping is always by date
   const groupExpensesByDate = (expenses: Expense[]): Map<string, Expense[]> => {
     const grouped = new Map<string, Expense[]>();
+    
+    // Debug flag - set to true to enable grouping debug logs
+    const DEBUG_GROUPING = false;
+    
     expenses.forEach(expense => {
       // Always group by date (YYYY-MM-DD only), not by groupId
       // This ensures all expenses on the same date are grouped together
       const dateOnly = expense.date.split('T')[0]; // Extract date part only
       const groupKey = dateOnly;
+      
+      if (DEBUG_GROUPING) {
+        console.log('🔍 Grouping expense:', {
+          name: expense.name,
+          fullDate: expense.date,
+          dateOnly,
+          groupKey,
+          pocketId: expense.pocketId,
+          category: expense.category,
+        });
+      }
+      
       if (!grouped.has(groupKey)) {
         grouped.set(groupKey, []);
       }
       grouped.get(groupKey)!.push(expense);
     });
+    
+    if (DEBUG_GROUPING) {
+      console.log('📦 Grouped results:', Array.from(grouped.entries()).map(([key, exps]) => ({
+        date: key,
+        count: exps.length,
+        expenses: exps.map(e => ({ name: e.name, pocket: e.pocketId })),
+      })));
+    }
+    
     return grouped;
   };
 
@@ -1009,20 +1100,11 @@ function ExpenseListComponent({
 
   // Render grouped expenses by date or groupId
   const renderGroupedExpenseItem = (groupKey: string, expenses: Expense[]) => {
-    // If only 1 expense, render as single item
-    if (expenses.length === 1) {
-      return renderExpenseItem(expenses[0]);
-    }
-
-    // Multiple expenses - render as grouped card
+    // ✨ REFACTOR V2: Always use static date header + simple list (no nested collapse)
     const dateExpenses = expenses;
-    // Use the actual date from the first expense (all in group should have same date)
     const actualDate = dateExpenses[0].date;
-    const isGroupExpanded = expandedItems.has(`group-${groupKey}`);
     const hasExcludedInGroup = dateExpenses.some(exp => excludedExpenseIds.has(exp.id));
     const allExcluded = dateExpenses.every(exp => excludedExpenseIds.has(exp.id));
-    const hasSelectedInGroup = dateExpenses.some(exp => selectedExpenseIds.has(exp.id));
-    const allSelected = dateExpenses.every(exp => selectedExpenseIds.has(exp.id));
 
     // Calculate total for this group (excluding excluded items)
     const groupTotal = dateExpenses
@@ -1034,128 +1116,23 @@ function ExpenseListComponent({
         return sum + exp.amount;
       }, 0);
 
-    const hasFromIncome = dateExpenses.some(exp => exp.fromIncome);
-    const hasNormalExpense = dateExpenses.some(exp => !exp.fromIncome);
-
     return (
-      <Collapsible 
-        key={`group-${groupKey}`} 
-        open={isGroupExpanded} 
-        onOpenChange={() => {
-          setExpandedItems(prev => {
-            const newSet = new Set(prev);
-            const key = `group-${groupKey}`;
-            if (newSet.has(key)) {
-              newSet.delete(key);
-            } else {
-              newSet.add(key);
-            }
-            return newSet;
-          });
-        }}
-      >
-        <div className={`border rounded-lg ${isToday(actualDate) ? 'ring-2 ring-blue-500' : ''} ${hasSelectedInGroup && isBulkSelectMode ? 'bg-accent/30 border-primary' : ''} ${allExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
-          <CollapsibleTrigger asChild>
-            <div className="cursor-pointer hover:bg-accent/50 transition-all rounded-lg">
-              {/* Mobile: Single-line compact layout (more natural and common) */}
-              <div className="md:hidden p-3">
-                <div className="flex items-center justify-between gap-3">
-                  {/* Left side: Date, badge, indicator */}
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    {isBulkSelectMode && (
-                      <Checkbox
-                        checked={allSelected}
-                        onCheckedChange={() => {
-                          setSelectedExpenseIds(prev => {
-                            const newSet = new Set(prev);
-                            if (allSelected) {
-                              dateExpenses.forEach(exp => newSet.delete(exp.id));
-                            } else {
-                              dateExpenses.forEach(exp => newSet.add(exp.id));
-                            }
-                            return newSet;
-                          });
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    )}
-                    {isToday(actualDate) && (
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
-                    )}
-                    <span className={`text-sm ${isWeekend(actualDate) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} truncate`}>
-                      {formatDateShort(actualDate)}
-                    </span>
-                    <Badge variant="secondary" className="text-xs h-5 px-2 shrink-0">
-                      {dateExpenses.length}
-                    </Badge>
-                  </div>
-                  
-                  {/* Right side: Amount and chevron */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <p className={`text-sm ${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''}`}>
-                      {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
-                    </p>
-                    {isGroupExpanded ? (
-                      <ChevronUp className="size-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="size-4 text-muted-foreground" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Desktop: Keep original single-line layout */}
-              <div className="hidden md:flex items-center justify-between p-3">
-                <div className="flex-1 flex items-center gap-2 min-w-0">
-                  {isBulkSelectMode && (
-                    <Checkbox
-                      checked={allSelected}
-                      onCheckedChange={() => {
-                        setSelectedExpenseIds(prev => {
-                          const newSet = new Set(prev);
-                          if (allSelected) {
-                            dateExpenses.forEach(exp => newSet.delete(exp.id));
-                          } else {
-                            dateExpenses.forEach(exp => newSet.add(exp.id));
-                          }
-                          return newSet;
-                        });
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  )}
-                  {isToday(actualDate) && (
-                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
-                  )}
-                  <span 
-                    className={`${isWeekend(actualDate) ? "text-green-600" : ""} ${allExcluded ? 'line-through' : ''} whitespace-nowrap`}
-                  >
-                    {formatDateShort(actualDate)}
-                  </span>
-                  <p className={`text-sm text-muted-foreground ${allExcluded ? 'line-through' : ''} truncate`}>
-                    {dateExpenses.length} item{dateExpenses.length > 1 ? 's' : ''}
-                  </p>
-                  {isGroupExpanded ? (
-                    <ChevronUp className="size-4 shrink-0" />
-                  ) : (
-                    <ChevronDown className="size-4 shrink-0" />
-                  )}
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <p className={`${groupTotal < 0 ? 'text-green-600' : 'text-red-600'} ${allExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
-                    {groupTotal < 0 ? '+' : '-'}{formatCurrency(Math.abs(groupTotal))}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="px-3 pb-3 space-y-3 border-t pt-3">
-              {dateExpenses.map(expense => renderIndividualExpenseInGroup(expense))}
-            </div>
-          </CollapsibleContent>
+      <div key={`group-${groupKey}`} className="space-y-1">
+        {/* ✨ Static Date Header (no collapse, no card border) */}
+        <div className="py-2 px-1 flex items-center gap-2 border-b border-border">
+          {isToday(actualDate) && (
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
+          )}
+          <span className={`text-base font-semibold ${isWeekend(actualDate) ? "text-green-600" : "text-foreground"} ${allExcluded ? 'line-through opacity-50' : ''}`}>
+            {formatDateShort(actualDate)}
+          </span>
         </div>
-      </Collapsible>
+
+        {/* ✨ Simple List Items (no card styling, clean layout) */}
+        <div className="space-y-1">
+          {dateExpenses.map(expense => renderIndividualExpenseInGroup(expense))}
+        </div>
+      </div>
     );
   };
 
@@ -1172,7 +1149,7 @@ function ExpenseListComponent({
             <CollapsibleTrigger asChild>
               <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
                 {/* Mobile: Compact layout with badge below */}
-                <div className="md:hidden p-2">
+                <div className="md:hidden p-2 pl-4">
                   <div className="flex items-start justify-between gap-2">
                     {/* Left: Checkbox, Name area, Chevron */}
                     <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1269,8 +1246,8 @@ function ExpenseListComponent({
                 </div>
 
                 {/* Desktop: Keep original single-line layout */}
-                <div className="hidden md:flex items-center justify-between p-2">
-                  <div className="flex-1 flex items-center gap-2">
+                <div className="hidden md:flex items-center justify-between p-2 pl-4">
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
                     {isBulkSelectMode && (
                       <Checkbox
                         checked={selectedExpenseIds.has(expense.id)}
@@ -1398,7 +1375,7 @@ function ExpenseListComponent({
           className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''} ${isExcluded ? 'opacity-50' : ''}`}
         >
           {/* Mobile: Compact layout with badge below */}
-          <div className="md:hidden p-2">
+          <div className="md:hidden p-2 pl-4">
             <div className="flex items-start justify-between gap-2">
               {/* Left: Checkbox, Name area */}
               <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1508,8 +1485,8 @@ function ExpenseListComponent({
           </div>
 
           {/* Desktop: Keep original single-line layout */}
-          <div className="hidden md:flex items-center justify-between p-2">
-            <div className="flex-1 flex items-center gap-2">
+          <div className="hidden md:flex items-center justify-between p-2 pl-4">
+            <div className="flex-1 flex items-center gap-2 min-w-0">
               {isBulkSelectMode && (
                 <Checkbox
                   checked={selectedExpenseIds.has(expense.id)}
@@ -2204,64 +2181,85 @@ function ExpenseListComponent({
                   </p>
                 ) : (
                   <>
-                    {incomes.map((income) => {
+                    {[...incomes]
+                      .sort((a, b) => {
+                        // Sort by date: newest first (descending)
+                        const dateA = new Date(a.date).getTime();
+                        const dateB = new Date(b.date).getTime();
+                        return dateB - dateA;
+                      })
+                      .map((income) => {
                       const isExcluded = excludedIncomeIds.has(income.id);
                       const isSelected = selectedIncomeIds.has(income.id);
+                      const isExpanded = expandedIncomeIds.has(income.id);
+                      const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
+                      
                       return (
                         <div
                           key={income.id}
-                          className={`flex items-start gap-2 p-3 border rounded-lg transition-all ${
+                          className={`p-3 border rounded-lg transition-all cursor-pointer ${
                             isExcluded ? 'opacity-50 bg-muted/30' : ''
                           } ${
-                            isBulkSelectMode 
-                              ? 'cursor-pointer hover:bg-accent/50' 
-                              : 'hover:bg-accent/50 hover:scale-[1.005]'
+                            'hover:bg-accent/50'
                           } ${
                             isSelected ? 'bg-accent border-primary' : ''
                           }`}
-                          onClick={() => isBulkSelectMode && handleToggleSelectIncome(income.id)}
+                          onClick={() => {
+                            if (isBulkSelectMode) {
+                              handleToggleSelectIncome(income.id);
+                            } else {
+                              toggleExpandIncome(income.id);
+                            }
+                          }}
                         >
-                          {isBulkSelectMode && (
-                            <div className="pt-0.5">
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => handleToggleSelectIncome(income.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="border-neutral-400 data-[state=checked]:border-primary"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
+                          <div className="flex items-start gap-2">
+                            {isBulkSelectMode && (
+                              <div className="pt-0.5">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={() => handleToggleSelectIncome(income.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="border-neutral-400 data-[state=checked]:border-primary"
+                                />
+                              </div>
+                            )}
+                            
+                            {!isBulkSelectMode && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleExpandIncome(income.id);
+                                }}
+                                className="pt-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                                title={isExpanded ? "Sembunyikan detail" : "Tampilkan detail"}
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp className="size-4" />
+                                ) : (
+                                  <ChevronDown className="size-4" />
+                                )}
+                              </button>
+                            )}
+                            
                             <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
-                              <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                                {new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(income.date))}
-                              </span>
-                            </div>
-                            {income.currency === "USD" && (
-                              <div className={`flex items-center gap-2 text-sm text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                                <DollarSign className="size-3" />
-                                <span className="text-xs">
-                                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)} × {formatCurrency(income.exchangeRate || 0)}
-                                  <span className="ml-1">({income.conversionType === "auto" ? "realtime" : "manual"})</span>
-                                </span>
-                              </div>
-                            )}
-                            {income.deduction > 0 && (
-                              <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                                <Minus className="size-3 inline" /> Potongan: {formatCurrency(income.deduction)} (Kotor: {formatCurrency(income.amountIDR)})
-                              </div>
-                            )}
-                          </div>
-                          {!isBulkSelectMode && (
-                            <div className="flex items-center justify-between sm:justify-end gap-1">
-                              <div className="text-right">
-                                <p className={`text-sm sm:text-base text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                                  {formatCurrency(income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR)}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-0.5">
+                              {/* Clean default view */}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
+                                  <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                                    {formatDateSafe(income.date)}
+                                    {income.conversionType === "auto" && " • (Auto)"}
+                                    {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
+                                  </span>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <p className={`text-base font-medium text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
+                                    +{formatCurrency(netAmount)}
+                                  </p>
+                                  
+                                  {!isBulkSelectMode && (
+                                    <div className="flex items-center gap-0.5">
                                 <Button variant="ghost" size="icon" className="h-8 w-8"
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -2296,12 +2294,11 @@ function ExpenseListComponent({
                                     <DropdownMenuItem
                                       onClick={() => {
                                         setEditingIncomeId(income.id);
-                                        // Convert date to YYYY-MM-DD format for input type="date"
-                                        const dateObj = new Date(income.date);
-                                        const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+                                        // FIX: Extract date directly without timezone conversion
+                                        const datePart = income.date.split('T')[0]; // Get YYYY-MM-DD directly
                                         setEditingIncome({
                                           ...income,
-                                          date: formattedDate
+                                          date: datePart
                                         });
                                       }}
                                     >
@@ -2317,49 +2314,85 @@ function ExpenseListComponent({
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
+                              
+                              {/* Expandable details (hidden by default) */}
+                              {isExpanded && !isBulkSelectMode && (
+                                <div className="pl-6 pt-2 mt-2 space-y-1 text-xs text-muted-foreground border-l-2 border-muted ml-2">
+                                  {income.currency === "USD" && (
+                                    <div className={isExcluded ? 'line-through' : ''}>
+                                      <span className="font-medium">Kotor:</span> {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)} × {formatCurrency(income.exchangeRate || 0)} = {formatCurrency(income.amountIDR)}
+                                    </div>
+                                  )}
+                                  {income.deduction > 0 && (
+                                    <div className={isExcluded ? 'line-through' : ''}>
+                                      <span className="font-medium">Potongan:</span> -{formatCurrency(income.deduction)}
+                                    </div>
+                                  )}
+                                  {(!income.currency || income.currency === "IDR") && (
+                                    <div className={isExcluded ? 'line-through' : ''}>
+                                      <span className="font-medium">Jumlah:</span> {formatCurrency(income.amountIDR)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          )}
                           </div>
                         </div>
                       );
                     })}
                     
                     {/* Income Breakdown Section */}
-                    <div className="pt-4 border-t space-y-3 bg-muted/30 p-4 rounded-lg">
+                    <div className="pt-4 border-t space-y-2 bg-muted/30 p-4 rounded-lg">
                       <h4 className="text-sm font-medium mb-3">Ringkasan Pemasukan</h4>
                       
                       {/* Total Kotor */}
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Total Kotor</span>
+                        <span>Total Kotor</span>
                         <span className="text-green-600">{formatCurrency(totalGrossIncome)}</span>
                       </div>
                       
-                      {/* Potongan Individual */}
+                      {/* Indented: Individual deductions */}
                       {totalIndividualDeductions > 0 && (
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <Minus className="size-3" />
-                            Potongan Individual
-                          </span>
+                        <div className="flex items-center justify-between text-sm pl-4">
+                          <span className="text-muted-foreground">Potongan Individual</span>
                           <span className="text-red-600">-{formatCurrency(totalIndividualDeductions)}</span>
                         </div>
                       )}
                       
                       {/* Subtotal */}
-                      <div className="flex items-center justify-between text-sm border-t pt-2">
-                        <span className="text-muted-foreground">Subtotal</span>
-                        <span className="text-green-600">{formatCurrency(subtotalAfterIndividualDeductions)}</span>
-                      </div>
+                      {totalIndividualDeductions > 0 && (
+                        <div className="flex items-center justify-between text-sm border-t pt-2">
+                          <span>Subtotal</span>
+                          <span className="text-green-600">{formatCurrency(subtotalAfterIndividualDeductions)}</span>
+                        </div>
+                      )}
                       
-                      {/* Potongan Global */}
-                      <div className={`space-y-2 ${isDeductionExcluded ? 'opacity-50' : ''}`}>
+                      {/* Indented: Global Deduction with Info Tooltip */}
+                      <div className={`pl-4 space-y-2 ${isDeductionExcluded ? 'opacity-50' : ''}`}>
                         <div className="flex items-center justify-between">
-                          <Label className="text-sm flex items-center gap-2 cursor-pointer" onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}>
-                            <Minus className="size-3 text-red-600" />
-                            <span className={isDeductionExcluded ? 'line-through' : ''}>Potongan Global</span>
+                          <div className="flex items-center gap-2 text-sm cursor-pointer" onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}>
+                            <span className={`text-muted-foreground ${isDeductionExcluded ? 'line-through' : ''}`}>
+                              Potongan Global
+                            </span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="size-3 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[250px]">
+                                  <p className="text-xs">
+                                    Potongan yang diterapkan sekali ke subtotal setelah semua
+                                    pemasukan digabung, bukan diterapkan per item.
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                             {isDeductionExcluded && <Badge variant="secondary" className="text-xs">excluded</Badge>}
-                          </Label>
+                          </div>
                           <div className="flex items-center gap-1">
                             <Button 
                               variant="ghost" 
@@ -2398,10 +2431,10 @@ function ExpenseListComponent({
                         )}
                       </div>
                       
-                      {/* Total Bersih */}
-                      <div className="flex items-center justify-between text-base font-medium border-t pt-3">
-                        <span>Total Bersih</span>
-                        <span className="text-green-600">{formatCurrency(totalNetIncome)}</span>
+                      {/* Highlighted: Total Bersih */}
+                      <div className="flex items-center justify-between border-t-2 border-border pt-3 mt-2">
+                        <span className="font-semibold">Total Bersih</span>
+                        <span className="text-lg font-bold text-green-600">{formatCurrency(totalNetIncome)}</span>
                       </div>
                     </div>
                   </>
@@ -2415,7 +2448,8 @@ function ExpenseListComponent({
       {/* Edit Dialog/Drawer - Responsive */}
       {isMobile ? (
         <Drawer open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()} dismissible={true}>
-          <DrawerContent className="max-h-[90vh] flex flex-col">
+          {editingExpenseId !== null && (
+            <DrawerContent className="max-h-[90vh] flex flex-col">
             <DrawerHeader className="text-left border-b">
               <DrawerTitle>Edit Pengeluaran</DrawerTitle>
             </DrawerHeader>
@@ -2545,10 +2579,12 @@ function ExpenseListComponent({
               </Button>
             </div>
           </DrawerContent>
+          )}
         </Drawer>
       ) : (
         <Dialog open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {editingExpenseId !== null && (
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Edit Pengeluaran</DialogTitle>
             </DialogHeader>
@@ -2678,6 +2714,7 @@ function ExpenseListComponent({
               </Button>
             </div>
           </DialogContent>
+          )}
         </Dialog>
       )}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -2768,31 +2805,16 @@ function ExpenseListComponent({
       )}
       
       {/* Category Breakdown - Dialog (Desktop) / Drawer (Mobile) */}
-      {/* ✅ CRITICAL FIX: Conditional rendering to force unmount when closed */}
+      {/* ✅ V4 FIX: Wrapper stays, content goes */}
       {isMobile ? (
-        showCategoryDrawer && (
-          <Drawer 
-            open={showCategoryDrawer} 
-            onOpenChange={(open) => {
-              console.log('Category Drawer onOpenChange:', open);
-              setShowCategoryDrawer(open);
-              // ✅ Force cleanup stuck overlay
-              if (!open) {
-                // Force remove any stuck overlays
-                setTimeout(() => {
-                  const overlays = document.querySelectorAll('[data-vaul-overlay], [data-vaul-drawer]');
-                  overlays.forEach(overlay => {
-                    if (overlay.parentElement) {
-                      overlay.parentElement.removeChild(overlay);
-                    }
-                  });
-                }, 100);
-              }
-            }}
-            modal={true}
-            dismissible={true}
-            shouldScaleBackground={false}
-          >
+        <Drawer 
+          open={showCategoryDrawer} 
+          onOpenChange={setShowCategoryDrawer}
+          modal={true}
+          dismissible={true}
+          shouldScaleBackground={false}
+        >
+          {showCategoryDrawer && (
             <DrawerContent className="max-h-[85vh]">
               <DrawerHeader>
                 <DrawerTitle>Breakdown Kategori</DrawerTitle>
@@ -2806,12 +2828,12 @@ function ExpenseListComponent({
                 />
               </div>
             </DrawerContent>
-          </Drawer>
-        )
+          )}
+        </Drawer>
       ) : (
-        showCategoryDrawer && (
-          <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
-            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+        <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
+          {showCategoryDrawer && (
+            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto" aria-describedby={undefined}>
               <DialogHeader>
                 <DialogTitle>Breakdown Kategori</DialogTitle>
               </DialogHeader>
@@ -2824,14 +2846,18 @@ function ExpenseListComponent({
                 />
               </div>
             </DialogContent>
-          </Dialog>
-        )
+          )}
+        </Dialog>
       )}
       
       {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}
-      {editingIncomeId && editingIncome && onUpdateIncome && (
-        isMobile ? (
-          <Drawer open={true} onOpenChange={(open) => !open && setEditingIncomeId(null)}>
+      {isMobile ? (
+        <Drawer open={!!editingIncomeId && !!editingIncome} onOpenChange={(open) => {
+          if (!open) {
+            setEditingIncomeId(null);
+          }
+        }}>
+          {editingIncomeId && editingIncome && onUpdateIncome && (
             <DrawerContent className="max-h-[90vh] flex flex-col">
               <DrawerHeader className="text-left border-b">
                 <DrawerTitle>Edit Pemasukan</DrawerTitle>
@@ -2858,7 +2884,7 @@ function ExpenseListComponent({
                   onSuccess={() => setEditingIncomeId(null)}
                   inDialog={true}
                   pockets={pockets}
-                  balances={balances}
+                  balances={balancesMap}
                   hideTargetPocket={false}
                   submitButtonText="Simpan"
                 />
@@ -2873,10 +2899,16 @@ function ExpenseListComponent({
                 </Button>
               </div>
             </DrawerContent>
-          </Drawer>
-        ) : (
-          <Dialog open={true} onOpenChange={(open) => !open && setEditingIncomeId(null)}>
-            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          )}
+        </Drawer>
+      ) : (
+        <Dialog open={!!editingIncomeId && !!editingIncome} onOpenChange={(open) => {
+          if (!open) {
+            setEditingIncomeId(null);
+          }
+        }}>
+          {editingIncomeId && editingIncome && onUpdateIncome && (
+            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
               <DialogHeader>
                 <DialogTitle>Edit Pemasukan</DialogTitle>
               </DialogHeader>
@@ -2901,7 +2933,6 @@ function ExpenseListComponent({
                 onSuccess={() => setEditingIncomeId(null)}
                 inDialog={true}
                 pockets={pockets}
-                balances={balances}
                 hideTargetPocket={false}
                 submitButtonText="Simpan"
               />
@@ -2914,8 +2945,8 @@ function ExpenseListComponent({
                 </Button>
               </div>
             </DialogContent>
-          </Dialog>
-        )
+          )}
+        </Dialog>
       )}
     </Card>
   );

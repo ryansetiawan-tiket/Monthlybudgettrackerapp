@@ -4,10 +4,14 @@ import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { toast } from 'sonner@2.0.3';
 
 export function useExcludeState() {
+  console.log('[useExcludeState] Hook called - starting initialization');
+  
   const [excludedExpenseIds, setExcludedExpenseIds] = useState<Set<string>>(new Set());
   const [excludedIncomeIds, setExcludedIncomeIds] = useState<Set<string>>(new Set());
   const [isDeductionExcluded, setIsDeductionExcluded] = useState(false);
   const [isExcludeLocked, setIsExcludeLocked] = useState(false);
+  
+  console.log('[useExcludeState] State initialized, excludedExpenseIds is Set:', excludedExpenseIds instanceof Set);
 
   const baseUrl = getBaseUrl(projectId);
 

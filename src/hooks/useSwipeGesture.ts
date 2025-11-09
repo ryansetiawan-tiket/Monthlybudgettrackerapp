@@ -94,8 +94,15 @@ export function useSwipeGesture(config: SwipeConfig) {
       const opacity = Math.max(0, 1 - (Math.abs(deltaY) / 300));
       const dialogElement = element.closest('[role="dialog"]');
       const backdrop = dialogElement?.previousElementSibling as HTMLElement;
-      if (backdrop && backdrop.hasAttribute('data-radix-dialog-overlay')) {
-        backdrop.style.opacity = opacity.toString();
+      if (backdrop) {
+        const isRadixOverlay = backdrop.hasAttribute('data-radix-dialog-overlay');
+        const isVaulOverlay = backdrop.hasAttribute('data-vaul-overlay') || backdrop.getAttribute('data-slot') === 'drawer-overlay';
+        if (isRadixOverlay || isVaulOverlay) {
+          backdrop.style.opacity = opacity.toString();
+          // When fully transparent, allow pointer events to pass through so underlying UI is clickable
+          // Use a small threshold to avoid flicker from fractional values
+          backdrop.style.pointerEvents = opacity <= 0.01 ? 'none' : 'auto';
+        }
       }
 
       // Prevent scrolling when swiping
@@ -128,9 +135,15 @@ export function useSwipeGesture(config: SwipeConfig) {
       // Fade out backdrop
       const dialogElement = element.closest('[role="dialog"]');
       const backdrop = dialogElement?.previousElementSibling as HTMLElement;
-      if (backdrop && backdrop.hasAttribute('data-radix-dialog-overlay')) {
-        backdrop.style.transition = 'opacity 0.3s ease-out';
-        backdrop.style.opacity = '0';
+      if (backdrop) {
+        const isRadixOverlay = backdrop.hasAttribute('data-radix-dialog-overlay');
+        const isVaulOverlay = backdrop.hasAttribute('data-vaul-overlay') || backdrop.getAttribute('data-slot') === 'drawer-overlay';
+        if (isRadixOverlay || isVaulOverlay) {
+          backdrop.style.transition = 'opacity 0.3s ease-out';
+          backdrop.style.opacity = '0';
+          // Ensure the overlay stops intercepting pointer events after fade-out begins
+          backdrop.style.pointerEvents = 'none';
+        }
       }
 
       // Call callback after animation
@@ -146,9 +159,15 @@ export function useSwipeGesture(config: SwipeConfig) {
       // Restore backdrop
       const dialogElement = element.closest('[role="dialog"]');
       const backdrop = dialogElement?.previousElementSibling as HTMLElement;
-      if (backdrop && backdrop.hasAttribute('data-radix-dialog-overlay')) {
-        backdrop.style.transition = 'opacity 0.3s ease-out';
-        backdrop.style.opacity = '1';
+      if (backdrop) {
+        const isRadixOverlay = backdrop.hasAttribute('data-radix-dialog-overlay');
+        const isVaulOverlay = backdrop.hasAttribute('data-vaul-overlay') || backdrop.getAttribute('data-slot') === 'drawer-overlay';
+        if (isRadixOverlay || isVaulOverlay) {
+          backdrop.style.transition = 'opacity 0.3s ease-out';
+          backdrop.style.opacity = '1';
+          // Make sure it accepts pointer events again while visible
+          backdrop.style.pointerEvents = 'auto';
+        }
       }
     }
 

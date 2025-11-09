@@ -170,7 +170,7 @@ export function EditPocketDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px]" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>✏️ Edit Kantong</DialogTitle>
         </DialogHeader>

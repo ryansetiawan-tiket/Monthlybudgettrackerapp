@@ -124,11 +124,17 @@ interface MonthCache {
 }
 
 function AppContent() {
+  console.log('[App] AppContent rendering - Phase 1: Initializing hooks');
+  
   // Setup mobile back button handler (for Capacitor/Android)
+  console.log('[App] Phase 1.1: Calling useMobileBackButton');
   useMobileBackButton();
+  console.log('[App] Phase 1.2: useMobileBackButton completed');
   
   // Monitor online/offline status
+  console.log('[App] Phase 1.3: Calling useOnlineStatus');
   useOnlineStatus();
+  console.log('[App] Phase 1.4: useOnlineStatus completed');
 
   // Random funny quote
   const [randomQuote, setRandomQuote] = useState("");
@@ -214,6 +220,10 @@ function AppContent() {
   } = usePockets();
 
   // Custom Hooks - Exclude State Management
+  console.log('[App] Phase 2: Calling useExcludeState');
+  const excludeStateResult = useExcludeState();
+  console.log('[App] Phase 2.1: useExcludeState returned, extracting values...');
+  
   const {
     excludedExpenseIds,
     setExcludedExpenseIds,
@@ -229,7 +239,14 @@ function AppContent() {
     updateExcludedExpenseIds,
     updateExcludedIncomeIds,
     toggleDeductionExcluded,
-  } = useExcludeState();
+  } = excludeStateResult;
+  
+  console.log('[App] Phase 2.2: useExcludeState values extracted');
+  console.log('[App] Phase 2.3: excludedExpenseIds type check:', {
+    isDefined: excludedExpenseIds !== undefined,
+    isSet: excludedExpenseIds instanceof Set,
+    value: excludedExpenseIds
+  });
 
   // Local UI states
   const [isSaving, setIsSaving] = useState(false);
@@ -1285,15 +1302,20 @@ function AppContent() {
 
   // Calculate gross additional income excluding excluded items and apply individual deductions
   // Memoized for performance - only recomputes when dependencies change
-  const grossAdditionalIncome = useMemo(() => 
-    additionalIncomes
+  const grossAdditionalIncome = useMemo(() => {
+    // Safety check: ensure excludedIncomeIds is initialized
+    if (!excludedIncomeIds) {
+      console.error('[App] excludedIncomeIds is undefined - hooks may not have initialized properly');
+      return 0;
+    }
+    
+    return additionalIncomes
       .filter(income => !excludedIncomeIds.has(income.id))
       .reduce((sum, income) => {
         const netAmount = income.amountIDR - (income.deduction || 0);
         return sum + netAmount;
-      }, 0),
-    [additionalIncomes, excludedIncomeIds]
-  );
+      }, 0);
+  }, [additionalIncomes, excludedIncomeIds]);
 
   // Apply global deduction only if not excluded
   const totalAdditionalIncome = useMemo(() => {
@@ -1311,17 +1333,22 @@ function AppContent() {
 
   // Calculate total expenses excluding excluded items
   // Items from income (fromIncome: true) add to budget instead of subtracting
-  const totalExpenses = useMemo(() => 
-    expenses
+  const totalExpenses = useMemo(() => {
+    // Safety check: ensure excludedExpenseIds is initialized
+    if (!excludedExpenseIds) {
+      console.error('[App] excludedExpenseIds is undefined - hooks may not have initialized properly');
+      return 0;
+    }
+    
+    return expenses
       .filter(expense => !excludedExpenseIds.has(expense.id))
       .reduce((sum, expense) => {
         if (expense.fromIncome) {
           return sum - expense.amount; // Subtract from expenses (adds to budget)
         }
         return sum + expense.amount;
-      }, 0),
-    [expenses, excludedExpenseIds]
-  );
+      }, 0);
+  }, [expenses, excludedExpenseIds]);
 
   // Calculate remaining budget
   const remainingBudget = useMemo(() => 
@@ -1579,6 +1606,7 @@ function AppContent() {
               isExcludeLocked={isExcludeLocked}
               onToggleExcludeLock={() => toggleExcludeLock(selectedYear, selectedMonth)}
               pockets={pockets}
+              balances={balances}
               categoryFilter={categoryFilter}
               onClearFilter={handleClearFilter}
               // Income props

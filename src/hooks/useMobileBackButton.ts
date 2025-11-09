@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { useDialogStack } from '../contexts/DialogStackContext';
 import { triggerHaptic, isCapacitor } from '../utils/capacitor-helpers';
-import { toast } from 'sonner';
+import { toast } from 'sonner@2.0.3';
 
 /**
  * Helper function to close top drawer
@@ -55,11 +55,19 @@ async function closeTopDrawer() {
  * Call this hook once in App.tsx (top level)
  */
 export function useMobileBackButton() {
+  console.log('[useMobileBackButton] Hook called - starting initialization');
+  
+  console.log('[useMobileBackButton] Getting DialogStack context...');
   const { closeTopDialog } = useDialogStack();
+  console.log('[useMobileBackButton] DialogStack context obtained');
+  
+  console.log('[useMobileBackButton] Initializing refs...');
   const lastBackPress = useRef(0);
   const listenerHandleRef = useRef<any>(null);
+  console.log('[useMobileBackButton] Refs initialized');
 
   useEffect(() => {
+    console.log('[useMobileBackButton] useEffect running');
     // Only setup on Capacitor (native)
     if (!isCapacitor()) {
       console.log('[BackButton] Not in Capacitor, skipping setup');

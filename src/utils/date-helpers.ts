@@ -80,3 +80,41 @@ export function compareDates(a: string, b: string): number {
   if (dateA > dateB) return 1;
   return 0;
 }
+
+/**
+ * Format date safely without timezone conversion issues
+ * Parses YYYY-MM-DD string and formats in local timezone
+ * 
+ * FIX: Prevents off-by-1-day bug caused by UTC midnight parsing
+ * 
+ * @param dateString - Format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
+ * @param options - Intl.DateTimeFormat options
+ * @returns Formatted date string
+ * 
+ * @example
+ * formatDateSafe("2025-11-08") → "8 Nov 2025" (NOT "9 Nov 2025")
+ */
+export function formatDateSafe(
+  dateString: string,
+  options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }
+): string {
+  if (!dateString) return '';
+  
+  // Extract date part only (before 'T' if timestamp)
+  const datePart = dateString.split('T')[0];
+  const [yearStr, monthStr, dayStr] = datePart.split('-');
+  
+  if (!yearStr || !monthStr || !dayStr) {
+    console.warn('[formatDateSafe] Invalid date format:', dateString);
+    return dateString;
+  }
+  
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10) - 1; // 0-indexed for Date constructor
+  const day = parseInt(dayStr, 10);
+  
+  // Create date using local timezone (NOT UTC) - prevents timezone shift
+  const date = new Date(year, month, day);
+  
+  return new Intl.DateTimeFormat('id-ID', options).format(date);
+}

@@ -255,7 +255,7 @@ export function CategoryEditor({ open, onOpenChange, category, onSave }: Categor
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{isEditing ? 'Edit Category' : 'Create Category'}</DialogTitle>
         </DialogHeader>

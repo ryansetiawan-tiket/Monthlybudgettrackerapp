@@ -3481,4 +3481,194 @@ app.post("/make-server-3adbeaf1/categories/tracking/:monthKey", async (c) => {
   }
 });
 
+// ============================================
+// DATA MIGRATION ENDPOINTS
+// ============================================
+
+/**
+ * 🔧 MIGRATION: Fix Income Timestamps
+ * 
+ * PROBLEM: Old income data has arbitrary UTC timestamps (e.g., 22:47:16.000Z)
+ * which convert to wrong dates in WIB timezone.
+ * 
+ * SOLUTION: Normalize all income timestamps to UTC noon (12:00:00.000Z)
+ * to ensure consistent date display across all timezones.
+ * 
+ * POST /make-server-3adbeaf1/migrations/fix-income-timestamps
+ * 
+ * Body (optional):
+ * {
+ *   "dryRun": true,  // If true, only reports what would be fixed without saving
+ *   "monthKeys": ["2025-11"]  // Optional: specific months to fix. If empty, fixes all.
+ * }
+ */
+app.post("/make-server-3adbeaf1/migrations/fix-income-timestamps", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const { dryRun = false, monthKeys = [] } = body;
+    
+    console.log(`[MIGRATION] Starting income timestamp fix. Dry run: ${dryRun}`);
+    
+    const results = {
+      scanned: 0,
+      fixed: 0,
+      skipped: 0,
+      errors: 0,
+      details: [] as any[],
+    };
+    
+    // Helper function to check if timestamp needs fixing
+    const needsFix = (dateStr: string): boolean => {
+      if (!dateStr || !dateStr.includes('T')) {
+        return false;
+      }
+      
+      // Extract time component
+      const timePart = dateStr.split('T')[1];
+      
+      // If it's already UTC noon (12:00:00.000Z), no fix needed
+      if (timePart === '12:00:00.000Z') {
+        return false;
+      }
+      
+      // Any other time needs fixing
+      return true;
+    };
+    
+    // Helper function to fix timestamp
+    const fixTimestamp = (dateStr: string): string => {
+      // Extract date part (YYYY-MM-DD)
+      const datePart = dateStr.split('T')[0];
+      
+      // Return with UTC noon
+      return `${datePart}T12:00:00.000Z`;
+    };
+    
+    // If specific months provided, only scan those
+    // Otherwise, scan all income entries
+    let incomesToScan: any[] = [];
+    
+    if (monthKeys.length > 0) {
+      // Scan specific months
+      for (const monthKey of monthKeys) {
+        const prefix = `income:${monthKey}:`;
+        const monthIncomes = await kv.getByPrefix(prefix);
+        incomesToScan.push(...(monthIncomes || []));
+      }
+    } else {
+      // Scan all incomes (get all keys starting with "income:")
+      const allIncomes = await kv.getByPrefix('income:');
+      incomesToScan = allIncomes || [];
+    }
+    
+    console.log(`[MIGRATION] Found ${incomesToScan.length} income entries to scan`);
+    
+    // Process each income
+    for (const income of incomesToScan) {
+      results.scanned++;
+      
+      try {
+        const { id, date } = income;
+        
+        if (!date) {
+          results.skipped++;
+          results.details.push({
+            id,
+            status: 'skipped',
+            reason: 'No date field',
+          });
+          continue;
+        }
+        
+        if (!needsFix(date)) {
+          results.skipped++;
+          results.details.push({
+            id,
+            status: 'skipped',
+            reason: 'Already normalized',
+            date,
+          });
+          continue;
+        }
+        
+        // Extract month key from income id or date
+        const oldDate = date;
+        const newDate = fixTimestamp(date);
+        
+        // Extract year-month from the income key
+        // Key format: income:YYYY-MM:uuid
+        // We need to reconstruct the key from the income data
+        const monthMatch = oldDate.match(/^(\d{4}-\d{2})/);
+        if (!monthMatch) {
+          results.errors++;
+          results.details.push({
+            id,
+            status: 'error',
+            reason: 'Cannot extract month from date',
+            date: oldDate,
+          });
+          continue;
+        }
+        
+        const monthKey = monthMatch[1];
+        const key = `income:${monthKey}:${id}`;
+        
+        if (!dryRun) {
+          // Update the income with fixed timestamp
+          const updatedIncome = {
+            ...income,
+            date: newDate,
+            updatedAt: new Date().toISOString(),
+            _migratedAt: new Date().toISOString(), // Mark as migrated
+          };
+          
+          await kv.set(key, updatedIncome);
+        }
+        
+        results.fixed++;
+        results.details.push({
+          id,
+          status: 'fixed',
+          oldDate,
+          newDate,
+          key,
+        });
+        
+      } catch (error: any) {
+        results.errors++;
+        results.details.push({
+          id: income.id,
+          status: 'error',
+          reason: error.message,
+        });
+        console.error(`[MIGRATION] Error processing income ${income.id}:`, error);
+      }
+    }
+    
+    console.log(`[MIGRATION] Complete. Scanned: ${results.scanned}, Fixed: ${results.fixed}, Skipped: ${results.skipped}, Errors: ${results.errors}`);
+    
+    return c.json({
+      success: true,
+      dryRun,
+      summary: {
+        scanned: results.scanned,
+        fixed: results.fixed,
+        skipped: results.skipped,
+        errors: results.errors,
+      },
+      details: results.details,
+      message: dryRun 
+        ? `DRY RUN: Would fix ${results.fixed} income entries` 
+        : `Successfully fixed ${results.fixed} income entries`,
+    });
+    
+  } catch (error: any) {
+    console.error("[MIGRATION] Fatal error:", error);
+    return c.json({ 
+      success: false, 
+      error: `Migration failed: ${error.message}` 
+    }, 500);
+  }
+});
+
 Deno.serve(app.fetch);
