@@ -3,8 +3,7 @@ import { MonthSelector } from "./components/MonthSelector";
 import { BudgetOverview } from "./components/BudgetOverview";
 import { BudgetForm } from "./components/BudgetForm";
 import { ExpenseList } from "./components/ExpenseList";
-import { AdditionalIncomeList } from "./components/AdditionalIncomeList";
-import { FixedExpenseTemplate } from "./components/FixedExpenseTemplates";
+import { FixedExpenseTemplate, FixedExpenseTemplates } from "./components/FixedExpenseTemplates";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { PocketsSummary } from "./components/PocketsSummary";
 import { FloatingActionButton } from "./components/FloatingActionButton";
@@ -29,20 +28,25 @@ const CategoryManager = lazy(() =>
 const UnifiedTransactionDialog = lazy(() =>
   import("./components/UnifiedTransactionDialog").then(m => ({ default: m.UnifiedTransactionDialog }))
 );
+const CalendarView = lazy(() =>
+  import("./components/CalendarView").then(m => ({ default: m.CalendarView }))
+);
 import DialogSkeleton from "./components/DialogSkeleton";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
 import { useRealtimeSubscription } from "./utils/supabase/useRealtimeSubscription";
 import { toast } from "sonner@2.0.3";
 import { Toaster } from "./components/ui/sonner";
-import { Plus, DollarSign, Settings, Sliders } from "lucide-react";
+import { Plus, DollarSign, Settings, Sliders, Calendar, FileText } from "lucide-react";
 import { Button } from "./components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { funnyQuotes } from "./data/funny-quotes";
 import { motion, AnimatePresence } from "motion/react";
 import { getBaseUrl, createAuthHeaders } from "./utils/api";
 import { formatCurrency } from "./utils/currency";
+import { calculateCarryOverAssets, calculateCarryOverLiabilities } from "./utils/calculations";
 import { useBudgetData } from "./hooks/useBudgetData";
 import { usePockets } from "./hooks/usePockets";
-import { useExcludeState } from "./hooks/useExcludeState";
+import { useCategorySettings } from "./hooks/useCategorySettings";
 import { DialogStackProvider } from "./contexts/DialogStackContext";
 import { useMobileBackButton } from "./hooks/useMobileBackButton";
 import { usePullToRefresh } from "./hooks/usePullToRefresh";
@@ -51,10 +55,10 @@ import { useIsMobile } from "./components/ui/use-mobile";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { handleError } from "./utils/errorHandler";
+import "./utils/migrate-expense-keys"; // Load migration utilities in console
 
 interface BudgetData {
   initialBudget: number;
-  carryover: number;
   notes: string;
   incomeDeduction: number;
 }
@@ -219,40 +223,13 @@ function AppContent() {
     refreshPockets,
   } = usePockets();
 
-  // Custom Hooks - Exclude State Management
-  console.log('[App] Phase 2: Calling useExcludeState');
-  const excludeStateResult = useExcludeState();
-  console.log('[App] Phase 2.1: useExcludeState returned, extracting values...');
+  // 🏗️ ARCHITECTURE FIX: Previous month pockets for carry-over calculation
+  const [previousMonthBalances, setPreviousMonthBalances] = useState<Map<string, PocketBalance>>(new Map());
   
-  const {
-    excludedExpenseIds,
-    setExcludedExpenseIds,
-    excludedIncomeIds,
-    setExcludedIncomeIds,
-    isDeductionExcluded,
-    setIsDeductionExcluded,
-    isExcludeLocked,
-    setIsExcludeLocked,
-    loadExcludeState,
-    saveExcludeState,
-    toggleExcludeLock,
-    updateExcludedExpenseIds,
-    updateExcludedIncomeIds,
-    toggleDeductionExcluded,
-  } = excludeStateResult;
-  
-  console.log('[App] Phase 2.2: useExcludeState values extracted');
-  console.log('[App] Phase 2.3: excludedExpenseIds type check:', {
-    isDefined: excludedExpenseIds !== undefined,
-    isSet: excludedExpenseIds instanceof Set,
-    value: excludedExpenseIds
-  });
-
   // Local UI states
   const [isSaving, setIsSaving] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [isAddingIncome, setIsAddingIncome] = useState(false);
-  const [isLoadingCarryover, setIsLoadingCarryover] = useState(false);
   const [templates, setTemplates] = useState<FixedExpenseTemplate[]>([]);
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
@@ -271,6 +248,15 @@ function AppContent() {
   
   // Phase 8: Category Manager State
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  
+  // Template Manager State (Desktop)
+  const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+  
+  // Calendar View State
+  const [showCalendarView, setShowCalendarView] = useState(false);
+
+  // Category Settings Hook
+  const { settings: categorySettings } = useCategorySettings();
 
   const baseUrl = getBaseUrl(projectId);
   const isMobile = useIsMobile();
@@ -282,7 +268,6 @@ function AppContent() {
       await Promise.all([
         fetchBudgetData(selectedYear, selectedMonth),
         fetchPockets(selectedYear, selectedMonth),
-        loadExcludeState(selectedYear, selectedMonth),
       ]);
       
       // Trigger pockets refresh to update timelines
@@ -296,7 +281,7 @@ function AppContent() {
       console.error('Pull to refresh error:', error);
       toast.error('Gagal memperbarui data');
     }
-  }, [selectedYear, selectedMonth, fetchBudgetData, fetchPockets, loadExcludeState, refreshPockets]);
+  }, [selectedYear, selectedMonth, fetchBudgetData, fetchPockets, refreshPockets]);
 
   // Pull to Refresh hook (mobile only)
   const pullToRefreshState = usePullToRefresh({
@@ -439,23 +424,60 @@ function AppContent() {
     // fetchBudgetData will handle caching internally through setState
     fetchBudgetData(selectedYear, selectedMonth);
     
-    // Reset excluded expenses and incomes when month changes (will be overridden by loadExcludeState if locked)
-    setExcludedExpenseIds(new Set());
-    setExcludedIncomeIds(new Set());
-    setIsDeductionExcluded(false);
-    setIsExcludeLocked(false);
-    
     // Load templates if not loaded yet (templates are global, not month-specific)
     if (templates.length === 0) {
       loadTemplates();
     }
     
-    // Load exclude state (might override reset above if locked)
-    loadExcludeState(selectedYear, selectedMonth);
-    
     // Load pockets (includes archived and balances)
     fetchPockets(selectedYear, selectedMonth);
-  }, [selectedMonth, selectedYear, fetchBudgetData, loadExcludeState, fetchPockets]);
+  }, [selectedMonth, selectedYear, fetchBudgetData, fetchPockets]);
+
+  // 🏗️ ARCHITECTURE FIX: Fetch previous month balances for carry-over calculation
+  useEffect(() => {
+    const fetchPreviousMonthBalances = async () => {
+      // Calculate previous month
+      let prevMonth = selectedMonth - 1;
+      let prevYear = selectedYear;
+      
+      if (prevMonth < 1) {
+        prevMonth = 12;
+        prevYear = selectedYear - 1;
+      }
+      
+      try {
+        const response = await fetch(
+          `${baseUrl}/pockets/${prevYear}/${prevMonth}`,
+          {
+            headers: {
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+          }
+        );
+        
+        if (!response.ok) {
+          // If previous month doesn't exist, set empty map
+          setPreviousMonthBalances(new Map());
+          return;
+        }
+        
+        const data = await response.json();
+        const balances = data.success ? (data.data.balances || []) : (data.balances || []);
+        const balanceMap = new Map<string, PocketBalance>();
+        
+        balances.forEach((balance: PocketBalance) => {
+          balanceMap.set(balance.pocketId, balance);
+        });
+        
+        setPreviousMonthBalances(balanceMap);
+      } catch (error) {
+        console.log('📅 Previous month balances not found (first month usage)');
+        setPreviousMonthBalances(new Map());
+      }
+    };
+    
+    fetchPreviousMonthBalances();
+  }, [selectedMonth, selectedYear, baseUrl]);
 
   // ============================================
   // REALTIME SUBSCRIPTIONS
@@ -478,8 +500,6 @@ function AppContent() {
         fetchBudgetData(selectedYear, selectedMonth);
       } else if (key.includes('pockets_') || key.includes('transfer')) {
         fetchPockets(selectedYear, selectedMonth);
-      } else if (key.includes('exclude_state_')) {
-        loadExcludeState(selectedYear, selectedMonth);
       }
     },
     onInsert: (payload) => {
@@ -492,8 +512,6 @@ function AppContent() {
         fetchBudgetData(selectedYear, selectedMonth);
       } else if (key.includes('pockets_') || key.includes('transfer')) {
         fetchPockets(selectedYear, selectedMonth);
-      } else if (key.includes('exclude_state_')) {
-        loadExcludeState(selectedYear, selectedMonth);
       }
     },
     onDelete: (payload) => {
@@ -507,8 +525,6 @@ function AppContent() {
         fetchBudgetData(selectedYear, selectedMonth);
       } else if (key.includes('pockets_') || key.includes('transfer')) {
         fetchPockets(selectedYear, selectedMonth);
-      } else if (key.includes('exclude_state_')) {
-        loadExcludeState(selectedYear, selectedMonth);
       }
     },
     enabled: true
@@ -517,82 +533,7 @@ function AppContent() {
   // These functions are no longer needed - using fetchBudgetData from hook instead
   // Keeping them commented for reference during migration
   // const loadBudgetData, loadExpenses, loadAdditionalIncomes - removed (use fetchBudgetData from hook)
-
-  const loadPreviousMonthData = useCallback(async () => {
-    setIsLoadingCarryover(true);
-    try {
-      // Calculate previous month and year
-      let prevMonth = selectedMonth - 1;
-      let prevYear = selectedYear;
-      
-      if (prevMonth === 0) {
-        prevMonth = 12;
-        prevYear = selectedYear - 1;
-      }
-
-      // Fetch budget data
-      const budgetResponse = await fetch(
-        `${baseUrl}/budget/${prevYear}/${prevMonth}`,
-        {
-          headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
-
-      if (!budgetResponse.ok) {
-        throw new Error("Failed to load previous month budget data");
-      }
-
-      const budgetData = await budgetResponse.json();
-
-      // Fetch expenses
-      const expensesResponse = await fetch(
-        `${baseUrl}/expenses/${prevYear}/${prevMonth}`,
-        {
-          headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
-
-      const expensesData = expensesResponse.ok ? await expensesResponse.json() : [];
-
-      // Fetch additional incomes
-      const incomesResponse = await fetch(
-        `${baseUrl}/additional-income/${prevYear}/${prevMonth}`,
-        {
-          headers: {
-            Authorization: `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
-
-      const incomesData = incomesResponse.ok ? await incomesResponse.json() : [];
-
-      // Calculate remaining budget
-      const prevGrossIncome = incomesData.reduce(
-        (sum: number, income: AdditionalIncome) => sum + income.amountIDR,
-        0
-      );
-      const prevTotalAdditionalIncome = prevGrossIncome - (budgetData.incomeDeduction || 0);
-      const prevTotalIncome =
-        Number(budgetData.initialBudget || 0) +
-        Number(budgetData.carryover || 0) +
-        prevTotalAdditionalIncome;
-      const prevTotalExpenses = expensesData.reduce(
-        (sum: number, expense: Expense) => sum + expense.amount,
-        0
-      );
-      const remaining = prevTotalIncome - prevTotalExpenses;
-
-      setPreviousMonthRemaining(remaining);
-    } catch (error) {
-      setPreviousMonthRemaining(null);
-    } finally {
-      setIsLoadingCarryover(false);
-    }
-  }, [selectedMonth, selectedYear, baseUrl, publicAnonKey]);
+  // ✅ REMOVED: loadPreviousMonthData - carryover manual sudah dihapus, sistem kantong handle otomatis
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -616,14 +557,7 @@ function AppContent() {
     }
   }, [baseUrl, publicAnonKey]);
 
-  // Auto-save exclude state when it changes (only if locked)
-  useEffect(() => {
-    if (isExcludeLocked) {
-      saveExcludeState(selectedYear, selectedMonth, true, excludedExpenseIds, excludedIncomeIds, isDeductionExcluded);
-    }
-  }, [excludedExpenseIds, excludedIncomeIds, isDeductionExcluded, isExcludeLocked, saveExcludeState, selectedYear, selectedMonth]);
-
-  const handleAddTemplate = useCallback(async (name: string, items: Array<{name: string, amount: number}>, color?: string) => {
+  const handleAddTemplate = useCallback(async (name: string, items: Array<{name: string, amount: number, category?: string, pocketId?: string}>, color?: string, emoji?: string) => {
     try {
       const response = await fetch(
         `${baseUrl}/templates`,
@@ -633,7 +567,7 @@ function AppContent() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, items, color }),
+          body: JSON.stringify({ name, items, color, emoji }),
         }
       );
 
@@ -683,7 +617,7 @@ function AppContent() {
     }
   }, [expenses, baseUrl, selectedYear, selectedMonth, publicAnonKey]);
 
-  const handleUpdateTemplate = useCallback(async (id: string, name: string, items: Array<{name: string, amount: number}>, color?: string) => {
+  const handleUpdateTemplate = useCallback(async (id: string, name: string, items: Array<{name: string, amount: number, category?: string, pocketId?: string}>, color?: string, emoji?: string) => {
     try {
       const response = await fetch(
         `${baseUrl}/templates/${id}`,
@@ -693,7 +627,7 @@ function AppContent() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, items, color }),
+          body: JSON.stringify({ name, items, color, emoji }),
         }
       );
 
@@ -769,7 +703,7 @@ function AppContent() {
     }
   }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, budget]);
 
-  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string) => {
+  const handleAddExpense = useCallback(async (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string, emoji?: string) => {
     setIsAdding(true);
     try {
       const response = await fetch(
@@ -780,7 +714,7 @@ function AppContent() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ name, amount, date, items, color, pocketId, groupId, category }),
+          body: JSON.stringify({ name, amount, date, items, color, pocketId, groupId, category, emoji }),
         }
       );
 
@@ -790,15 +724,28 @@ function AppContent() {
 
       const result = await response.json();
       
-      // Use functional update to avoid stale closure issues with multiple rapid calls
-      setExpenses(prev => {
-        const newExpenses = [...prev, result.data];
-        // Update cache with new state
-        updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
-        return newExpenses;
-      });
+      // 🔧 FIX: Only add to current state if expense date matches current month
+      // This prevents expenses with past/future dates from appearing in wrong month
+      const expenseDate = new Date(result.data.date);
+      const expenseYear = expenseDate.getUTCFullYear();
+      const expenseMonth = expenseDate.getUTCMonth() + 1;
       
-      // Invalidate next month's cache (carryover changes)
+      if (expenseYear === selectedYear && expenseMonth === selectedMonth) {
+        // Expense belongs to current month → Update state
+        setExpenses(prev => {
+          const newExpenses = [...prev, result.data];
+          // Update cache with new state
+          updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+          return newExpenses;
+        });
+      } else {
+        // Expense belongs to different month → Just invalidate cache
+        console.log(`📅 Expense date (${expenseYear}-${expenseMonth}) differs from current view (${selectedYear}-${selectedMonth}) - skipping state update`);
+        // Invalidate the ACTUAL expense month's cache
+        invalidateCache(expenseYear, expenseMonth);
+      }
+      
+      // Invalidate next month's cache (pocket carry-over system changes)
       invalidateCache(selectedYear, selectedMonth);
       
       // Only reload pockets and show toast if not silent (for batch operations)
@@ -839,12 +786,26 @@ function AppContent() {
         throw new Error("Failed to delete expense");
       }
 
-      const newExpenses = expenses.filter((expense) => expense.id !== id);
-      setExpenses(newExpenses);
+      // 🔧 FIX: Check if deleted expense actually belongs to current month view
+      const deletedExpense = expenses.find(e => e.id === id);
+      if (deletedExpense) {
+        const expenseDate = new Date(deletedExpense.date);
+        const expenseYear = expenseDate.getUTCFullYear();
+        const expenseMonth = expenseDate.getUTCMonth() + 1;
+        
+        if (expenseYear === selectedYear && expenseMonth === selectedMonth) {
+          // Belongs to current month → Remove from state
+          const newExpenses = expenses.filter((expense) => expense.id !== id);
+          setExpenses(newExpenses);
+          updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+        } else {
+          // Belongs to different month → Just invalidate that month's cache
+          console.log(`📅 Deleted expense from ${expenseYear}-${expenseMonth} (current view: ${selectedYear}-${selectedMonth})`);
+          invalidateCache(expenseYear, expenseMonth);
+        }
+      }
       
-      // Update cache
-      updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
-      // Invalidate next month's cache (carryover changes)
+      // Always invalidate current month cache (pocket carry-over system changes)
       invalidateCache(selectedYear, selectedMonth);
       
       // Reload pockets to update balances
@@ -890,16 +851,48 @@ function AppContent() {
       
       console.log('[App] Final updatedData category:', updatedData?.category);
       
-      // 🔧 CRITICAL FIX: Force new array and new object reference for React to detect changes
-      const newExpenses = expenses.map((expense) => 
-        expense.id === id ? { ...updatedData } : expense
-      );
-      setExpenses(newExpenses);
+      // 🔧 FIX: Check if expense date belongs to different month than currently viewing
+      const newDate = new Date(updatedData.date);
+      const newYear = newDate.getUTCFullYear();
+      const newMonth = newDate.getUTCMonth() + 1;
       
-      // Update cache
-      updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
-      // Invalidate next month's cache (carryover changes)
-      invalidateCache(selectedYear, selectedMonth);
+      // Compare expense date with currently selected month (not old date!)
+      // This ensures Oktober expense gets removed when viewing November
+      const monthChanged = (newYear !== selectedYear || newMonth !== selectedMonth);
+      
+      if (monthChanged) {
+        // Expense belongs to different month → Remove from current view and navigate
+        console.log(`📅 Expense date is ${newYear}-${newMonth} but viewing ${selectedYear}-${selectedMonth} - removing and navigating`);
+        const newExpenses = expenses.filter(expense => expense.id !== id);
+        setExpenses(newExpenses);
+        updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+        
+        // Invalidate target month cache
+        invalidateCache(newYear, newMonth);
+        
+        // ✨ UX IMPROVEMENT: Auto-navigate to target month + show notification
+        const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+        const targetMonthName = monthNames[newMonth - 1];
+        
+        // Automatically navigate to target month (seamless!)
+        setSelectedYear(newYear);
+        setSelectedMonth(newMonth);
+        
+        // Show success notification
+        toast.success(`Pindah ke ${targetMonthName} ${newYear}`, {
+          duration: 3000
+        });
+      } else {
+        // Same month → Update state in place
+        const newExpenses = expenses.map((expense) => 
+          expense.id === id ? { ...updatedData } : expense
+        );
+        setExpenses(newExpenses);
+        updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
+        invalidateCache(selectedYear, selectedMonth);
+        
+        toast.success("Pengeluaran berhasil diupdate");
+      }
       
       // Reload pockets to update balances
       await fetchPockets(selectedYear, selectedMonth);
@@ -907,7 +900,7 @@ function AppContent() {
       // Trigger refresh for PocketsSummary timeline
       refreshPockets();
       
-      toast.success("Pengeluaran berhasil diupdate");
+      // Toast already shown above based on monthChanged
     } catch (error) {
       toast.error("Gagal mengupdate pengeluaran");
     }
@@ -1007,7 +1000,20 @@ function AppContent() {
       }
 
       const result = await response.json();
-      setAdditionalIncomes((prev) => [...prev, result.data]);
+      
+      // 🔧 FIX: Only add to current state if income date matches current month
+      const incomeDate = new Date(result.data.date);
+      const incomeYear = incomeDate.getUTCFullYear();
+      const incomeMonth = incomeDate.getUTCMonth() + 1;
+      
+      if (incomeYear === selectedYear && incomeMonth === selectedMonth) {
+        // Income belongs to current month → Update state
+        setAdditionalIncomes((prev) => [...prev, result.data]);
+      } else {
+        // Income belongs to different month → Just invalidate cache
+        console.log(`📅 Income date (${incomeYear}-${incomeMonth}) differs from current view (${selectedYear}-${selectedMonth}) - skipping state update`);
+        invalidateCache(incomeYear, incomeMonth);
+      }
       
       // Reload pockets to update balances
       await fetchPockets(selectedYear, selectedMonth);
@@ -1021,7 +1027,7 @@ function AppContent() {
     } finally {
       setIsAddingIncome(false);
     }
-  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets]);
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets, invalidateCache]);
 
   const handleOpenTransferDialog = useCallback((targetPocketId?: string) => {
     startTransition(() => {
@@ -1167,24 +1173,54 @@ function AppContent() {
       }
 
       const result = await response.json();
-      setAdditionalIncomes((prev) =>
-        prev.map((item) => (item.id === id ? result.data : item))
-      );
+      
+      // 🔧 FIX: Check if income date belongs to different month than currently viewing
+      const newDate = new Date(result.data.date);
+      const newYear = newDate.getUTCFullYear();
+      const newMonth = newDate.getUTCMonth() + 1;
+      
+      // Compare income date with currently selected month (not old date!)
+      const monthChanged = (newYear !== selectedYear || newMonth !== selectedMonth);
+      
+      if (monthChanged) {
+        // Income belongs to different month → Remove from current view
+        console.log(`📅 Income date is ${newYear}-${newMonth} but viewing ${selectedYear}-${selectedMonth} - removing from current view`);
+        setAdditionalIncomes((prev) => prev.filter(item => item.id !== id));
+        
+        // Invalidate target month cache
+        invalidateCache(newYear, newMonth);
+        
+        // ✨ UX IMPROVEMENT: Auto-navigate to target month + show notification
+        const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+        const targetMonthName = monthNames[newMonth - 1];
+        
+        // Automatically navigate to target month (seamless!)
+        setSelectedYear(newYear);
+        setSelectedMonth(newMonth);
+        
+        // Show success notification
+        toast.success(`Pindah ke ${targetMonthName} ${newYear}`, {
+          duration: 3000
+        });
+      } else {
+        // Same month → Update state in place
+        setAdditionalIncomes((prev) =>
+          prev.map((item) => (item.id === id ? result.data : item))
+        );
+        invalidateCache(selectedYear, selectedMonth);
+        
+        toast.success("Pemasukan tambahan berhasil diupdate");
+      }
       
       // Reload pockets to update balances
       await fetchPockets(selectedYear, selectedMonth);
       
       // Trigger refresh for PocketsSummary timeline
       refreshPockets();
-      
-      toast.success("Pemasukan tambahan berhasil diupdate");
-      
-      // Reload previous month data if this might affect next month's carryover
-      loadPreviousMonthData();
     } catch (error) {
       toast.error("Gagal mengupdate pemasukan tambahan");
     }
-  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets, loadPreviousMonthData]);
+  }, [baseUrl, selectedYear, selectedMonth, publicAnonKey, fetchPockets, refreshPockets]);
 
   const handleBulkDeleteExpenses = useCallback(async (ids: string[]) => {
     try {
@@ -1214,7 +1250,7 @@ function AppContent() {
       const newExpenses = expenses.filter(exp => !ids.includes(exp.id));
       updateCachePartial(selectedYear, selectedMonth, 'expenses', newExpenses);
       
-      // Invalidate next month's cache (carryover changes)
+      // Invalidate next month's cache (pocket carry-over system changes)
       invalidateCache(selectedYear, selectedMonth);
       
       // Reload pockets to update balances
@@ -1256,9 +1292,9 @@ function AppContent() {
     startTransition(() => setIsIncomeDialogOpen(true));
   }, []);
 
-  const handleFABToggleSummary = useCallback(() => {
-    handleTogglePockets();
-  }, [handleTogglePockets]);
+  const handleFABTransfer = useCallback(() => {
+    startTransition(() => setIsTransferDialogOpen(true));
+  }, []);
 
   // Phase 7: Category Filter Handlers
   const handleCategoryClick = useCallback((category: import('./types').ExpenseCategory) => {
@@ -1275,7 +1311,7 @@ function AppContent() {
     
     // Update cache
     updateCachePartial(selectedYear, selectedMonth, 'budget', newBudget);
-    // Invalidate next month's cache (carryover changes)
+    // Invalidate next month's cache (pocket carry-over system changes)
     invalidateCache(selectedYear, selectedMonth);
     
     // Auto-save on change
@@ -1300,61 +1336,87 @@ function AppContent() {
     }
   }, [budget, updateCachePartial, selectedYear, selectedMonth, invalidateCache, baseUrl, publicAnonKey]);
 
-  // Calculate gross additional income excluding excluded items and apply individual deductions
+  // 🏗️ ARCHITECTURE FIX: Calculate carry-over assets (positive balances from previous month)
+  const carryOverAssets = useMemo(() => {
+    const assets = calculateCarryOverAssets(previousMonthBalances);
+    console.log('🏗️ [ARCHITECTURE FIX] Carry-Over Assets (Positif):', formatCurrency(assets));
+    return assets;
+  }, [previousMonthBalances]);
+
+  // 🏗️ ARCHITECTURE FIX: Calculate carry-over liabilities (negative balances/utang from previous month)
+  const carryOverLiabilities = useMemo(() => {
+    const liabilities = calculateCarryOverLiabilities(previousMonthBalances);
+    console.log('🏗️ [ARCHITECTURE FIX] Carry-Over Liabilities (Utang):', formatCurrency(liabilities));
+    return liabilities;
+  }, [previousMonthBalances]);
+
+  // Calculate gross additional income and apply individual deductions
   // Memoized for performance - only recomputes when dependencies change
   const grossAdditionalIncome = useMemo(() => {
-    // Safety check: ensure excludedIncomeIds is initialized
-    if (!excludedIncomeIds) {
-      console.error('[App] excludedIncomeIds is undefined - hooks may not have initialized properly');
-      return 0;
-    }
-    
     return additionalIncomes
-      .filter(income => !excludedIncomeIds.has(income.id))
       .reduce((sum, income) => {
         const netAmount = income.amountIDR - (income.deduction || 0);
         return sum + netAmount;
       }, 0);
-  }, [additionalIncomes, excludedIncomeIds]);
+  }, [additionalIncomes]);
 
-  // Apply global deduction only if not excluded
+  // Apply global deduction
   const totalAdditionalIncome = useMemo(() => {
-    const appliedDeduction = isDeductionExcluded ? 0 : (budget.incomeDeduction || 0);
-    return grossAdditionalIncome - appliedDeduction;
-  }, [grossAdditionalIncome, isDeductionExcluded, budget.incomeDeduction]);
+    return grossAdditionalIncome - (budget.incomeDeduction || 0);
+  }, [grossAdditionalIncome, budget.incomeDeduction]);
 
-  // Calculate total income from all sources
-  const totalIncome = useMemo(() =>
-    Number(budget.initialBudget) +
-    Number(budget.carryover) +
-    totalAdditionalIncome,
-    [budget.initialBudget, budget.carryover, totalAdditionalIncome]
-  );
-
-  // Calculate total expenses excluding excluded items
-  // Items from income (fromIncome: true) add to budget instead of subtracting
-  const totalExpenses = useMemo(() => {
-    // Safety check: ensure excludedExpenseIds is initialized
-    if (!excludedExpenseIds) {
-      console.error('[App] excludedExpenseIds is undefined - hooks may not have initialized properly');
-      return 0;
-    }
-    
+  // 🏗️ ARCHITECTURE FIX: Calculate current month expenses only (for breakdown display)
+  const currentMonthExpenses = useMemo(() => {
     return expenses
-      .filter(expense => !excludedExpenseIds.has(expense.id))
       .reduce((sum, expense) => {
         if (expense.fromIncome) {
           return sum - expense.amount; // Subtract from expenses (adds to budget)
         }
         return sum + expense.amount;
       }, 0);
-  }, [expenses, excludedExpenseIds]);
+  }, [expenses]);
 
-  // Calculate remaining budget
-  const remainingBudget = useMemo(() => 
-    totalIncome - totalExpenses,
-    [totalIncome, totalExpenses]
-  );
+  // 🏗️ ARCHITECTURE FIX: Total Income = Budget Awal + Pemasukan Tambahan + Carry-Over ASET (positif)
+  const totalIncome = useMemo(() => {
+    const income = Number(budget.initialBudget) +
+      totalAdditionalIncome +
+      carryOverAssets; // ✨ NEW: Include positive carry-over (Assets)
+    
+    console.log('🏗️ [ARCHITECTURE FIX] Total Income Breakdown:', {
+      budgetAwal: formatCurrency(Number(budget.initialBudget)),
+      pemasukanTambahan: formatCurrency(totalAdditionalIncome),
+      carryOverAssets: formatCurrency(carryOverAssets),
+      totalIncome: formatCurrency(income)
+    });
+    
+    return income;
+  }, [budget.initialBudget, totalAdditionalIncome, carryOverAssets]);
+
+  // 🏗️ ARCHITECTURE FIX: Total Expenses = Pengeluaran Bulan Ini + Carry-Over KEWAJIBAN (negatif/utang)
+  const totalExpenses = useMemo(() => {
+    const expenses = currentMonthExpenses + carryOverLiabilities; // ✨ NEW: Include negative carry-over (Liabilities/Utang)
+    
+    console.log('🏗️ [ARCHITECTURE FIX] Total Expenses Breakdown:', {
+      pengeluaranBulanIni: formatCurrency(currentMonthExpenses),
+      carryOverLiabilities: formatCurrency(carryOverLiabilities),
+      totalExpenses: formatCurrency(expenses)
+    });
+    
+    return expenses;
+  }, [currentMonthExpenses, carryOverLiabilities]);
+
+  // 🏗️ ARCHITECTURE FIX: Remaining Budget = Total Income - Total Expenses
+  const remainingBudget = useMemo(() => {
+    const remaining = totalIncome - totalExpenses;
+    
+    console.log('🏗️ [ARCHITECTURE FIX] Sisa Budget:', {
+      totalIncome: formatCurrency(totalIncome),
+      totalExpenses: formatCurrency(totalExpenses),
+      sisaBudget: formatCurrency(remaining)
+    });
+    
+    return remaining;
+  }, [totalIncome, totalExpenses]);
 
   if (isLoading) {
     return <LoadingSkeleton />;
@@ -1368,7 +1430,9 @@ function AppContent() {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className="min-h-screen bg-background pb-4 pt-0 px-4 md:p-6 lg:p-8"
+        className={`min-h-screen bg-background pb-4 pt-0 px-4 md:p-6 lg:p-8 ${
+          showCalendarView && isMobile ? 'hidden' : ''
+        }`}
       >
         {/* Pull to Refresh Indicator (Mobile Only) */}
         {isMobile && (
@@ -1384,40 +1448,58 @@ function AppContent() {
         <div className="max-w-5xl mx-auto space-y-8">
           {/* Sticky Header for Mobile with Native App Space */}
           <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[40px] pr-[16px] pb-[16px] pl-[16px]">
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-center space-y-2 pt-2 relative"
-            >
-              <h1>Budget Tracker</h1>
-              {/* Settings button - Mobile only, positioned at top right */}
-              {isMobile && (
-                <Button 
-                  variant="ghost" 
-                  size="icon"
-                  className="absolute top-0 right-0 h-9 w-9"
-                  onClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
-                  title="Pengaturan Budget"
-                >
-                  <Sliders className="size-4" />
-                </Button>
-              )}
-              <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
-            </motion.div>
+            {/* Desktop: Split layout (Title left | Controls right) | Mobile: Stacked */}
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-8">
+              {/* LEFT SECTION: Title & Subtitle */}
+              <motion.div 
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="text-left space-y-2 pt-2 relative flex-shrink-0"
+              >
+                <h1>Budget Tracker</h1>
+                {/* Action buttons - Mobile only, positioned at top right */}
+                {isMobile && (
+                  <div className="absolute top-0 right-0 flex items-center gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={() => setShowCalendarView(true)}
+                      title="Tampilan Kalender"
+                    >
+                      <Calendar className="size-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
+                      title="Pengaturan Budget"
+                    >
+                      <Sliders className="size-4" />
+                    </Button>
+                  </div>
+                )}
+                <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
+              </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.15 }}
-            >
-              <MonthSelector
-                selectedMonth={selectedMonth}
-                selectedYear={selectedYear}
-                onMonthChange={handleMonthChange}
-                onSettingsClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
-              />
-            </motion.div>
+              {/* RIGHT SECTION: Month Selector with Controls */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.15 }}
+                className="md:flex-shrink-0"
+              >
+                <MonthSelector
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
+                  onMonthChange={handleMonthChange}
+                  onSettingsClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
+                  onCalendarClick={() => setShowCalendarView(true)}
+                />
+              </motion.div>
+            </div>
           </div>
 
           <motion.div
@@ -1431,6 +1513,12 @@ function AppContent() {
               remainingBudget={remainingBudget}
               showPockets={showPockets}
               onTogglePockets={handleTogglePockets}
+              initialBudget={Number(budget.initialBudget)}
+              additionalIncome={totalAdditionalIncome}
+              globalDeduction={budget.incomeDeduction || 0}
+              carryOverAssets={carryOverAssets}
+              currentMonthExpenses={currentMonthExpenses}
+              carryOverLiabilities={carryOverLiabilities}
             />
           </motion.div>
 
@@ -1525,13 +1613,10 @@ function AppContent() {
             open={isBudgetDialogOpen}
             onOpenChange={setIsBudgetDialogOpen}
             initialBudget={budget.initialBudget}
-            carryover={budget.carryover}
             notes={budget.notes}
             onBudgetChange={handleBudgetChange}
             onSave={handleSaveBudget}
             isSaving={isSaving}
-            suggestedCarryover={previousMonthRemaining}
-            isLoadingCarryover={isLoadingCarryover}
           />
 
           <Suspense fallback={<DialogSkeleton />}>
@@ -1548,6 +1633,7 @@ function AppContent() {
                 pockets={pockets}
                 balances={balances}
                 currentExpenses={expenses}
+                expenses={expenses}
               />
             )}
           </Suspense>
@@ -1600,11 +1686,7 @@ function AppContent() {
               onEditExpense={handleEditExpense}
               onBulkDeleteExpenses={handleBulkDeleteExpenses}
               onBulkUpdateCategory={handleBulkUpdateCategory}
-              excludedExpenseIds={excludedExpenseIds}
-              onExcludedIdsChange={updateExcludedExpenseIds}
               onMoveToIncome={handleMoveExpenseToIncome}
-              isExcludeLocked={isExcludeLocked}
-              onToggleExcludeLock={() => toggleExcludeLock(selectedYear, selectedMonth)}
               pockets={pockets}
               balances={balances}
               categoryFilter={categoryFilter}
@@ -1615,24 +1697,32 @@ function AppContent() {
               onUpdateIncome={handleUpdateIncome}
               globalDeduction={budget.incomeDeduction || 0}
               onUpdateGlobalDeduction={handleUpdateGlobalDeduction}
-              excludedIncomeIds={excludedIncomeIds}
-              onExcludedIncomeIdsChange={updateExcludedIncomeIds}
-              isDeductionExcluded={isDeductionExcluded}
-              onDeductionExcludedChange={toggleDeductionExcluded}
               // Phase 8: Category Manager
               onOpenCategoryManager={() => startTransition(() => setIsCategoryManagerOpen(true))}
               // Desktop: Transaction entry
               onOpenAddTransaction={() => startTransition(() => setIsTransactionDialogOpen(true))}
+              // Desktop: Template Manager
+              onOpenTemplateManager={() => startTransition(() => setIsTemplateManagerOpen(true))}
+              // 🔧 FIX: Pass month/year for CategoryBreakdown MoM calculation
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
+              // Budget props for SimulationSandbox
+              initialBudget={budget.initialBudget}
+              // 🏗️ ARCHITECTURE FIX: Carry-over breakdown props
+              carryOverAssets={carryOverAssets}
+              carryOverLiabilities={carryOverLiabilities}
             />
           </motion.div>
         </div>
         
-        {/* Floating Action Button */}
-        <FloatingActionButton
-          onAddExpense={handleFABAddExpense}
-          onAddIncome={handleFABAddIncome}
-          onToggleSummary={handleFABToggleSummary}
-        />
+        {/* Floating Action Button - Hide when calendar is open */}
+        {!(showCalendarView && isMobile) && (
+          <FloatingActionButton
+            onAddExpense={handleFABAddExpense}
+            onAddIncome={handleFABAddIncome}
+            onTransfer={handleFABTransfer}
+          />
+        )}
         
         {/* Phase 8: Category Manager Dialog */}
         <Suspense fallback={<DialogSkeleton />}>
@@ -1643,6 +1733,24 @@ function AppContent() {
             />
           )}
         </Suspense>
+        
+        {/* Desktop: Template Manager Dialog */}
+        {isTemplateManagerOpen && (
+          <Dialog open={isTemplateManagerOpen} onOpenChange={setIsTemplateManagerOpen}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+              <DialogHeader>
+                <DialogTitle>Template Pengeluaran</DialogTitle>
+              </DialogHeader>
+              <FixedExpenseTemplates
+                templates={templates}
+                onAddTemplate={handleAddTemplate}
+                onUpdateTemplate={handleUpdateTemplate}
+                onDeleteTemplate={handleDeleteTemplate}
+                pockets={pockets}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
         
         {/* Desktop: Unified Transaction Dialog */}
         <Suspense fallback={<DialogSkeleton />}>
@@ -1661,12 +1769,37 @@ function AppContent() {
               pockets={pockets}
               balances={balances}
               currentExpenses={expenses}
+              expenses={expenses}
             />
           )}
         </Suspense>
         
         <Toaster />
       </motion.div>
+      
+      {/* Calendar View - MOVED OUTSIDE parent motion.div for TRUE fullscreen! */}
+      <AnimatePresence>
+        {showCalendarView && (
+          <Suspense fallback={<DialogSkeleton />}>
+            <CalendarView
+              month={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+              expenses={expenses}
+              incomes={additionalIncomes}
+              pockets={pockets}
+              settings={categorySettings}
+              onClose={() => setShowCalendarView(false)}
+              onEditExpense={handleEditExpense}
+              onDeleteExpense={handleDeleteExpense}
+              onEditIncome={handleUpdateIncome}
+              onDeleteIncome={handleDeleteIncome}
+              onMonthChange={(year, month) => {
+                setSelectedYear(year);
+                setSelectedMonth(month);
+              }}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
     </AnimatePresence>
   );
 }

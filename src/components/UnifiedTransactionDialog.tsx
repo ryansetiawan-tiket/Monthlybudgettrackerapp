@@ -12,7 +12,7 @@
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { AddExpenseForm } from "./AddExpenseForm";
+import { ExpenseMethodTabs } from "./ExpenseMethodTabs";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 import { useState, useEffect } from "react";
 import { ExpenseCategory } from "../types";
@@ -65,6 +65,7 @@ interface UnifiedTransactionDialogProps {
   pockets?: Array<{ id: string; name: string }>;
   balances?: Map<string, { availableBalance: number }>;
   currentExpenses?: Array<{ category?: string; amount: number }>;
+  expenses?: Array<{ id: string; name: string; amount: number; date: string; category?: string; pocket?: string; pocketId?: string }>; // For smart suggestions
 }
 
 /**
@@ -96,14 +97,17 @@ export function UnifiedTransactionDialog({
   pockets = [],
   balances,
   currentExpenses = [],
+  expenses = [],
 }: UnifiedTransactionDialogProps) {
   const [selectedTab, setSelectedTab] = useState<'expense' | 'income'>('expense');
+  const [expenseMethod, setExpenseMethod] = useState<'manual' | 'template'>('manual');
 
-  // Reset tab to default (expense) when dialog closes
+  // Reset tab to default (expense + manual) when dialog closes
   // This ensures consistent UX on each open
   useEffect(() => {
     if (!open) {
       setSelectedTab('expense');
+      setExpenseMethod('manual');
     }
   }, [open]);
 
@@ -139,14 +143,20 @@ export function UnifiedTransactionDialog({
 
           {/* Expense Form Tab */}
           <TabsContent value="expense" className="mt-4">
-            <AddExpenseForm
+            <ExpenseMethodTabs
               onAddExpense={onAddExpense}
-              isAdding={isAddingExpense}
+              isAddingExpense={isAddingExpense}
               templates={templates}
+              onAddTemplate={onAddTemplate}
+              onUpdateTemplate={onUpdateTemplate}
+              onDeleteTemplate={onDeleteTemplate}
               onSuccess={handleExpenseSuccess}
               pockets={pockets}
               balances={balances}
               currentExpenses={currentExpenses}
+              expenses={expenses}
+              expenseMethod={expenseMethod}
+              setExpenseMethod={setExpenseMethod}
             />
           </TabsContent>
 

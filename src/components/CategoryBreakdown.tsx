@@ -1,8 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Skeleton } from "./ui/skeleton";
 import { ScrollArea } from "./ui/scroll-area";
 import { Progress } from "./ui/progress";
 import { Badge } from "./ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
 import { 
@@ -12,13 +15,14 @@ import {
   getBudgetStatusColor,
   getBudgetPercentage
 } from "../utils/calculations";
-import { ExpenseCategory } from "../constants";
+import { ExpenseCategory, LEGACY_CATEGORY_ID_MAP } from "../constants";
 import { formatCurrency } from "../utils/currency";
 import { motion } from "motion/react";
 import { useIsMobile } from "./ui/use-mobile";
 import { useCategorySettings } from "../hooks/useCategorySettings";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, BarChart3, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { INSIGHTS_POOL, getRandomInsights } from './category-insights-pool';
 
 interface Expense {
   id: string;
@@ -26,9 +30,16 @@ interface Expense {
   amount: number;
   category?: string;
   date: string;
+  items?: Array<{
+    name: string;
+    amount: number;
+    category?: string;
+  }>;
 }
 
 interface CategoryBreakdownProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   monthKey: string;
   pocketId?: string;
   onRefresh?: () => void;
@@ -78,7 +89,33 @@ const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   other: '#6B7280',
 };
 
+/**
+ * 🔧 BACKWARD COMPATIBILITY HELPER
+ * Normalizes legacy category IDs (0, 1, 2, etc.) to new string keys (food, transport, etc.)
+ * 
+ * @param categoryId - The category ID (can be old numeric or new string)
+ * @returns Normalized category key
+ * 
+ * @example
+ * normalizeCategoryId('1') → 'transport'
+ * normalizeCategoryId('transport') → 'transport'
+ * normalizeCategoryId('custom_abc123') → 'custom_abc123'
+ */
+function normalizeCategoryId(categoryId: string | undefined): string {
+  if (!categoryId) return 'other';
+  
+  // Check if it's a legacy numeric ID
+  if (categoryId in LEGACY_CATEGORY_ID_MAP) {
+    return LEGACY_CATEGORY_ID_MAP[categoryId];
+  }
+  
+  // Already normalized or custom category
+  return categoryId;
+}
+
 export function CategoryBreakdown({ 
+  open,
+  onOpenChange,
   monthKey, 
   pocketId, 
   expenses: expensesProp,
@@ -89,6 +126,8 @@ export function CategoryBreakdown({
   const [fetchedExpenses, setFetchedExpenses] = useState<Expense[]>([]);
   const [previousMonthData, setPreviousMonthData] = useState<Map<string, number>>(new Map());
   const [threeMonthAvg, setThreeMonthAvg] = useState<number>(0);
+  const [selectedInsight, setSelectedInsight] = useState<string | null>(null);
+  const [selectedInsights, setSelectedInsights] = useState<string[]>([]);
   const isMobile = useIsMobile();
   
   const { settings } = useCategorySettings();
@@ -96,11 +135,11 @@ export function CategoryBreakdown({
 
   // Fetch previous month data for MoM comparison
   useEffect(() => {
-    if (monthKey) {
+    if (monthKey && open) {
       fetchPreviousMonthData();
       fetchThreeMonthAverage();
     }
-  }, [monthKey, pocketId]);
+  }, [monthKey, pocketId, open]);
 
   useEffect(() => {
     if (!expensesProp && monthKey) {
@@ -126,10 +165,13 @@ export function CategoryBreakdown({
   const fetchPreviousMonthData = async () => {
     try {
       const [year, month] = monthKey.split('-').map(Number);
-      const prevDate = new Date(year, month - 2, 1);
+      const prevDate = new Date(year, month - 1, 1);
+      prevDate.setMonth(prevDate.getMonth() - 1); // Go back 1 month
       const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
       
-      const url = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/timeline?month=${prevKey}${pocketId ? `&pocketId=${pocketId}` : ''}`;
+      const [prevYear, prevMonth] = prevKey.split('-');
+      const url = `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/expenses/${prevYear}/${prevMonth}`;
+      
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${publicAnonKey}`,
@@ -137,19 +179,46 @@ export function CategoryBreakdown({
       });
 
       if (response.ok) {
-        const data = await response.json();
-        const prevExpenses: Expense[] = data.flatMap((day: any) => 
-          day.expenses || []
-        );
+        const result = await response.json();
         
-        // Aggregate by category
+        // Handle multiple response formats (backward compat)
+        let prevExpenses: Expense[] = [];
+        
+        if (Array.isArray(result)) {
+          prevExpenses = result;
+        } else if (result.data && Array.isArray(result.data)) {
+          prevExpenses = result.data;
+        } else if (result.expenses && Array.isArray(result.expenses)) {
+          prevExpenses = result.expenses;
+        } else {
+          console.error('Unknown response format - cannot parse expenses:', result);
+        }
+        
+        // Aggregate by category - support both expense-level and item-level categories
+        // 🔧 BACKWARD COMPAT: Normalize legacy category IDs to new string keys
         const categoryMap = new Map<string, number>();
         prevExpenses.forEach(exp => {
-          const cat = exp.category || 'other';
-          categoryMap.set(cat, (categoryMap.get(cat) || 0) + exp.amount);
+          // Check if expense has items with individual categories
+          const expenseItems = (exp as any).items;
+          
+          if (expenseItems && Array.isArray(expenseItems) && expenseItems.length > 0) {
+            // Aggregate by item category (with normalization)
+            expenseItems.forEach((item: any) => {
+              const rawCat = item.category || 'other';
+              const cat = normalizeCategoryId(rawCat);
+              categoryMap.set(cat, (categoryMap.get(cat) || 0) + item.amount);
+            });
+          } else {
+            // Aggregate by expense category (with normalization)
+            const rawCat = exp.category || 'other';
+            const cat = normalizeCategoryId(rawCat);
+            categoryMap.set(cat, (categoryMap.get(cat) || 0) + exp.amount);
+          }
         });
         
         setPreviousMonthData(categoryMap);
+      } else {
+        console.error('Failed to fetch previous month data:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error fetching previous month data:', error);
@@ -214,15 +283,35 @@ export function CategoryBreakdown({
     if (expensesOnly.length === 0) return [];
 
     // Aggregate by category
+    // ✅ Support both expense-level category AND item-level categories (for template expenses)
+    // 🔧 BACKWARD COMPAT: Normalize legacy category IDs to new string keys
     const categoryMap = new Map<ExpenseCategory, { amount: number; count: number }>();
 
     expensesOnly.forEach(expense => {
-      const category = (expense.category as ExpenseCategory) || 'other';
-      const current = categoryMap.get(category) || { amount: 0, count: 0 };
-      categoryMap.set(category, {
-        amount: current.amount + expense.amount,
-        count: current.count + 1
-      });
+      // Check if expense has items with individual categories
+      const expenseItems = (expense as any).items;
+      
+      if (expenseItems && Array.isArray(expenseItems) && expenseItems.length > 0) {
+        // ✅ NEW: Aggregate by item category (template expenses)
+        expenseItems.forEach((item: any) => {
+          const rawCategory = item.category || 'other';
+          const category = normalizeCategoryId(rawCategory) as ExpenseCategory;  // ✅ Normalize!
+          const current = categoryMap.get(category) || { amount: 0, count: 0 };
+          categoryMap.set(category, {
+            amount: current.amount + item.amount,
+            count: current.count + 1
+          });
+        });
+      } else {
+        // ✅ OLD: Aggregate by expense category (regular expenses)
+        const rawCategory = expense.category || 'other';
+        const category = normalizeCategoryId(rawCategory) as ExpenseCategory;  // ✅ Normalize!
+        const current = categoryMap.get(category) || { amount: 0, count: 0 };
+        categoryMap.set(category, {
+          amount: current.amount + expense.amount,
+          count: current.count + 1
+        });
+      }
     });
 
     const total = Array.from(categoryMap.values()).reduce((sum, item) => sum + item.amount, 0);
@@ -259,7 +348,9 @@ export function CategoryBreakdown({
         percentage: total > 0 ? (stats.amount / total) * 100 : 0,
         color: CATEGORY_COLORS[cat],
         budget: budgetInfo,
-        // 🔧 FIX: Only show MoM if there's valid previous month data (> 0)
+        // 🔧 MoM Badge Logic:
+        // ✅ SHOW: Previous month had data (previousAmount > 0)
+        // ❌ HIDE: Category is new this month (previousAmount = 0)
         mom: mom.previousAmount > 0 ? mom : undefined
       };
     });
@@ -272,12 +363,21 @@ export function CategoryBreakdown({
     return categoryData.reduce((sum, item) => sum + item.amount, 0);
   }, [categoryData]);
 
+  // 🎲 Random select 3 insights when dialog opens (MUST be after categoryData is defined)
+  useEffect(() => {
+    if (open && categoryData.length > 0) {
+      setSelectedInsights(getRandomInsights());
+    }
+  }, [open, categoryData.length]);
+
   // Handle category click
   const handleCategoryClick = useCallback((category: ExpenseCategory) => {
     if (onCategoryClick) {
       onCategoryClick(category);
+      // Close modal so user can see filtered expense list
+      onOpenChange(false);
     }
-  }, [onCategoryClick]);
+  }, [onCategoryClick, onOpenChange]);
 
   // Custom tooltip for bar chart
   const CustomTooltip = ({ active, payload }: any) => {
@@ -301,101 +401,128 @@ export function CategoryBreakdown({
     return null;
   };
 
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-48" />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-64 w-full" />
-          <Skeleton className="h-32 w-full" />
-        </CardContent>
-      </Card>
-    );
-  }
+  // Loading state content
+  const loadingContent = (
+    <div className="space-y-4 p-6">
+      <Skeleton className="h-6 w-48" />
+      <Skeleton className="h-64 w-full" />
+      <Skeleton className="h-32 w-full" />
+    </div>
+  );
 
-  if (categoryData.length === 0) {
+  // Empty state content
+  const emptyContent = () => {
     const hasExpenses = expenses.some(exp => exp.amount > 0);
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            📊 Breakdown per Kategori
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">📊</div>
-            <h3 className="font-medium mb-2">Belum Ada Data</h3>
-            <p className="text-sm text-muted-foreground">
-              {hasExpenses 
-                ? "Pengeluaran Anda belum memiliki kategori. Tambahkan kategori untuk melihat breakdown."
-                : "Tambahkan pengeluaran untuk melihat breakdown kategori"}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="text-center py-12">
+        <div className="text-6xl mb-4">📊</div>
+        <h3 className="font-medium mb-2">Belum Ada Data</h3>
+        <p className="text-sm text-muted-foreground">
+          {hasExpenses 
+            ? "Pengeluaran Anda belum memiliki kategori. Tambahkan kategori untuk melihat breakdown."
+            : "Tambahkan pengeluaran untuk melihat breakdown kategori"}
+        </p>
+      </div>
     );
-  }
+  };
 
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            📊 Breakdown per Kategori
-          </CardTitle>
-          <div className="text-right">
-            <p className="font-semibold">Total: {formatCurrency(totalExpenses)}</p>
-            {threeMonthAvg > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Avg 3 bulan: {formatCurrency(threeMonthAvg)}
+  // Main content
+  const mainContent = (
+    <div className={isMobile ? 'space-y-3' : 'space-y-4'}>
+      {/* Header with total */}
+      {!loading && categoryData.length > 0 && (
+        <div className={isMobile ? 'px-4' : ''}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart3 className={isMobile ? 'size-4' : 'size-5'} />
+              <h3 className={isMobile ? 'text-sm font-semibold' : 'font-semibold'}>
+                Breakdown per Kategori
+              </h3>
+            </div>
+            {!isMobile && (
+              <p className="text-sm text-muted-foreground">
+                Total: {formatCurrency(totalExpenses)}
               </p>
             )}
           </div>
+          {isMobile && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Total: {formatCurrency(totalExpenses)}
+            </p>
+          )}
+          {!isMobile && threeMonthAvg > 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Avg 3 bulan: {formatCurrency(threeMonthAvg)}
+            </p>
+          )}
         </div>
-      </CardHeader>
-      <CardContent>
-        {/* DESKTOP: 2-Column Layout */}
-        {!isMobile && (
-          <div className="grid grid-cols-2 gap-6">
-            {/* LEFT: Horizontal Bar Chart */}
-            <div>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart 
-                  data={categoryData} 
-                  layout="vertical"
-                  margin={{ top: 5, right: 10, left: 10, bottom: 5 }}
-                >
-                  <XAxis type="number" />
-                  <YAxis 
-                    type="category" 
-                    dataKey="label" 
-                    width={100}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar 
-                    dataKey="amount" 
-                    radius={[0, 4, 4, 0]}
-                    fill="#3B82F6"
-                    style={{ cursor: 'pointer' }}
-                    onClick={(data: any) => {
-                      if (data && data.category) {
-                        handleCategoryClick(data.category);
-                      }
-                    }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+      )}
+      
+      {/* Loading state */}
+      {loading && loadingContent}
+      
+      {/* Empty state */}
+      {!loading && categoryData.length === 0 && emptyContent()}
+      
+      {/* Content with data */}
+      {!loading && categoryData.length > 0 && (
+        <>
+          {/* DESKTOP: 2-Column Layout */}
+          {!isMobile && (
+            <div className="grid grid-cols-2 gap-6">
+              {/* LEFT: Horizontal Bar Chart */}
+              <div>
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart 
+                    data={categoryData} 
+                    layout="vertical"
+                    margin={{ top: 5, right: 10, left: 10, bottom: 5 }}
+                  >
+                    <XAxis type="number" />
+                    <YAxis 
+                      type="category" 
+                      dataKey="label" 
+                      width={100}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar 
+                      dataKey="amount" 
+                      radius={[0, 4, 4, 0]}
+                      fill="#3B82F6"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(data: any) => {
+                        if (data && data.category) {
+                          handleCategoryClick(data.category);
+                        }
+                      }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
 
-            {/* RIGHT: Smart Category List */}
-            <ScrollArea className="h-[400px]">
-              <div className="space-y-2 pr-4">
+              {/* RIGHT: Smart Category List */}
+              <ScrollArea className="h-[400px]">
+                <div className="space-y-2 pr-4">
+                  {categoryData.map((item, index) => (
+                    <CategorySmartCard
+                      key={item.category}
+                      data={item}
+                      onClick={() => handleCategoryClick(item.category)}
+                      index={index}
+                    />
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+
+          {/* MOBILE: 1-Column Compact Cards */}
+          {isMobile && (
+            <div className="px-4 pb-4">
+              <div className="space-y-2">
                 {categoryData.map((item, index) => (
-                  <CategorySmartCard
+                  <CategoryCompactCard
                     key={item.category}
                     data={item}
                     onClick={() => handleCategoryClick(item.category)}
@@ -403,27 +530,319 @@ export function CategoryBreakdown({
                   />
                 ))}
               </div>
-            </ScrollArea>
-          </div>
-        )}
-
-        {/* MOBILE: 1-Column Compact Cards */}
-        {isMobile && (
-          <ScrollArea className="max-h-[60vh]">
-            <div className="space-y-2">
-              {categoryData.map((item, index) => (
-                <CategoryCompactCard
-                  key={item.category}
-                  data={item}
-                  onClick={() => handleCategoryClick(item.category)}
-                  index={index}
-                />
-              ))}
             </div>
-          </ScrollArea>
-        )}
-      </CardContent>
-    </Card>
+          )}
+
+          {/* 🎯 NEW: Fun Insights Section */}
+          <div className={isMobile ? 'px-4 mt-6' : 'mt-6'}>
+            <h3 className={isMobile ? 'text-sm font-semibold mb-3' : 'font-semibold mb-4'}>
+              💡 Fun Insights Bulan Ini
+            </h3>
+            
+            {/* Dynamic Insight Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {selectedInsights.map(insightId => {
+                const config = INSIGHTS_POOL.find(i => i.id === insightId);
+                if (!config) return null;
+                
+                const result = config.calculate(categoryData, expenses, previousMonthData, settings);
+                if (!result.hasData) return null; // Skip if no data available
+                
+                const isActive = selectedInsight === insightId;
+                
+                return (
+                  <Card 
+                    key={insightId}
+                    className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
+                    onClick={() => setSelectedInsight(isActive ? null : insightId)}
+                  >
+                    <CardContent className={isMobile ? 'p-4' : 'p-4'}>
+                      <div className="flex items-start gap-3">
+                        <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
+                          <p className="font-semibold text-sm mb-1 truncate">
+                            {result.category ? result.category.label : '-'}
+                          </p>
+                          <p className={`${config.textColor} font-bold`}>{result.value}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {config.subtitle}
+                          </p>
+                        </div>
+                        {isActive ? (
+                          <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                        ) : (
+                          <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Dynamic Transaction Lists - Full Width Outside Grid */}
+            {selectedInsight && (() => {
+              const config = INSIGHTS_POOL.find(i => i.id === selectedInsight);
+              if (!config) return null;
+              
+              const result = config.calculate(categoryData, expenses, previousMonthData, settings);
+              if (!result.hasData || !result.category) return null;
+              
+              const filteredExpenses = config.getFilteredExpenses(result.category, expenses);
+              const sortedExpenses = [...filteredExpenses].sort((a, b) => b.amount - a.amount);
+              
+              // Extract border color (e.g., 'border-red-500/30' -> 'red')
+              const colorMatch = config.borderColor.match(/border-(\w+)-/);
+              const baseColor = colorMatch ? colorMatch[1] : 'gray';
+              
+              return (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3, ease: 'easeInOut' }}
+                  className="overflow-hidden mt-3"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    {sortedExpenses.map((exp, idx) => {
+                      const isLargest = idx === 0;
+                      
+                      return (
+                        <motion.div
+                          key={exp.id}
+                          className={isLargest ? 'md:col-span-2' : ''}
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.05 }}
+                        >
+                          <Card className={`bg-muted/30 border-${baseColor}-500/20 h-full`}>
+                            <CardContent className={isLargest ? 'p-4' : 'p-3'}>
+                              <div className="flex items-center justify-between">
+                                <p className={`font-medium truncate flex-1 ${isLargest ? 'text-base' : 'text-sm'}`}>
+                                  {exp.name}
+                                </p>
+                                <p className={`font-semibold text-${baseColor}-600 ml-2 ${isLargest ? 'text-base' : 'text-sm'}`}>
+                                  {formatCurrency(exp.amount)}
+                                </p>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {new Date(exp.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </p>
+                              {isLargest && (
+                                <div className={`mt-2 pt-2 border-t border-${baseColor}-500/20`}>
+                                  <p className={`text-xs text-${baseColor}-600 font-medium`}>💰 Transaksi Terbesar</p>
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              );
+            })()}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  if (isMobile) {
+    // Mobile: Drawer with Tabs - Only render when needed to prevent portal issues
+    if (!open) return null;
+    
+    return (
+      <Drawer 
+        open={open} 
+        onOpenChange={onOpenChange}
+        dismissible={true}
+        modal={true}
+        shouldScaleBackground={false}
+      >
+        <DrawerContent aria-describedby={undefined} className="max-h-[85vh]">
+          <DrawerHeader className="pb-2">
+            <DrawerTitle>Breakdown Kategori</DrawerTitle>
+          </DrawerHeader>
+          
+          {/* Loading/Empty States */}
+          {loading && <div className="pb-4">{loadingContent}</div>}
+          {!loading && categoryData.length === 0 && <div className="pb-4">{emptyContent()}</div>}
+          
+          {/* 2-Tab Layout for Mobile */}
+          {!loading && categoryData.length > 0 && (
+            <Tabs defaultValue="breakdown" className="w-full flex flex-col flex-1 overflow-hidden">
+              <TabsList className="grid w-full grid-cols-2 mx-4 mb-2 shrink-0">
+                <TabsTrigger value="breakdown" className="text-xs">
+                  <BarChart3 className="size-3 mr-1" />
+                  Breakdown
+                </TabsTrigger>
+                <TabsTrigger value="insights" className="text-xs">
+                  <Sparkles className="size-3 mr-1" />
+                  Fun Insights
+                </TabsTrigger>
+              </TabsList>
+              
+              {/* Tab 1: Breakdown Kategori */}
+              <TabsContent value="breakdown" className="mt-0 overflow-y-auto flex-1">
+                {/* Header with total */}
+                <div className="px-4 mb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="size-4" />
+                      <h3 className="text-sm font-semibold">Breakdown per Kategori</h3>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Total: {formatCurrency(totalExpenses)}
+                  </p>
+                </div>
+                
+                {/* Category Cards */}
+                <div className="px-4 pb-4">
+                  <div className="space-y-2">
+                    {categoryData.map((item, index) => (
+                      <CategoryCompactCard
+                        key={item.category}
+                        data={item}
+                        onClick={() => handleCategoryClick(item.category)}
+                        index={index}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+              
+              {/* Tab 2: Fun Insights */}
+              <TabsContent value="insights" className="mt-0 overflow-y-auto flex-1">
+                <div className="px-4 pb-4">
+                  <h3 className="text-sm font-semibold mb-3">
+                    💡 Fun Insights Bulan Ini
+                  </h3>
+                  
+                  {/* Dynamic Insight Cards Grid */}
+                  <div className="grid grid-cols-1 gap-3">
+                    {selectedInsights.map(insightId => {
+                      const config = INSIGHTS_POOL.find(i => i.id === insightId);
+                      if (!config) return null;
+                      
+                      const result = config.calculate(categoryData, expenses, previousMonthData, settings);
+                      if (!result.hasData) return null;
+                      
+                      const isActive = selectedInsight === insightId;
+                      
+                      return (
+                        <Card 
+                          key={insightId}
+                          className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
+                          onClick={() => setSelectedInsight(isActive ? null : insightId)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                              <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
+                                <p className="font-semibold text-sm mb-1 truncate">
+                                  {result.category ? result.category.label : '-'}
+                                </p>
+                                <p className={`${config.textColor} font-bold`}>{result.value}</p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {config.subtitle}
+                                </p>
+                              </div>
+                              {isActive ? (
+                                <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                              ) : (
+                                <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {/* Dynamic Transaction Lists */}
+                  {selectedInsight && (() => {
+                    const config = INSIGHTS_POOL.find(i => i.id === selectedInsight);
+                    if (!config) return null;
+                    
+                    const result = config.calculate(categoryData, expenses, previousMonthData, settings);
+                    if (!result.hasData || !result.category) return null;
+                    
+                    const filteredExpenses = config.getFilteredExpenses(result.category, expenses);
+                    const sortedExpenses = [...filteredExpenses].sort((a, b) => b.amount - a.amount);
+                    
+                    // Extract border color
+                    const colorMatch = config.borderColor.match(/border-(\w+)-/);
+                    const baseColor = colorMatch ? colorMatch[1] : 'gray';
+                    
+                    return (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3, ease: 'easeInOut' }}
+                        className="overflow-hidden mt-3"
+                      >
+                        <div className="grid grid-cols-1 gap-2">
+                          {sortedExpenses.map((exp, idx) => {
+                            const isLargest = idx === 0;
+                            
+                            return (
+                              <motion.div
+                                key={exp.id}
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: idx * 0.05 }}
+                              >
+                                <Card className={`bg-muted/30 border-${baseColor}-500/20`}>
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center justify-between">
+                                      <p className={`font-medium truncate flex-1 ${isLargest ? 'text-base' : 'text-sm'}`}>
+                                        {exp.name}
+                                      </p>
+                                      <p className={`font-semibold text-${baseColor}-600 ml-2 ${isLargest ? 'text-base' : 'text-sm'}`}>
+                                        {formatCurrency(exp.amount)}
+                                      </p>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {new Date(exp.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </p>
+                                    {isLargest && (
+                                      <div className={`mt-2 pt-2 border-t border-${baseColor}-500/20`}>
+                                        <p className={`text-xs text-${baseColor}-600 font-medium`}>💰 Transaksi Terbesar</p>
+                                      </div>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+                </div>
+              </TabsContent>
+            </Tabs>
+          )}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  // Desktop: Dialog
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>Breakdown Kategori</DialogTitle>
+        </DialogHeader>
+        {mainContent}
+      </DialogContent>
+    </Dialog>
   );
 }
 

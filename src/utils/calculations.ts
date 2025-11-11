@@ -62,6 +62,54 @@ export const calculateBudget = (
 };
 
 /**
+ * ARCHITECTURE FIX: Calculate carry-over assets (positive pocket balances from previous month)
+ * 
+ * Aset = Uang yang bisa digunakan (Positive balances)
+ * This function filters only POSITIVE balances and sums them.
+ * 
+ * @param balances - Map of pocket balances with availableBalance property
+ * @returns Total positive balances (carry-over assets)
+ */
+export const calculateCarryOverAssets = (
+  balances: Map<string, { availableBalance: number }>
+): number => {
+  let totalAssets = 0;
+  
+  balances.forEach((balance) => {
+    // Only count POSITIVE balances (Assets)
+    if (balance.availableBalance > 0) {
+      totalAssets += balance.availableBalance;
+    }
+  });
+  
+  return totalAssets;
+};
+
+/**
+ * ARCHITECTURE FIX: Calculate carry-over liabilities (negative pocket balances from previous month)
+ * 
+ * Kewajiban = Utang yang harus dibayar (Negative balances)
+ * This function filters only NEGATIVE balances and returns absolute sum.
+ * 
+ * @param balances - Map of pocket balances with availableBalance property
+ * @returns Total negative balances as positive number (carry-over liabilities/utang)
+ */
+export const calculateCarryOverLiabilities = (
+  balances: Map<string, { availableBalance: number }>
+): number => {
+  let totalLiabilities = 0;
+  
+  balances.forEach((balance) => {
+    // Only count NEGATIVE balances (Liabilities/Utang)
+    if (balance.availableBalance < 0) {
+      totalLiabilities += Math.abs(balance.availableBalance);
+    }
+  });
+  
+  return totalLiabilities;
+};
+
+/**
  * Calculate pocket balance from transactions
  */
 export const calculatePocketBalance = (

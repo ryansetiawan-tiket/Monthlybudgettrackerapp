@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "./ui/textarea";
 import { Calendar } from "./ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { CalendarIcon, ArrowRight } from "lucide-react";
+import { CalendarIcon, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "./ui/utils";
@@ -299,7 +299,7 @@ export function TransferDialog({
 
           {/* Arrow */}
           <div className="flex justify-center">
-            <ArrowRight className="size-5 text-muted-foreground" />
+            <ArrowDown className="size-5 text-muted-foreground" />
           </div>
 
           {/* To Pocket */}
@@ -396,7 +396,7 @@ export function TransferDialog({
       <>
         <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
           <DrawerContent 
-            className="h-[75vh] flex flex-col rounded-t-2xl p-0"
+            className="h-[90vh] flex flex-col rounded-t-2xl p-0"
             aria-describedby={undefined}
           >
             <DrawerHeader className="px-4 pt-6 pb-4 border-b">

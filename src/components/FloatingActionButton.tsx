@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, PanInfo } from 'motion/react';
-import { Plus, Minus, Wallet, ChevronRight } from 'lucide-react';
+import { Plus, Minus, ArrowLeftRight, ChevronRight } from 'lucide-react';
 import { cn } from './ui/utils';
 
 interface FloatingActionButtonProps {
   onAddExpense: () => void;
   onAddIncome: () => void;
-  onToggleSummary: () => void;
+  onTransfer: () => void;
   className?: string;
 }
 
@@ -68,7 +68,7 @@ function useScrollDetection() {
 export function FloatingActionButton({
   onAddExpense,
   onAddIncome,
-  onToggleSummary,
+  onTransfer,
   className
 }: FloatingActionButtonProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -203,17 +203,17 @@ export function FloatingActionButton({
       onClick: onAddExpense
     },
     {
-      id: 'summary',
-      label: 'Toggle Ringkasan',
-      icon: Wallet,
-      color: 'text-blue-500', // Wallet biru
+      id: 'transfer',
+      label: 'Transfer Antar Kantong',
+      icon: ArrowLeftRight,
+      color: 'text-blue-500', // Transfer biru
       bg: 'bg-gray-900',
       position: fabSide === 'right'
         ? { x: -90, y: 0 }   // JAM 9 (left)
         : { x: 90, y: 0 },   // JAM 3 (right)
-      onClick: onToggleSummary
+      onClick: onTransfer
     }
-  ], [fabSide, onAddIncome, onAddExpense, onToggleSummary]);
+  ], [fabSide, onAddIncome, onAddExpense, onTransfer]);
 
   // Chevron position - JAM 10.30 (right) or JAM 1.30 (left)
   // Dynamic based on FAB side

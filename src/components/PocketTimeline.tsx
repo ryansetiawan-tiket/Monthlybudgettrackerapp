@@ -25,7 +25,7 @@ import { getCategoryConfig } from "../utils/categoryManager";
 
 interface TimelineEntry {
   id: string;
-  type: 'income' | 'expense' | 'transfer';
+  type: 'income' | 'expense' | 'transfer' | 'initial_balance'; // ✅ FASE 3: Added initial_balance
   date: string;
   description: string;
   amount: number;
@@ -38,6 +38,7 @@ interface TimelineEntry {
 interface PocketBalance {
   pocketId: string;
   originalAmount: number;
+  income: number; // 💰 Income for Cold Money & Custom pockets
   transferIn: number;
   transferOut: number;
   expenses: number;
@@ -132,6 +133,17 @@ export function PocketTimeline({
       return dateStr;
     }
   };
+  
+  // ✅ FASE 3: Format month key to readable name
+  const formatMonth = (monthKey: string) => {
+    try {
+      const [year, month] = monthKey.split('-');
+      const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      return `${months[parseInt(month) - 1]} ${year}`;
+    } catch {
+      return monthKey;
+    }
+  };
 
   const formatDateHeader = (dateStr: string) => {
     try {
@@ -188,6 +200,9 @@ export function PocketTimeline({
     setLoading(true);
     try {
       const [year, month] = monthKey.split('-');
+      
+      // ✅ MONTHLY STATEMENT MODEL: Fetch data for SPECIFIC month only
+      // Timeline shows month-scoped view with Saldo Awal = carry-over from previous months
       
       // Add timeout to fetch request
       const controller = new AbortController();
@@ -260,8 +275,26 @@ export function PocketTimeline({
     return { groupedEntries: grouped, sortedDateKeys: sorted };
   }, [entries]);
 
+  // ✅ FIX: Saldo Proyeksi = balanceAfter dari entry TERAKHIR (paling baru/atas)
+  // Ini adalah saldo yang akan dicapai jika semua transaksi di timeline terjadi
+  const projectedBalance = useMemo(() => {
+    if (!entries || entries.length === 0) {
+      return balance.availableBalance; // Fallback to server balance if no entries
+    }
+    
+    // Entries are already sorted DESC (newest first) from server
+    // So entries[0] is the LATEST/NEWEST entry
+    return entries[0].balanceAfter;
+  }, [entries, balance.availableBalance]);
+
   const getIcon = (entry: TimelineEntry) => {
     const iconClass = "size-4";
+    
+    // ✅ FASE 3: Handle initial_balance type
+    if (entry.type === 'initial_balance' || entry.metadata?.isInitialBalance) {
+      // Use emoji from entry.icon (set by server)
+      return <span className="text-base">{entry.icon || '💰'}</span>;
+    }
     
     // Universal icons based on transaction type
     switch (entry.type) {
@@ -271,10 +304,12 @@ export function PocketTimeline({
         return <Minus className={iconClass} />;
       case 'transfer':
         // Use direction-specific arrow for transfers
+        // Transfer IN (masuk) = Arrow RIGHT (→)
+        // Transfer OUT (keluar) = Arrow LEFT (←)
         if (entry.metadata?.direction === 'in') {
-          return <ArrowLeft className={iconClass} />;
-        } else {
           return <ArrowRight className={iconClass} />;
+        } else {
+          return <ArrowLeft className={iconClass} />;
         }
       default:
         return <Plus className={iconClass} />;
@@ -316,6 +351,7 @@ export function PocketTimeline({
   const timelineContent = (
     <ScrollArea className={isMobile ? "h-full" : "h-[60vh]"}>
       <div className={isMobile ? "pr-2" : "pr-4"}>
+      
       {loading ? (
         <div className="space-y-4 py-2">
           {/* Date Group 1 */}
@@ -372,7 +408,7 @@ export function PocketTimeline({
         </div>
       ) : (
         <div className="space-y-4">
-          {sortedDateKeys.map((dateKey) => (
+            {sortedDateKeys.map((dateKey) => (
             <div key={dateKey} className="space-y-3">
               {/* Date Header */}
               <div className="sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10 pb-2 border-b border-border/50">
@@ -386,6 +422,12 @@ export function PocketTimeline({
                 const isPast = isEntryInPast(entry.date);
                 const showFutureStyle = isRealtimeMode && !isPast;
                 
+                // ✅ FASE 3: Check if this is initial balance entry
+                const isInitialBalance = entry.type === 'initial_balance' || entry.metadata?.isInitialBalance;
+                
+                // ⚠️ BACKWARD COMPATIBILITY: Check if this is a transfer to/from unknown pocket (old data)
+                const isUnknownPocket = entry.type === 'transfer' && entry.metadata?.isUnknownPocket;
+                
                 // Get category emoji for expenses
                 const categoryId = entry.metadata?.category;
                 const categoryConfig = categoryId ? getCategoryConfig(categoryId, settings) : null;
@@ -394,7 +436,11 @@ export function PocketTimeline({
                 return (
                   <div 
                     key={entry.id}
-                    className={`flex gap-3 pb-3 border-b last:border-b-0 ${showFutureStyle ? 'opacity-50' : ''}`}
+                    className={`flex gap-3 pb-3 border-b last:border-b-0 ${showFutureStyle ? 'opacity-50' : ''} ${
+                      isInitialBalance ? 'bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-3 -m-3 mb-0' : ''
+                    } ${
+                      isUnknownPocket ? 'opacity-60' : ''
+                    }`}
                   >
                     {/* Universal Icon (+ / - / →) */}
                     <div className={`rounded-full p-2 h-fit flex-shrink-0 ${getColorClass(entry.color)}`}>
@@ -406,10 +452,20 @@ export function PocketTimeline({
                       <div className="flex items-start gap-3">
                         <div className="flex-1 min-w-0">
                           {/* Description with Category Emoji */}
-                          <p className="font-medium break-words">
+                          <p className={`${isInitialBalance ? 'font-semibold' : 'font-medium'} break-words ${
+                            isUnknownPocket ? 'text-muted-foreground' : ''
+                          }`}>
                             {categoryEmoji && <span className="mr-1">{categoryEmoji}</span>}
                             {entry.description}
                           </p>
+                          
+                          {/* ⚠️ Unknown Pocket Warning */}
+                          {isUnknownPocket && (
+                            <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 flex items-center gap-1">
+                              <Info className="size-3" />
+                              <span>Data lama dari sistem sebelumnya</span>
+                            </p>
+                          )}
                           
                           {/* Metadata: Badge + Date & Time (1 baris) */}
                           <p className="text-xs text-muted-foreground">
@@ -418,6 +474,27 @@ export function PocketTimeline({
                             )}
                             {formatDate(entry.date)}
                           </p>
+                          
+                          {/* ✅ FASE 3: Breakdown for Daily pocket initial balance */}
+                          {isInitialBalance && entry.metadata?.pocketType === 'daily' && entry.metadata?.breakdown && (
+                            <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
+                              <p className="flex items-center justify-between">
+                                <span>Carry-over bulan lalu:</span>
+                                <span className="font-medium">{formatCurrency(entry.metadata.breakdown.carryOver)}</span>
+                              </p>
+                              <p className="flex items-center justify-between">
+                                <span>Budget baru:</span>
+                                <span className="font-medium">{formatCurrency(entry.metadata.breakdown.newBudget)}</span>
+                              </p>
+                            </div>
+                          )}
+                          
+                          {/* ✅ FASE 3: From month info for carry-over */}
+                          {isInitialBalance && entry.metadata?.fromMonth && (
+                            <p className="text-xs text-muted-foreground italic mt-1">
+                              Dari {formatMonth(entry.metadata.fromMonth)}
+                            </p>
+                          )}
                           
                           {/* Transfer/Income Note */}
                           {entry.metadata?.note && (
@@ -495,11 +572,11 @@ export function PocketTimeline({
               {isRealtimeMode ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
             </p>
             <p className={`text-2xl font-semibold ${
-              (realtimeBalance !== null ? realtimeBalance : balance.availableBalance) >= 0 
+              (isRealtimeMode && realtimeBalance !== null ? realtimeBalance : projectedBalance) >= 0 
                 ? 'text-[#00c950]' 
                 : 'text-red-500'
             }`}>
-              {formatCurrency(realtimeBalance !== null ? realtimeBalance : balance.availableBalance)}
+              {formatCurrency(isRealtimeMode && realtimeBalance !== null ? realtimeBalance : projectedBalance)}
             </p>
             {isRealtimeMode && (
               <p className="text-xs text-muted-foreground">
@@ -528,6 +605,16 @@ export function PocketTimeline({
             </div>
             <span className="font-medium text-red-600">{formatCurrency(balance.expenses)}</span>
           </div>
+
+          {balance.income > 0 && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="size-4 text-green-600" />
+                <span className="text-sm text-muted-foreground">Pemasukan</span>
+              </div>
+              <span className="font-medium text-green-600">+{formatCurrency(balance.income)}</span>
+            </div>
+          )}
 
           {balance.transferIn > 0 && (
             <div className="flex items-center justify-between">
@@ -624,7 +711,7 @@ export function PocketTimeline({
         dismissible={true}
       >
         <DrawerContent 
-          className="h-[75vh] flex flex-col rounded-t-2xl p-0 z-[101]" 
+          className="h-[90vh] flex flex-col rounded-t-2xl p-0 z-[101]" 
           aria-describedby={undefined}
         >
           <DrawerHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">
@@ -706,6 +793,7 @@ export function PocketTimeline({
                           <Info className="size-4 mr-2" />
                           Info Kantong
                         </DropdownMenuItem>
+                        
                         {onEditPocket && (
                           <DropdownMenuItem
                             onClick={(e) => {

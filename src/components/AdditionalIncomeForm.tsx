@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { getBaseUrl, createAuthHeaders } from "../utils/api";
 import { formatCurrencyInput, parseCurrencyInput, formatCurrency } from "../utils/currency";
 import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
+import { getLocalDateFromISO } from "../utils/date-helpers";
 
 interface Pocket {
   id: string;
@@ -78,26 +79,17 @@ export function AdditionalIncomeForm({
     return `${year}-${month}-${day}`;
   };
 
+  // ✅ DEPRECATED: Use imported getLocalDateFromISO() instead!
   // Convert ISO date to YYYY-MM-DD format (timezone-safe)
   const convertISOToDateString = (isoDate: string) => {
-    // FIX: Extract date part directly without Date object to avoid timezone shift
-    const datePart = isoDate.split('T')[0];
-    // Validate it's in YYYY-MM-DD format
-    if (datePart && /^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-      return datePart;
-    }
-    // Fallback to manual parsing if timestamp format is different
-    const dateObj = new Date(isoDate);
-    const year = dateObj.getFullYear();
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    // ✅ FIX: Use utility function for consistent timezone handling
+    return getLocalDateFromISO(isoDate);
   };
   
   const [name, setName] = useState(initialValues?.name || "");
   const [amount, setAmount] = useState(initialValues?.amount?.toString() || "");
   const [currency, setCurrency] = useState<"IDR" | "USD">((initialValues?.currency as "IDR" | "USD") || "IDR");
-  const [conversionType, setConversionType] = useState<"auto" | "manual">((initialValues?.conversionType as "auto" | "manual") || "auto");
+  const [conversionType, setConversionType] = useState<"auto" | "manual">((initialValues?.conversionType as "auto" | "manual") || "manual");
   const [exchangeRate, setExchangeRate] = useState<number | null>(initialValues?.exchangeRate || null);
   const [manualRate, setManualRate] = useState(initialValues?.exchangeRate?.toString() || "");
   const [loadingRate, setLoadingRate] = useState(false);
@@ -333,7 +325,7 @@ export function AdditionalIncomeForm({
       setName("");
       setAmount("");
       setCurrency("IDR");
-      setConversionType("auto");
+      setConversionType("manual");
       setManualRate("");
       setDeduction("");
       setTargetPocketId(defaultTargetPocket || (pockets.length > 0 ? pockets[0].id : ""));
@@ -368,7 +360,7 @@ export function AdditionalIncomeForm({
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               placeholder="Contoh: Fiverr, Freelance, Bonus, dll"
             />
-            {showSuggestions && filteredSuggestions.length > 0 && name && (
+            {showSuggestions && filteredSuggestions.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-10 max-h-40 overflow-y-auto">
                 {filteredSuggestions.map((suggestion, index) => (
                   <button
@@ -416,19 +408,19 @@ export function AdditionalIncomeForm({
             <div className="flex gap-2">
               <Button
                 type="button"
-                variant={conversionType === "auto" ? "default" : "outline"}
-                onClick={() => setConversionType("auto")}
-                className="flex-1"
-              >
-                Auto (Realtime)
-              </Button>
-              <Button
-                type="button"
                 variant={conversionType === "manual" ? "default" : "outline"}
                 onClick={() => setConversionType("manual")}
                 className="flex-1"
               >
                 Manual
+              </Button>
+              <Button
+                type="button"
+                variant={conversionType === "auto" ? "default" : "outline"}
+                onClick={() => setConversionType("auto")}
+                className="flex-1"
+              >
+                Auto (Realtime)
               </Button>
             </div>
           </div>

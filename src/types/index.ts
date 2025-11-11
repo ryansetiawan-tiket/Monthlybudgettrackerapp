@@ -4,7 +4,6 @@
 
 export interface Budget {
   initialBudget: number;
-  carryover: number;
 }
 
 // Expense Categories
@@ -82,17 +81,27 @@ export interface Expense {
   notes?: string;
   pocketId?: string;
   groupId?: string;
+  emoji?: string; // Template emoji
+  color?: string; // Template color
+  items?: Array<{name: string; amount: number; category?: string}>; // Template items
+  currency?: string; // "USD" or "IDR" for additional income
+  originalAmount?: number; // Original USD amount for additional income
+  exchangeRate?: number; // Exchange rate used for conversion
+  conversionType?: string; // "auto" or "manual"
 }
 
 export interface AdditionalIncome {
   id: string;
-  name: string;
+  name: string; // Income source name (e.g., "Fiverr", "CGTrader")
   amountUSD: number;
   exchangeRate: number;
   amount: number;
+  amountIDR: number; // Actual IDR amount after conversion
   deduction: number;
   date: string;
   pocketId?: string;
+  currency?: string; // "USD" or "IDR"
+  conversionType?: string; // "auto" or "manual"
 }
 
 export interface Template {
@@ -110,6 +119,7 @@ export interface Pocket {
   type: PocketType;
   description?: string;
   icon?: string;
+  emoji?: string; // New emoji property (Phase 1.5)
   color?: string;
   order: number;
   enableWishlist?: boolean;

@@ -5,7 +5,6 @@ import { handleError, retryWithBackoff } from '../utils/errorHandler';
 
 interface BudgetData {
   initialBudget: number;
-  carryover: number;
   notes: string;
   incomeDeduction: number;
 }
@@ -51,7 +50,6 @@ interface MonthCache {
 export function useBudgetData() {
   const [budget, setBudget] = useState<BudgetData>({
     initialBudget: 0,
-    carryover: 0,
     notes: "",
     incomeDeduction: 0,
   });
@@ -94,7 +92,7 @@ export function useBudgetData() {
   ) => {
     const cacheKey = getCacheKey(year, month);
     const existing = cacheRef.current[cacheKey] || {
-      budget: { initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 },
+      budget: { initialBudget: 0, notes: "", incomeDeduction: 0 },
       expenses: [],
       additionalIncomes: [],
       previousMonthRemaining: null,
@@ -149,14 +147,14 @@ export function useBudgetData() {
         1000 // initial delay
       );
 
-      setBudget(data.budget || { initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 });
+      setBudget(data.budget || { initialBudget: 0, notes: "", incomeDeduction: 0 });
       setExpenses(data.expenses || []);
       setAdditionalIncomes(data.additionalIncomes || []);
       setPreviousMonthRemaining(data.previousMonthRemaining ?? null);
 
       // Cache the result in ref
       cacheRef.current[cacheKey] = {
-        budget: data.budget || { initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 },
+        budget: data.budget || { initialBudget: 0, notes: "", incomeDeduction: 0 },
         expenses: data.expenses || [],
         additionalIncomes: data.additionalIncomes || [],
         previousMonthRemaining: data.previousMonthRemaining ?? null,
@@ -165,7 +163,7 @@ export function useBudgetData() {
       handleError(error, "Gagal memuat data budget");
       
       // Set default empty state on error
-      setBudget({ initialBudget: 0, carryover: 0, notes: "", incomeDeduction: 0 });
+      setBudget({ initialBudget: 0, notes: "", incomeDeduction: 0 });
       setExpenses([]);
       setAdditionalIncomes([]);
       setPreviousMonthRemaining(null);

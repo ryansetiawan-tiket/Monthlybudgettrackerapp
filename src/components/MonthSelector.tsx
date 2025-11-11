@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { ChevronLeft, ChevronRight, Sliders } from "lucide-react";
+import { ChevronLeft, ChevronRight, Sliders, Calendar } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useIsMobile } from "./ui/use-mobile";
@@ -9,6 +9,7 @@ interface MonthSelectorProps {
   selectedYear: number;
   onMonthChange: (month: number, year: number) => void;
   onSettingsClick?: () => void;
+  onCalendarClick?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -16,7 +17,7 @@ const MONTH_NAMES = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember"
 ];
 
-export const MonthSelector = memo(function MonthSelector({ selectedMonth, selectedYear, onMonthChange, onSettingsClick }: MonthSelectorProps) {
+export const MonthSelector = memo(function MonthSelector({ selectedMonth, selectedYear, onMonthChange, onSettingsClick, onCalendarClick }: MonthSelectorProps) {
   const isMobile = useIsMobile();
   const handlePrevious = () => {
     if (selectedMonth === 1) {
@@ -47,7 +48,7 @@ export const MonthSelector = memo(function MonthSelector({ selectedMonth, select
   const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   return (
-    <div className="flex items-center justify-center gap-3 px-4">
+    <div className="flex items-center justify-center md:justify-end gap-3 px-4 md:px-0">
       <Button variant="outline" size="icon" onClick={handlePrevious}>
         <ChevronLeft className="size-4" />
       </Button>
@@ -80,11 +81,20 @@ export const MonthSelector = memo(function MonthSelector({ selectedMonth, select
       <Button variant="outline" size="icon" onClick={handleNext}>
         <ChevronRight className="size-4" />
       </Button>
-      {/* Settings button - Desktop only */}
-      {!isMobile && onSettingsClick && (
-        <Button variant="outline" size="icon" onClick={onSettingsClick} title="Pengaturan Budget">
-          <Sliders className="size-4" />
-        </Button>
+      {/* Action buttons - Desktop only */}
+      {!isMobile && (
+        <>
+          {onCalendarClick && (
+            <Button variant="outline" size="icon" onClick={onCalendarClick} title="Tampilan Kalender">
+              <Calendar className="size-4" />
+            </Button>
+          )}
+          {onSettingsClick && (
+            <Button variant="outline" size="icon" onClick={onSettingsClick} title="Pengaturan Budget">
+              <Sliders className="size-4" />
+            </Button>
+          )}
+        </>
       )}
     </div>
   );

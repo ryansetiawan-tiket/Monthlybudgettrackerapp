@@ -70,7 +70,7 @@ export function AddAdditionalIncomeDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
-        <DrawerContent className="h-[75vh] flex flex-col rounded-t-2xl p-0">
+        <DrawerContent className="h-[90vh] flex flex-col rounded-t-2xl p-0">
           <DrawerHeader className="px-4 pt-6 pb-4 border-b">
             <DrawerTitle>Tambah Pemasukan Tambahan</DrawerTitle>
           </DrawerHeader>

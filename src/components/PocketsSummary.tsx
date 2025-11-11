@@ -38,7 +38,9 @@ interface PocketBalance {
   transferIn: number;
   transferOut: number;
   expenses: number;
-  availableBalance: number;
+  availableBalance: number;  // ✅ BACKWARD COMPAT: Defaults to projected balance
+  realtimeBalance?: number;   // ✅ NEW (TUGAS 1): Balance up to today
+  projectedBalance?: number;  // ✅ NEW (TUGAS 1): Balance including future transactions
 }
 
 interface PocketsSummaryProps {
@@ -159,25 +161,21 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
   useEffect(() => {
     const loadRealtimeMode = async () => {
       const newMap = new Map<string, boolean>();
-      const pocketsToPrefetch: string[] = [];
       
       pockets.forEach(pocket => {
         const saved = localStorage.getItem(`realtime-mode-${pocket.id}`);
         // Default to true (ON) if not set
         const isRealtime = saved !== null ? saved === 'true' : true;
         newMap.set(pocket.id, isRealtime);
-        
-        // Queue for prefetch if realtime mode is ON
-        if (isRealtime) {
-          pocketsToPrefetch.push(pocket.id);
-        }
       });
       
       setRealtimeMode(newMap);
       
-      // Prefetch timeline for all realtime-enabled pockets IN PARALLEL (faster!)
-      if (pocketsToPrefetch.length > 0) {
-        Promise.all(pocketsToPrefetch.map(pocketId => prefetchTimeline(pocketId)));
+      // ✅ FIX: Prefetch timeline for ALL pockets (both realtime AND projection modes need it!)
+      // - Realtime mode needs timeline to calculate "Saldo Hari Ini"
+      // - Projection mode needs timeline to calculate "Saldo Proyeksi" (end of month balance)
+      if (pockets.length > 0) {
+        Promise.all(pockets.map(pocket => prefetchTimeline(pocket.id)));
       }
     };
     
@@ -193,8 +191,10 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     localStorage.setItem(`realtime-mode-${pocketId}`, String(newValue));
     toast.success(newValue ? 'Mode Realtime diaktifkan' : 'Mode Proyeksi diaktifkan');
     
-    // Prefetch timeline immediately when switching to realtime mode
-    if (newValue && !timelineCache.has(pocketId)) {
+    // ✅ FIX: Prefetch timeline when switching modes (both directions need timeline!)
+    // - Switching to Realtime → needs timeline for "Saldo Hari Ini"
+    // - Switching to Projection → needs timeline for "Saldo Proyeksi"
+    if (!timelineCache.has(pocketId)) {
       prefetchTimeline(pocketId);
     }
   };
@@ -230,6 +230,20 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     // If all items are in the future (shouldn't happen in normal use), return null
     // This means there are only future-dated transactions, so we fall back to server balance
     return null;
+  }, [timelineCache]);
+
+  // Calculate projected balance (end of month) based on timeline
+  const calculateProjectedBalance = useCallback((pocketId: string): number | null => {
+    const timeline = timelineCache.get(pocketId);
+    if (!timeline || timeline.length === 0) {
+      // Timeline not loaded yet - return null to use server balance temporarily
+      return null;
+    }
+    
+    // Timeline is sorted DESC (newest first)
+    // The FIRST entry has the latest date = projected balance at end of month
+    // ✅ FIX: Use final balance from timeline (includes ALL transactions including future)
+    return timeline[0].balanceAfter;
   }, [timelineCache]);
 
   const fetchPockets = async () => {
@@ -352,6 +366,8 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     
     try {
       const [year, month] = monthKey.split('-');
+      
+      // ✅ MONTHLY STATEMENT MODEL: Fetch month-scoped timeline
       const response = await fetch(`${baseUrl}/timeline/${year}/${month}/${pocketId}?sortOrder=desc`, {
         headers: {
           Authorization: `Bearer ${publicAnonKey}`,
@@ -386,7 +402,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
     if (!pocketToDelete) return;
 
     const balance = balances.get(pocketToDelete.id);
-    if (balance && balance.availableBalance !== 0) {
+    // ✅ TUGAS 1: Use projected balance for delete validation (must include ALL future transactions)
+    const finalBalance = balance?.projectedBalance ?? balance?.availableBalance ?? 0;
+    if (balance && finalBalance !== 0) {
       toast.error('Saldo kantong harus Rp 0 sebelum dihapus');
       setShowDeleteConfirm(false);
       setPocketToDelete(null);
@@ -622,7 +640,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="mt-[-22px] mr-[0px] mb-[0px] ml-[0px]">
           <Carousel
             opts={{
               align: "start",
@@ -640,8 +658,22 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
               if (!balance) return null;
 
               const isRealtime = realtimeMode.get(pocket.id);
-              const realtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
-              const displayBalance = realtimeBalance !== null ? realtimeBalance : balance.availableBalance;
+              
+              // ✅ TUGAS 1: Use server-calculated realtime/projected balance
+              // Server now returns both realtimeBalance and projectedBalance
+              // Frontend timeline calculation is ONLY used as fallback for legacy data
+              const serverRealtimeBalance = balance.realtimeBalance;
+              const serverProjectedBalance = balance.projectedBalance;
+              
+              // Fallback to timeline calculation (for backward compat or if server doesn't return new fields)
+              const timelineRealtimeBalance = isRealtime ? calculateRealtimeBalance(pocket.id, true) : null;
+              const timelineProjectedBalance = !isRealtime ? calculateProjectedBalance(pocket.id) : null;
+              
+              // Priority: Server balance > Timeline calculation > Legacy availableBalance
+              const displayBalance = isRealtime 
+                ? (serverRealtimeBalance ?? timelineRealtimeBalance ?? balance.availableBalance)
+                : (serverProjectedBalance ?? timelineProjectedBalance ?? balance.availableBalance);
+                
               const isPositive = displayBalance >= 0;
               const balanceColor = isPositive ? 'text-green-600' : 'text-red-600';
 
@@ -794,7 +826,9 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const pocketBalance = balances.get(pocket.id);
-                                  if (pocketBalance && pocketBalance.availableBalance !== 0) {
+                                  // ✅ TUGAS 1: Use projected balance for delete validation
+                                  const finalBalance = pocketBalance?.projectedBalance ?? pocketBalance?.availableBalance ?? 0;
+                                  if (pocketBalance && finalBalance !== 0) {
                                     toast.error('Saldo kantong harus Rp 0 sebelum dihapus');
                                   } else {
                                     setPocketToDelete(pocket);
@@ -1022,7 +1056,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
       {isMobile ? (
         <Drawer open={showWishlist} onOpenChange={setShowWishlist} dismissible={true}>
           <DrawerContent 
-            className="h-[85vh] flex flex-col rounded-t-2xl p-0 z-[50]"
+            className="h-[90vh] flex flex-col rounded-t-2xl p-0 z-[50]"
             aria-describedby={undefined}
           >
             <DrawerHeader className="px-4 pt-6 pb-4 border-b">

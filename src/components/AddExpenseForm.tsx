@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
-import { Plus, CalendarIcon, FileText, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Plus, CalendarIcon, FileText, Trash2, ChevronLeft, ChevronRight, X, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { format } from "date-fns";
@@ -10,8 +10,11 @@ import { id } from "date-fns/locale";
 import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import type { FixedExpenseTemplate } from "./FixedExpenseTemplates";
+import { FixedExpenseTemplates } from "./FixedExpenseTemplates";
 import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { EXPENSE_CATEGORIES } from "../constants";
 import type { ExpenseCategory } from "../types";
 import { useCategorySettings } from "../hooks/useCategorySettings";
@@ -21,15 +24,25 @@ import { BudgetExceedDialog, BudgetExceedInfo } from "./BudgetExceedDialog";
 import { getCategoryLabel } from "../utils/calculations";
 import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
 import { formatCurrency } from "../utils/currency";
+import { SmartSuggestions } from "./SmartSuggestions";
+import { getSuggestions, filterSuggestions, type Suggestion } from "../utils/smartSuggestions";
 
 interface AddExpenseFormProps {
-  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string) => Promise<any>;
+  onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string, emoji?: string) => Promise<any>;
   isAdding: boolean;
   templates: FixedExpenseTemplate[];
   onSuccess?: () => void;
-  pockets?: Array<{id: string; name: string}>;
+  pockets?: Array<{id: string; name: string; emoji?: string}>;
   balances?: Map<string, {availableBalance: number}>;
   currentExpenses?: Array<{ category?: string; amount: number }>; // For budget alert calculations
+  expenses?: Array<{ id: string; name: string; amount: number; date: string; category?: string; pocket?: string; pocketId?: string }>; // For smart suggestions
+  // NEW: Nested tabs control from parent
+  expenseMethod?: 'manual' | 'template';
+  setExpenseMethod?: (method: 'manual' | 'template') => void;
+  // NEW: Template management handlers (passed from parent)
+  onAddTemplate?: (name: string, items: Array<{name: string; amount: number; category?: string; pocketId?: string}>, color?: string, emoji?: string) => void;
+  onUpdateTemplate?: (id: string, name: string, items: Array<{name: string; amount: number; category?: string; pocketId?: string}>, color?: string, emoji?: string) => void;
+  onDeleteTemplate?: (id: string) => void;
 }
 
 interface ExpenseEntry {
@@ -41,10 +54,15 @@ interface ExpenseEntry {
   category?: string; // Can be ExpenseCategory or custom category ID
 }
 
-export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances, currentExpenses = [] }: AddExpenseFormProps) {
+export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, pockets = [], balances, currentExpenses = [], expenses = [], expenseMethod, setExpenseMethod, onAddTemplate, onUpdateTemplate, onDeleteTemplate }: AddExpenseFormProps) {
   // Phase 8: Get custom categories
   const { settings } = useCategorySettings();
   const allCategories = useMemo(() => getAllCategories(settings), [settings]);
+  
+  // Smart Suggestions state
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [focusedEntryId, setFocusedEntryId] = useState<string>('');
   
   // Phase 9: Budget Alert System state
   const [showBudgetDialog, setShowBudgetDialog] = useState(false);
@@ -75,16 +93,20 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
   
   const [date, setDate] = useState(getLocalDateString());
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
-  const [templateItems, setTemplateItems] = useState<Array<{name: string, amount: number, editable?: boolean}>>([]);
+  const [templateItems, setTemplateItems] = useState<Array<{name: string, amount: number, category?: string, editable?: boolean}>>([]);
   
   // Multiple entries state
+  const initialEntryId = useMemo(() => crypto.randomUUID(), []);
   const [entries, setEntries] = useState<ExpenseEntry[]>([{
-    id: crypto.randomUUID(),
+    id: initialEntryId,
     name: "",
     amount: "",
     calculatedAmount: null,
     pocketId: 'pocket_daily'
   }]);
+  
+  // Expand/collapse state - track which entry is expanded
+  const [expandedEntryId, setExpandedEntryId] = useState<string>(initialEntryId);
   
   // Update selected pocket when pockets load
   useEffect(() => {
@@ -169,19 +191,68 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
 
   const addNewEntry = () => {
     const defaultPocket = pockets.length > 0 ? pockets[0].id : 'pocket_daily';
+    const newEntryId = crypto.randomUUID();
     setEntries(prev => [...prev, {
-      id: crypto.randomUUID(),
+      id: newEntryId,
       name: "",
       amount: "",
       calculatedAmount: null,
       pocketId: defaultPocket
     }]);
+    // Auto-expand the new entry
+    setExpandedEntryId(newEntryId);
   };
 
   const removeEntry = (entryId: string) => {
     if (entries.length > 1) {
-      setEntries(prev => prev.filter(entry => entry.id !== entryId));
+      setEntries(prev => {
+        const filtered = prev.filter(entry => entry.id !== entryId);
+        // If we're removing the expanded entry, expand the first remaining entry
+        if (entryId === expandedEntryId && filtered.length > 0) {
+          setExpandedEntryId(filtered[0].id);
+        }
+        return filtered;
+      });
     }
+  };
+
+  // Smart Suggestions handlers
+  const handleNameFocus = (entryId: string) => {
+    setFocusedEntryId(entryId);
+    // Generate suggestions from expenses history
+    const generatedSuggestions = getSuggestions(expenses, pockets, 7);
+    setSuggestions(generatedSuggestions);
+    setShowSuggestions(true);
+  };
+
+  const handleNameBlur = () => {
+    // Delay hiding to allow click on suggestion
+    setTimeout(() => {
+      setShowSuggestions(false);
+      setFocusedEntryId('');
+    }, 200);
+  };
+
+  const handleSuggestionSelect = (suggestion: Suggestion) => {
+    if (!focusedEntryId) return;
+
+    // Auto-fill all fields from suggestion
+    setEntries(prev => prev.map(entry => 
+      entry.id === focusedEntryId 
+        ? {
+            ...entry,
+            name: suggestion.name,
+            category: suggestion.category,
+            amount: suggestion.amount.toString(),
+            calculatedAmount: suggestion.amount,
+            pocketId: suggestion.pocket,
+          }
+        : entry
+    ));
+
+    // Close suggestions
+    setShowSuggestions(false);
+    setFocusedEntryId('');
   };
 
   const handleTemplateSelect = (templateId: string) => {
@@ -196,19 +267,21 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     }
   };
 
-  const handleTemplateItemChange = (index: number, field: "name" | "amount", value: string | number) => {
+  const handleTemplateItemChange = (index: number, field: "name" | "amount" | "category", value: string | number) => {
     const newItems = [...templateItems];
     if (field === "name") {
       newItems[index].name = value as string;
-    } else {
+    } else if (field === "amount") {
       newItems[index].amount = Number(value);
+    } else if (field === "category") {
+      newItems[index].category = value as string || undefined;
     }
     newItems[index].editable = true;
     setTemplateItems(newItems);
   };
 
   const handleAddTemplateItem = () => {
-    setTemplateItems([...templateItems, { name: "", amount: 0, editable: true }]);
+    setTemplateItems([...templateItems, { name: "", amount: 0, category: undefined, editable: true }]);
   };
 
   const handleRemoveTemplateItem = (index: number) => {
@@ -223,6 +296,7 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     const template = templates.find(t => t.id === selectedTemplate);
     const templateName = template?.name || "Template";
     const templateColor = template?.color;
+    const templateEmoji = template?.emoji;
     
     // Use first entry's pocket or default
     const pocketId = entries[0]?.pocketId || 'pocket_daily';
@@ -234,11 +308,15 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
     // Just use the date string directly - backend will handle time if needed
     const fullTimestamp = date;
     
-    // Send as single expense with items and color
+    // Send as single expense with items (including category per item), color, and emoji
     if (totalAmount > 0) {
-      const items = templateItems.map(item => ({ name: item.name, amount: item.amount }));
-      // Templates don't have category for now (future enhancement)
-      onAddExpense(templateName, totalAmount, fullTimestamp, items, templateColor, pocketId, undefined, false, undefined);
+      const items = templateItems.map(item => ({ 
+        name: item.name, 
+        amount: item.amount,
+        ...(item.category ? { category: item.category } : {})
+      }));
+      // No global category for template expenses - each item has its own category
+      onAddExpense(templateName, totalAmount, fullTimestamp, items, templateColor, pocketId, undefined, false, undefined, templateEmoji);
       if (onSuccess) onSuccess();
     }
 
@@ -642,119 +720,180 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
 
         {entries.map((entry, index) => {
           const showCalculation = entry.amount && entry.amount !== entry.calculatedAmount?.toString() && entry.calculatedAmount !== null;
+          const isExpanded = expandedEntryId === entry.id;
+          const finalAmount = entry.calculatedAmount !== null ? entry.calculatedAmount : Number(entry.amount) || 0;
+          
+          // Preview info for collapsed state
+          const getPocketName = () => {
+            const pocket = pockets.find(p => p.id === entry.pocketId);
+            return pocket?.name || 'Sehari-hari';
+          };
+          
+          const getCategoryEmoji = () => {
+            if (!entry.category) return '';
+            const category = allCategories.find(c => c.id === entry.category);
+            return category?.emoji || '';
+          };
           
           return (
-            <Card key={entry.id} className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Entry {index + 1}</span>
-                {entries.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeEntry(entry.id)}
-                  >
-                    <X className="size-4 text-destructive" />
-                  </Button>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Nama (Opsional)</Label>
-                <Input
-                  value={entry.name}
-                  onChange={(e) => updateEntryField(entry.id, 'name', e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, entry.id)}
-                  placeholder="Kosongkan untuk otomatis menggunakan tanggal"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Kategori (Opsional)</Label>
-                <Select 
-                  value={entry.category || ""} 
-                  onValueChange={(value) => updateEntryField(entry.id, 'category', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih kategori" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allCategories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        <span className="flex items-center gap-2">
-                          <span>{cat.emoji}</span>
-                          <span>{cat.label}</span>
-                          {cat.isCustom && (
-                            <span className="text-xs text-muted-foreground">(Custom)</span>
+            <Collapsible
+              key={entry.id}
+              open={isExpanded}
+              onOpenChange={(open) => setExpandedEntryId(open ? entry.id : '')}
+            >
+              <Card className="overflow-hidden">
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors p-[16px]">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <ChevronDown className={cn(
+                        "size-4 shrink-0 transition-transform duration-200",
+                        isExpanded ? "transform rotate-0" : "transform -rotate-90"
+                      )} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{entry.name || `Entry ${index + 1}`}</span>
+                          {!isExpanded && getCategoryEmoji() && (
+                            <span className="text-base">{getCategoryEmoji()}</span>
                           )}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Nominal</Label>
-                <Input
-                  type="text"
-                  value={entry.amount}
-                  onChange={(e) => updateEntryCalculation(entry.id, e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, entry.id)}
-                  placeholder="0 atau 50000+4000-20%"
-                  className={balanceErrors.has(entry.id) ? "border-red-500" : ""}
-                />
-                {showCalculation && (
-                  <div className="p-2 bg-accent rounded-md">
-                    <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
-                    <p className="text-primary">{formatCurrency(entry.calculatedAmount!)}</p>
+                        </div>
+                        {!isExpanded && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {formatCurrency(finalAmount)} • {getPocketName()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {entries.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeEntry(entry.id);
+                        }}
+                        className="shrink-0 ml-2"
+                      >
+                        <X className="size-4 text-destructive" />
+                      </Button>
+                    )}
                   </div>
-                )}
-                {/* Balance Error Message */}
-                {balanceErrors.has(entry.id) && (
-                  <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2 duration-200">
-                    <span className="text-red-500 text-lg flex-shrink-0">⛔️</span>
-                    <p className="text-sm text-red-500 leading-relaxed">{balanceErrors.get(entry.id)}</p>
-                  </div>
-                )}
-              </div>
+                </CollapsibleTrigger>
 
-              {pockets.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Ambil dari Kantong</Label>
-                  <Select 
-                    value={entry.pocketId} 
-                    onValueChange={(value) => updateEntryField(entry.id, 'pocketId', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {pockets.map(pocket => {
-                        const balance = balances?.get(pocket.id);
-                        return (
-                          <SelectItem key={pocket.id} value={pocket.id}>
-                            <div className="flex items-center justify-between w-full gap-4">
-                              <span>{pocket.name}</span>
-                              {balance && (
-                                <span className="text-xs text-muted-foreground">
-                                  {formatCurrency(balance.availableBalance)}
-                                </span>
-                              )}
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                  {balances && balances.get(entry.pocketId) && (
-                    <p className="text-xs text-muted-foreground">
-                      Saldo tersedia: {formatCurrency(balances.get(entry.pocketId)!.availableBalance)}
-                    </p>
-                  )}
-                </div>
-              )}
-            </Card>
+                <CollapsibleContent>
+                  <div className="px-4 pb-[16px] pt-[4px] space-y-3 pr-[16px] pl-[16px]">
+                    <div className="space-y-2">
+                      <Label>Nama (Opsional)</Label>
+                      <Input
+                        value={entry.name}
+                        onChange={(e) => updateEntryField(entry.id, 'name', e.target.value)}
+                        onKeyPress={(e) => handleKeyPress(e, entry.id)}
+                        onFocus={() => handleNameFocus(entry.id)}
+                        onBlur={handleNameBlur}
+                        placeholder="Kosongkan untuk otomatis menggunakan tanggal"
+                      />
+                      
+                      {/* Smart Suggestions - only show for focused entry */}
+                      {showSuggestions && focusedEntryId === entry.id && (
+                        <SmartSuggestions
+                          suggestions={filterSuggestions(suggestions, entry.name)}
+                          visible={showSuggestions && focusedEntryId === entry.id}
+                          onSelect={handleSuggestionSelect}
+                          onClose={() => setShowSuggestions(false)}
+                          filterQuery={entry.name}
+                        />
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Kategori (Opsional)</Label>
+                      <Select 
+                        value={entry.category || ""} 
+                        onValueChange={(value) => updateEntryField(entry.id, 'category', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih kategori" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allCategories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              <span className="flex items-center gap-2">
+                                <span>{cat.emoji}</span>
+                                <span>{cat.label}</span>
+                                {cat.isCustom && (
+                                  <span className="text-xs text-muted-foreground">(Custom)</span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Nominal</Label>
+                      <Input
+                        type="text"
+                        value={entry.amount}
+                        onChange={(e) => updateEntryCalculation(entry.id, e.target.value)}
+                        onKeyPress={(e) => handleKeyPress(e, entry.id)}
+                        placeholder="0 atau 50000+4000-20%"
+                        className={balanceErrors.has(entry.id) ? "border-red-500" : ""}
+                      />
+                      {showCalculation && (
+                        <div className="p-2 bg-accent rounded-md">
+                          <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
+                          <p className="text-primary">{formatCurrency(entry.calculatedAmount!)}</p>
+                        </div>
+                      )}
+                      {/* Balance Error Message */}
+                      {balanceErrors.has(entry.id) && (
+                        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-in fade-in slide-in-from-top-2 duration-200">
+                          <span className="text-red-500 text-lg flex-shrink-0">⛔️</span>
+                          <p className="text-sm text-red-500 leading-relaxed">{balanceErrors.get(entry.id)}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {pockets.length > 0 && (
+                      <div className="space-y-2">
+                        <Label>Ambil dari Kantong</Label>
+                        <Select 
+                          value={entry.pocketId} 
+                          onValueChange={(value) => updateEntryField(entry.id, 'pocketId', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {pockets.map(pocket => {
+                              const balance = balances?.get(pocket.id);
+                              return (
+                                <SelectItem key={pocket.id} value={pocket.id}>
+                                  <div className="flex items-center justify-between w-full gap-4">
+                                    <span>{pocket.name}</span>
+                                    {balance && (
+                                      <span className="text-xs text-muted-foreground">
+                                        {formatCurrency(balance.availableBalance)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {balances && balances.get(entry.pocketId) && (
+                          <p className="text-xs text-muted-foreground">
+                            Saldo tersedia: {formatCurrency(balances.get(entry.pocketId)!.availableBalance)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
           );
         })}
 
@@ -803,32 +942,46 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
       {templateItems.length > 0 && (
         <div className="space-y-2">
           <Label htmlFor="expenseTemplateItems">Item Template</Label>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {templateItems.map((item, index) => (
-              <div key={index} className="flex space-x-2">
-                <Input
-                  type="text"
-                  value={item.name}
-                  onChange={(e) => handleTemplateItemChange(index, "name", e.target.value)}
-                  placeholder="Nama Item"
-                  className="flex-1"
-                />
+              <div key={index} className="space-y-2 p-3 border border-border rounded-md bg-muted/30">
+                <div className="flex space-x-2">
+                  <Input
+                    type="text"
+                    value={item.name}
+                    onChange={(e) => handleTemplateItemChange(index, "name", e.target.value)}
+                    placeholder="Nama Item"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleRemoveTemplateItem(index)}
+                    disabled={templateItems.length === 1}
+                    className="flex-shrink-0"
+                  >
+                    <Trash2 className="size-4 text-destructive" />
+                  </Button>
+                </div>
                 <Input
                   type="text"
                   value={item.amount.toString()}
                   onChange={(e) => handleTemplateItemChange(index, "amount", e.target.value)}
                   placeholder="Nominal"
-                  className="flex-1"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemoveTemplateItem(index)}
-                  disabled={templateItems.length === 1}
+                <select
+                  value={item.category || ''}
+                  onChange={(e) => handleTemplateItemChange(index, "category", e.target.value || undefined)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <Trash2 className="size-4 text-destructive" />
-                </Button>
+                  <option value="">Pilih Kategori (Opsional)</option>
+                  {allCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
             ))}
           </div>

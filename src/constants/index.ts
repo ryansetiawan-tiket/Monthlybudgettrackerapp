@@ -141,6 +141,33 @@ export const EXPENSE_CATEGORIES = [
   { value: 'other', label: 'Lainnya', emoji: '📦' }
 ] as const;
 
+/**
+ * 🔧 BACKWARD COMPATIBILITY MAP
+ * Maps old numeric category IDs to new string-based category keys
+ * 
+ * CONTEXT: Oktober 2025 data uses numeric IDs (0, 1, 2, etc.)
+ * November 2025+ uses string keys ('food', 'transport', etc.)
+ * 
+ * This map ensures MoM (Month-over-Month) calculations work correctly
+ * when comparing old and new data formats.
+ * 
+ * @see CategoryBreakdown.tsx - Uses this for MoM category matching
+ */
+export const LEGACY_CATEGORY_ID_MAP: Record<string, string> = {
+  // Old ID → New Key
+  '0': 'food',           // Makanan
+  '1': 'transport',      // Transportasi
+  '2': 'savings',        // Tabungan
+  '3': 'bills',          // Tagihan
+  '4': 'health',         // Kesehatan
+  '5': 'loan',           // Pinjaman
+  '6': 'family',         // Keluarga
+  '7': 'entertainment',  // Hiburan
+  '8': 'installment',    // Cicilan
+  '9': 'shopping',       // Belanja
+  '10': 'other',         // Lainnya
+} as const;
+
 // Animation Durations (in ms)
 export const ANIMATION = {
   FAST: 150,

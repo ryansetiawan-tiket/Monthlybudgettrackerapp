@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, Eye, EyeOff, ArrowRight, ArrowLeft, DollarSign, Minus, Lock, Unlock, BarChart3, Settings, MoreVertical, ListChecks, Info } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, ArrowRight, ArrowLeft, DollarSign, Minus, BarChart3, Settings, MoreVertical, ListChecks, Info, Filter, FileText } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,7 +37,7 @@ import { getAllCategories } from "../utils/categoryManager";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { formatCurrency } from "../utils/currency";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
-import { formatDateSafe } from "../utils/date-helpers";
+import { formatDateSafe, getLocalDateFromISO } from "../utils/date-helpers";
 import {
   Tooltip,
   TooltipContent,
@@ -46,10 +46,14 @@ import {
 } from "./ui/tooltip";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
+import SimulationSandbox from "./SimulationSandbox";
+import { AdvancedFilterDrawer } from "./AdvancedFilterDrawer";
+import { projectId, publicAnonKey } from "../utils/supabase/info";
 
 interface ExpenseItem {
   name: string;
   amount: number;
+  category?: string; // Per-item category support
 }
 
 interface Expense {
@@ -99,11 +103,7 @@ interface ExpenseListProps {
   onEditExpense: (id: string, expense: Omit<Expense, 'id'>) => void;
   onBulkDeleteExpenses: (ids: string[]) => Promise<void>;
   onBulkUpdateCategory?: (ids: string[], category: string) => Promise<void>;
-  excludedExpenseIds?: Set<string>;
-  onExcludedIdsChange?: (ids: Set<string>) => void;
   onMoveToIncome?: (expense: Expense) => void;
-  isExcludeLocked?: boolean;
-  onToggleExcludeLock?: () => void;
   pockets?: Array<{id: string; name: string}>;
   balances?: PocketBalance[];
   categoryFilter?: Set<import('../types').ExpenseCategory>; // Phase 7
@@ -124,12 +124,17 @@ interface ExpenseListProps {
   }) => void;
   globalDeduction?: number;
   onUpdateGlobalDeduction?: (deduction: number) => void;
-  excludedIncomeIds?: Set<string>;
-  onExcludedIncomeIdsChange?: (ids: Set<string>) => void;
-  isDeductionExcluded?: boolean;
-  onDeductionExcludedChange?: (excluded: boolean) => void;
   onOpenCategoryManager?: () => void; // Phase 8: Open CategoryManager
   onOpenAddTransaction?: () => void; // Desktop transaction entry
+  onOpenTemplateManager?: () => void; // Desktop template manager
+  // Budget-related props (for SimulationSandbox)
+  initialBudget?: number;
+  // 🏗️ ARCHITECTURE FIX: NEW - Carry-over breakdown props
+  carryOverAssets?: number;
+  carryOverLiabilities?: number;
+  // Month/Year for CategoryBreakdown MoM calculation
+  selectedMonth?: number;
+  selectedYear?: number;
 }
 
 function ExpenseListComponent({ 
@@ -138,11 +143,7 @@ function ExpenseListComponent({
   onEditExpense, 
   onBulkDeleteExpenses, 
   onBulkUpdateCategory, 
-  excludedExpenseIds: excludedExpenseIdsProp, 
-  onExcludedIdsChange, 
   onMoveToIncome, 
-  isExcludeLocked = false, 
-  onToggleExcludeLock, 
   pockets = [],
   balances = [],
   categoryFilter = new Set(), 
@@ -153,12 +154,17 @@ function ExpenseListComponent({
   onUpdateIncome,
   globalDeduction = 0,
   onUpdateGlobalDeduction,
-  excludedIncomeIds: excludedIncomeIdsProp,
-  onExcludedIncomeIdsChange,
-  isDeductionExcluded = false,
-  onDeductionExcludedChange,
   onOpenCategoryManager,
-  onOpenAddTransaction
+  onOpenAddTransaction,
+  onOpenTemplateManager,
+  // Budget props
+  initialBudget = 0,
+  // 🏗️ ARCHITECTURE FIX: NEW - Carry-over breakdown props
+  carryOverAssets = 0,
+  carryOverLiabilities = 0,
+  // Month/Year props
+  selectedMonth,
+  selectedYear
 }: ExpenseListProps) {
   const isMobile = useIsMobile();
   
@@ -171,21 +177,83 @@ function ExpenseListComponent({
     return map;
   }, [balances]);
   
-  // 🔍 DEBUG: Log when expenses prop changes
-  useEffect(() => {
-    console.log('[ExpenseList] Expenses prop updated, count:', expenses.length);
-    expenses.forEach(e => {
-      if (e.category) {
-        console.log(`  - ${e.name}: category = ${e.category}`);
-      }
-    });
-  }, [expenses]);
+  const monthKey = useMemo(() => {
+    if (selectedMonth && selectedYear) {
+      const key = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+      return key;
+    }
+    return '';
+  }, [selectedMonth, selectedYear]);
   
   // Phase 8: Get custom category settings
   const { settings } = useCategorySettings();
   const allCategories = useMemo(() => {
     return getAllCategories(settings);
   }, [settings]);
+  
+  // ✨ NEW: Fetch templates for emoji lookup (so we always show latest template emoji)
+  const [templates, setTemplates] = useState<Array<{id: string; name: string; emoji?: string; color?: string}>>([]);
+  
+  useEffect(() => {
+    if (!monthKey) return;
+    
+    const fetchTemplates = async () => {
+      try {
+        const response = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-3adbeaf1/templates`,
+          {
+            headers: {
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          setTemplates(data || []);
+        }
+      } catch (error) {
+        console.error('[ExpenseList] Failed to fetch templates:', error);
+      }
+    };
+    
+    fetchTemplates();
+  }, [monthKey]);
+  
+  // Create template lookup map for O(1) emoji access
+  const templateMap = useMemo(() => {
+    const map = new Map<string, {emoji?: string; color?: string; name: string}>();
+    templates.forEach(t => {
+      map.set(t.id, { emoji: t.emoji, color: t.color, name: t.name });
+    });
+    return map;
+  }, [templates]);
+  
+  // ✨ Helper: Get display emoji (template emoji takes priority over expense emoji)
+  const getDisplayEmoji = useCallback((expense: Expense): string | undefined => {
+    // If expense has groupId, try to get emoji from template (always fresh/latest)
+    if (expense.groupId) {
+      const template = templateMap.get(expense.groupId);
+      if (template?.emoji) {
+        return template.emoji;
+      }
+    }
+    // Fallback to expense's stored emoji (might be outdated)
+    return (expense as any).emoji;
+  }, [templateMap]);
+  
+  // Get unique income sources
+  const allIncomeSources = useMemo(() => {
+    const sourceMap = new Map<string, number>();
+    incomes.forEach(income => {
+      const count = sourceMap.get(income.name) || 0;
+      sourceMap.set(income.name, count + 1);
+    });
+    return Array.from(sourceMap.entries()).map(([name, count]) => ({
+      name,
+      count
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [incomes]);
   
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -207,6 +275,7 @@ function ExpenseListComponent({
     category: undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [matchedCategories, setMatchedCategories] = useState<Set<string>>(new Set());
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [upcomingExpanded, setUpcomingExpanded] = useState(true);
@@ -230,11 +299,40 @@ function ExpenseListComponent({
   // New states for Figma redesign
   const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
   
-  // Exclude from calculation states for income
-  const excludedIncomeIds = excludedIncomeIdsProp || new Set<string>();
   const [showCategoryDrawer, setShowCategoryDrawer] = useState(false);
   const [showGlobalDeductionInput, setShowGlobalDeductionInput] = useState(false);
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<Set<import('../types').ExpenseCategory>>(new Set());
+  
+  // Phase 2: Smart Simulation Sandbox state
+  const [showSandbox, setShowSandbox] = useState(false);
+  const [sandboxContext, setSandboxContext] = useState<'all' | 'expense' | 'income'>('all');
+  
+  // Advanced Filter state
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [selectedCategoryFilters, setSelectedCategoryFilters] = useState<Set<string>>(new Set());
+  const [selectedPocketFilters, setSelectedPocketFilters] = useState<Set<string>>(new Set());
+  const [selectedIncomeSourceFilters, setSelectedIncomeSourceFilters] = useState<Set<string>>(new Set());
+  const [activeFilters, setActiveFilters] = useState<{
+    categories: Set<string>;
+    pockets: Set<string>;
+    incomeSources: Set<string>;
+  }>({
+    categories: new Set(),
+    pockets: new Set(),
+    incomeSources: new Set(),
+  });
+  
+  // Register simulation sandbox for back button handling
+  useDialogRegistration(
+    showSandbox,
+    (open) => {
+      if (!open) {
+        setShowSandbox(false);
+      }
+    },
+    DialogPriority.HIGH,
+    'simulation-sandbox'
+  );
   
   // Income editing states
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
@@ -290,18 +388,6 @@ function ExpenseListComponent({
       return newSet;
     });
   };
-  
-  // Exclude from calculation states - use prop or default to empty Set
-  const excludedExpenseIds = excludedExpenseIdsProp || new Set<string>();
-
-  // 🔍 DEBUG: Log expenses on mount and updates
-  useEffect(() => {
-    console.log('🔍 [ExpenseList] Expenses received, count:', expenses.length);
-    console.log('🔍 [ExpenseList] Full expenses data:', JSON.stringify(expenses.slice(0, 5), null, 2));
-    expenses.slice(0, 10).forEach((exp, idx) => {
-      console.log(`🔍 [ExpenseList] Expense ${idx}: name="${exp.name}" | category="${exp.category}" | has category field: ${exp.hasOwnProperty('category')}`);
-    });
-  }, [expenses]);
 
   // Helper function to get day name
   const getDayName = (dateString: string): string => {
@@ -323,39 +409,53 @@ function ExpenseListComponent({
     return date.getDate().toString();
   };
 
-  // Extract all unique names, day names, and dates from expenses
+  // Extract all unique names, day names, dates, and categories (CONTEXTUAL to active tab)
   const allNames = useMemo(() => {
     const namesSet = new Set<string>();
     const dayNamesSet = new Set<string>();
     const datesSet = new Set<string>();
+    const categoriesSet = new Set<string>();
     
-    expenses.forEach(expense => {
-      // Add expense name
-      namesSet.add(expense.name);
-      
-      // Add day name
-      dayNamesSet.add(getDayName(expense.date));
-      
-      // Add date number
-      datesSet.add(getDateNumber(expense.date));
-      
-      // Add item names
-      if (expense.items && expense.items.length > 0) {
-        expense.items.forEach(item => {
-          namesSet.add(item.name);
-        });
-      }
-    });
+    // ✅ CONTEXTUAL: Filter data based on active tab
+    if (activeTab === 'expense') {
+      // Search in expenses only
+      expenses.filter(e => !e.fromIncome).forEach(expense => {
+        namesSet.add(expense.name);
+        dayNamesSet.add(getDayName(expense.date));
+        datesSet.add(getDateNumber(expense.date));
+        
+        if (expense.items && expense.items.length > 0) {
+          expense.items.forEach(item => {
+            namesSet.add(item.name);
+          });
+        }
+      });
+    } else {
+      // Search in incomes only
+      incomes.forEach(income => {
+        namesSet.add(income.name);
+        dayNamesSet.add(getDayName(income.date));
+        datesSet.add(getDateNumber(income.date));
+      });
+    }
+    
+    // ✅ KATEGORI DETECTION: Add all category names for expenses tab
+    if (activeTab === 'expense') {
+      allCategories.forEach(cat => {
+        categoriesSet.add(getCategoryLabel(cat.id as any, settings));
+      });
+    }
     
     // Combine all unique values
     const allSuggestions = [
       ...Array.from(namesSet),
       ...Array.from(dayNamesSet),
-      ...Array.from(datesSet)
+      ...Array.from(datesSet),
+      ...Array.from(categoriesSet)
     ];
     
     return allSuggestions.sort();
-  }, [expenses]);
+  }, [expenses, incomes, activeTab, allCategories, settings]);
 
   // Filter suggestions based on search query
   const suggestions = useMemo(() => {
@@ -387,6 +487,30 @@ function ExpenseListComponent({
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     setShowSuggestions(true);
+    setSelectedSuggestionIndex(-1);
+    
+    // ✅ KATEGORI DETECTION: Check if query matches any category
+    if (value.trim() && activeTab === 'expense') {
+      const lowerQuery = value.toLowerCase();
+      const matched = new Set<string>();
+      
+      allCategories.forEach(cat => {
+        const categoryLabel = getCategoryLabel(cat.id as any, settings);
+        if (categoryLabel.toLowerCase().includes(lowerQuery)) {
+          matched.add(cat.id);
+        }
+      });
+      
+      setMatchedCategories(matched);
+    } else {
+      setMatchedCategories(new Set());
+    }
+  };
+  
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setMatchedCategories(new Set());
+    setShowSuggestions(false);
     setSelectedSuggestionIndex(-1);
   };
 
@@ -528,6 +652,95 @@ function ExpenseListComponent({
     setSelectedIncomeIds(new Set());
   }, []);
 
+  // Phase 2: Handler to open sandbox with smart context
+  const handleOpenSandbox = () => {
+    // Map activeTab to sandbox context ('expense' or 'income' → same, otherwise 'all')
+    const context = activeTab === 'expense' || activeTab === 'income' ? activeTab : 'all';
+    setSandboxContext(context);
+    setShowSandbox(true);
+  };
+
+  // Advanced Filter handlers
+  const toggleCategoryFilter = (categoryId: string) => {
+    setSelectedCategoryFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryId)) {
+        newSet.delete(categoryId);
+      } else {
+        newSet.add(categoryId);
+      }
+      return newSet;
+    });
+  };
+
+  const togglePocketFilter = (pocketId: string) => {
+    setSelectedPocketFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(pocketId)) {
+        newSet.delete(pocketId);
+      } else {
+        newSet.add(pocketId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleIncomeSourceFilter = (sourceName: string) => {
+    setSelectedIncomeSourceFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sourceName)) {
+        newSet.delete(sourceName);
+      } else {
+        newSet.add(sourceName);
+      }
+      return newSet;
+    });
+  };
+
+  const applyFilters = () => {
+    // Copy temporary selections to active filters
+    setActiveFilters({
+      categories: new Set(selectedCategoryFilters),
+      pockets: new Set(selectedPocketFilters),
+      incomeSources: new Set(selectedIncomeSourceFilters),
+    });
+    
+    // Clear the pie chart category filter if advanced filter is active
+    if (selectedCategoryFilters.size > 0) {
+      setActiveCategoryFilter(new Set());
+    }
+    
+    // Close drawer
+    setIsFilterDrawerOpen(false);
+    
+    // Show success toast
+    const filterCount = selectedCategoryFilters.size + selectedPocketFilters.size + selectedIncomeSourceFilters.size;
+    if (filterCount > 0) {
+      toast.success(`✅ ${filterCount} filter diterapkan`);
+    }
+  };
+
+  const resetFilters = () => {
+    // Clear all selections
+    setSelectedCategoryFilters(new Set());
+    setSelectedPocketFilters(new Set());
+    setSelectedIncomeSourceFilters(new Set());
+    setActiveFilters({
+      categories: new Set(),
+      pockets: new Set(),
+      incomeSources: new Set(),
+    });
+    
+    // Clear existing category filter badge
+    setActiveCategoryFilter(new Set());
+    
+    // Close drawer
+    setIsFilterDrawerOpen(false);
+    
+    // Show toast
+    toast.info('🔄 Filter direset');
+  };
+
   const handleToggleSelectExpense = (id: string) => {
     setSelectedExpenseIds(prev => {
       const newSet = new Set(prev);
@@ -586,34 +799,9 @@ function ExpenseListComponent({
     }
   };
 
-  // Toggle exclude expense from calculation
-  const handleToggleExclude = useCallback((id: string) => {
-    const expense = expenses.find(exp => exp.id === id);
-    const wasExcluded = excludedExpenseIds.has(id);
-    const newSet = new Set(excludedExpenseIds);
-    
-    if (wasExcluded) {
-      newSet.delete(id);
-      if (expense) {
-        toast.success(`${expense.name} dimasukkan kembali dalam hitungan`);
-      }
-    } else {
-      newSet.add(id);
-      if (expense) {
-        toast.info(`${expense.name} dikecualikan dari hitungan`);
-      }
-    }
-    
-    // Notify parent about the change
-    if (onExcludedIdsChange) {
-      onExcludedIdsChange(newSet);
-    }
-  }, [excludedExpenseIds, onExcludedIdsChange, expenses]);
-
-  // Calculate totals excluding excluded items
+  // Calculate totals
   // Items from income (fromIncome: true) subtract from expenses
   const totalExpenses = expenses
-    .filter(expense => !excludedExpenseIds.has(expense.id))
     .reduce((sum, expense) => {
       if (expense.fromIncome) {
         return sum - expense.amount;
@@ -623,22 +811,18 @@ function ExpenseListComponent({
 
   // Calculate income totals
   const totalGrossIncome = incomes
-    .filter(income => !excludedIncomeIds.has(income.id))
     .reduce((sum, income) => sum + income.amountIDR, 0);
   
   const totalIndividualDeductions = incomes
-    .filter(income => !excludedIncomeIds.has(income.id))
     .reduce((sum, income) => sum + (income.deduction || 0), 0);
   
   const subtotalAfterIndividualDeductions = totalGrossIncome - totalIndividualDeductions;
   
-  const effectiveGlobalDeduction = isDeductionExcluded ? 0 : (globalDeduction || 0);
-  
-  const totalNetIncome = subtotalAfterIndividualDeductions - effectiveGlobalDeduction;
+  const totalNetIncome = subtotalAfterIndividualDeductions - (globalDeduction || 0);
 
-  // Fuzzy search function - checks if expense name, items, day name, or date matches
-  const fuzzyMatch = (expense: Expense, query: string): boolean => {
-    if (!query) return true;
+  // ✅ IMPROVED: Fuzzy search for expenses - includes category matching and ALL history
+  const fuzzyMatchExpense = (expense: Expense, query: string): boolean => {
+    if (!query || !query.trim()) return true;
     
     const lowerQuery = query.toLowerCase();
     
@@ -667,10 +851,56 @@ function ExpenseListComponent({
       return true;
     }
     
+    // ✅ NEW: Check category name
+    if (expense.category) {
+      const categoryLabel = getCategoryLabel(expense.category as any, settings);
+      if (categoryLabel.toLowerCase().includes(lowerQuery)) {
+        return true;
+      }
+    }
+    
+    // ✅ NEW: Check pocket name
+    const pocketName = getPocketName(expense.pocketId);
+    if (pocketName.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+    
+    return false;
+  };
+  
+  // ✅ NEW: Fuzzy search for incomes - includes ALL history
+  const fuzzyMatchIncome = (income: AdditionalIncome, query: string): boolean => {
+    if (!query || !query.trim()) return true;
+    
+    const lowerQuery = query.toLowerCase();
+    
+    // Check income name
+    if (income.name.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+    
+    // Check day name
+    const dayName = getDayName(income.date);
+    if (dayName.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+    
+    // Check date number
+    const dateNumber = getDateNumber(income.date);
+    if (dateNumber.includes(lowerQuery)) {
+      return true;
+    }
+    
+    // Check pocket name
+    const pocketName = getPocketName(income.pocketId);
+    if (pocketName.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+    
     return false;
   };
 
-  // Phase 7: Filter by category first, then by tab (expense/income)
+  // Phase 7: Filter by category first, then by tab (expense/income), then by date
   const categoryFilteredExpenses = useMemo(() => {
     let filtered = expenses;
     
@@ -683,42 +913,122 @@ function ExpenseListComponent({
       }
     });
     
-    // Then filter by category if needed (combine categoryFilter from props and activeCategoryFilter from breakdown)
-    const combinedFilter = new Set([...Array.from(categoryFilter), ...Array.from(activeCategoryFilter)]);
-    if (combinedFilter.size > 0) {
+    // ✅ NEW: Advanced Category Filter (multi-select) - takes priority
+    if (activeFilters.categories.size > 0) {
       filtered = filtered.filter(expense => {
-        const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
-        return combinedFilter.has(expCategory);
+        // ✅ Support filtering by item-level categories (template expenses)
+        if (expense.items && expense.items.length > 0) {
+          // Check if ANY item matches the filter
+          return expense.items.some(item => {
+            const itemCategory = ((item as any).category || 'other') as string;
+            return activeFilters.categories.has(itemCategory);
+          });
+        } else {
+          // Check expense-level category (regular expenses)
+          const expCategory = (expense.category || 'other') as string;
+          return activeFilters.categories.has(expCategory);
+        }
+      });
+    }
+    // Legacy: Then filter by category if needed (combine categoryFilter from props and activeCategoryFilter from breakdown)
+    // Only apply if advanced filter is NOT active
+    else {
+      const combinedFilter = new Set([...Array.from(categoryFilter), ...Array.from(activeCategoryFilter)]);
+      if (combinedFilter.size > 0) {
+        filtered = filtered.filter(expense => {
+          // ✅ NEW: Support filtering by item-level categories (template expenses)
+          if (expense.items && expense.items.length > 0) {
+            // Check if ANY item matches the filter
+            return expense.items.some(item => {
+              const itemCategory = ((item as any).category || 'other') as import('../types').ExpenseCategory;
+              return combinedFilter.has(itemCategory);
+            });
+          } else {
+            // Check expense-level category (regular expenses)
+            const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
+            return combinedFilter.has(expCategory);
+          }
+        });
+      }
+    }
+    
+    // ✅ NEW: Advanced Pocket Filter (multi-select, expense only)
+    if (activeFilters.pockets.size > 0 && activeTab === 'expense') {
+      filtered = filtered.filter(expense => {
+        return expense.pocketId && activeFilters.pockets.has(expense.pocketId);
       });
     }
     
     return filtered;
-  }, [expenses, categoryFilter, activeCategoryFilter, activeTab]);
+  }, [expenses, categoryFilter, activeCategoryFilter, activeTab, activeFilters]);
 
-  // Sort and filter expenses
+  // ✅ IMPROVED: Sort and filter expenses - no date restriction, with category filter
   const sortedAndFilteredExpenses = useMemo(() => {
-    return [...categoryFilteredExpenses]
-      .sort((a, b) => {
-        // First sort by date
-        const dateCompare = sortOrder === 'asc' 
-          ? new Date(a.date).getTime() - new Date(b.date).getTime() 
-          : new Date(b.date).getTime() - new Date(a.date).getTime();
+    let filtered = [...categoryFilteredExpenses];
+    
+    // ✅ NEW: If category detected AND user is searching, show all from that category OR match search
+    if (matchedCategories.size > 0 && activeTab === 'expense' && searchQuery.trim()) {
+      filtered = filtered.filter(expense => {
+        // ✅ Support item-level categories (template expenses)
+        let categoryMatches = false;
         
-        // If dates are the same, prioritize template expenses (with items)
-        if (dateCompare === 0) {
-          const aHasItems = a.items && a.items.length > 0;
-          const bHasItems = b.items && b.items.length > 0;
-          
-          // Template expenses (with items) come first
-          if (aHasItems && !bHasItems) return -1;
-          if (!aHasItems && bHasItems) return 1;
-          return 0;
+        if (expense.items && expense.items.length > 0) {
+          // Check if ANY item's category matches
+          categoryMatches = expense.items.some(item => {
+            const itemCategory = ((item as any).category || 'other') as import('../types').ExpenseCategory;
+            return matchedCategories.has(itemCategory);
+          });
+        } else {
+          // Check expense-level category
+          const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
+          categoryMatches = matchedCategories.has(expCategory);
         }
         
-        return dateCompare;
-      })
-      .filter((expense) => fuzzyMatch(expense, searchQuery));
-  }, [categoryFilteredExpenses, sortOrder, searchQuery]);
+        // Show if category matches OR if search text matches
+        return categoryMatches || fuzzyMatchExpense(expense, searchQuery);
+      });
+    } else {
+      // Regular search filter
+      filtered = filtered.filter((expense) => fuzzyMatchExpense(expense, searchQuery));
+    }
+    
+    // Sort
+    return filtered.sort((a, b) => {
+      // First sort by date
+      const dateCompare = sortOrder === 'asc' 
+        ? new Date(a.date).getTime() - new Date(b.date).getTime() 
+        : new Date(b.date).getTime() - new Date(a.date).getTime();
+      
+      // If dates are the same, prioritize template expenses (with items)
+      if (dateCompare === 0) {
+        const aHasItems = a.items && a.items.length > 0;
+        const bHasItems = b.items && b.items.length > 0;
+        
+        // Template expenses (with items) come first
+        if (aHasItems && !bHasItems) return -1;
+        if (!aHasItems && bHasItems) return 1;
+        return 0;
+      }
+      
+      return dateCompare;
+    });
+  }, [categoryFilteredExpenses, sortOrder, searchQuery, matchedCategories, activeTab]);
+
+  // ✅ NEW: Filter and sort incomes (with income source filter)
+  const filteredAndSortedIncomes = useMemo(() => {
+    let filtered = [...incomes];
+    
+    // Apply income source filter
+    if (activeFilters.incomeSources.size > 0) {
+      filtered = filtered.filter(income => activeFilters.incomeSources.has(income.name));
+    }
+    
+    // Apply search filter
+    filtered = filtered.filter(income => fuzzyMatchIncome(income, searchQuery));
+    
+    // Sort by date (newest first by default)
+    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [incomes, activeFilters.incomeSources, searchQuery]);
 
   // Check if all filtered expenses are selected
   const isAllSelected = useMemo(() => {
@@ -809,18 +1119,6 @@ function ExpenseListComponent({
     }
   }, [expenses, isBulkSelectMode, selectedExpenseIds]);
 
-  // Clean up excluded IDs when expenses change (remove deleted expenses from excluded list)
-  useEffect(() => {
-    const validExcludedIds = new Set(
-      Array.from(excludedExpenseIds).filter(id => 
-        expenses.some(exp => exp.id === id)
-      )
-    );
-    if (validExcludedIds.size !== excludedExpenseIds.size && onExcludedIdsChange) {
-      onExcludedIdsChange(validExcludedIds);
-    }
-  }, [expenses, excludedExpenseIds, onExcludedIdsChange]);
-
   // Keyboard support: Escape to exit bulk mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -864,8 +1162,8 @@ function ExpenseListComponent({
     const expense = expenses.find(e => e.id === id);
     if (expense) {
       setEditingExpenseId(id);
-      // Extract date only (YYYY-MM-DD) from timestamp to display correctly in date input
-      const dateOnly = expense.date ? expense.date.split('T')[0] : expense.date;
+      // ✅ FIX: Extract LOCAL date (not UTC) for timezone consistency
+      const dateOnly = expense.date ? getLocalDateFromISO(expense.date) : expense.date;
       setEditingExpense({ 
         name: expense.name, 
         amount: expense.amount, 
@@ -899,9 +1197,10 @@ function ExpenseListComponent({
         finalAmount = editingExpense.items.reduce((sum, item) => sum + item.amount, 0);
       }
       
-      // 🔧 FIX: Keep date in YYYY-MM-DD format (no timezone conversion)
-      // Extract date part only if it has timestamp
-      const finalDate = editingExpense.date?.split('T')[0] || editingExpense.date;
+      // ✅ FIX: Keep date in YYYY-MM-DD format (use local date, not UTC)
+      const finalDate = editingExpense.date?.includes('T')
+        ? getLocalDateFromISO(editingExpense.date)
+        : editingExpense.date;
       
       console.log('[ExpenseList] Saving edit - Category:', editingExpense.category);
       
@@ -978,7 +1277,7 @@ function ExpenseListComponent({
     }
   };
 
-  const handleUpdateItem = (index: number, field: 'name' | 'amount', value: string | number) => {
+  const handleUpdateItem = (index: number, field: 'name' | 'amount' | 'category', value: string | number) => {
     const newItems = [...(editingExpense.items || [])];
     if (field === 'amount' && typeof value === 'string') {
       // Just update the input string, don't evaluate yet
@@ -1007,7 +1306,7 @@ function ExpenseListComponent({
     const newIndex = (editingExpense.items || []).length;
     setEditingExpense({ 
       ...editingExpense, 
-      items: [...(editingExpense.items || []), { name: '', amount: 0 }] 
+      items: [...(editingExpense.items || []), { name: '', amount: 0, category: undefined }] 
     });
     setItemAmountInputs(prev => ({ ...prev, [newIndex]: '0' }));
   };
@@ -1038,16 +1337,22 @@ function ExpenseListComponent({
     const DEBUG_GROUPING = false;
     
     expenses.forEach(expense => {
-      // Always group by date (YYYY-MM-DD only), not by groupId
-      // This ensures all expenses on the same date are grouped together
-      const dateOnly = expense.date.split('T')[0]; // Extract date part only
+      // ✅ FIX: Convert to LOCAL date, not UTC date!
+      // UTC: "2025-10-27T23:21:21.000Z" → split → "2025-10-27" (wrong for WIB!)
+      // Local: new Date() → getFullYear/Month/Date → "2025-10-28" (correct for WIB!)
+      const localDate = new Date(expense.date);
+      const year = localDate.getFullYear();
+      const month = String(localDate.getMonth() + 1).padStart(2, '0');
+      const day = String(localDate.getDate()).padStart(2, '0');
+      const dateOnly = `${year}-${month}-${day}`; // Local date in YYYY-MM-DD format
       const groupKey = dateOnly;
       
       if (DEBUG_GROUPING) {
         console.log('🔍 Grouping expense:', {
           name: expense.name,
           fullDate: expense.date,
-          dateOnly,
+          utcDateOnly: expense.date.split('T')[0],
+          localDateOnly: dateOnly,
           groupKey,
           pocketId: expense.pocketId,
           category: expense.category,
@@ -1071,6 +1376,13 @@ function ExpenseListComponent({
     return grouped;
   };
 
+  // ✅ NEW: Filter incomes with search (CONTEXTUAL for income tab)
+  const filteredIncomes = useMemo(() => {
+    if (activeTab !== 'income') return incomes;
+    
+    return incomes.filter((income) => fuzzyMatchIncome(income, searchQuery));
+  }, [incomes, searchQuery, activeTab]);
+
   // Split into upcoming and history
   const upcomingExpenses = sortedAndFilteredExpenses.filter(exp => !isPast(exp.date));
   const historyExpenses = sortedAndFilteredExpenses.filter(exp => isPast(exp.date));
@@ -1082,7 +1394,6 @@ function ExpenseListComponent({
   // Calculate subtotals (excluding excluded items)
   // Items from income (fromIncome: true) subtract from expenses
   const upcomingTotal = upcomingExpenses
-    .filter(expense => !excludedExpenseIds.has(expense.id))
     .reduce((sum, expense) => {
       if (expense.fromIncome) {
         return sum - expense.amount;
@@ -1090,7 +1401,6 @@ function ExpenseListComponent({
       return sum + expense.amount;
     }, 0);
   const historyTotal = historyExpenses
-    .filter(expense => !excludedExpenseIds.has(expense.id))
     .reduce((sum, expense) => {
       if (expense.fromIncome) {
         return sum - expense.amount;
@@ -1103,12 +1413,9 @@ function ExpenseListComponent({
     // ✨ REFACTOR V2: Always use static date header + simple list (no nested collapse)
     const dateExpenses = expenses;
     const actualDate = dateExpenses[0].date;
-    const hasExcludedInGroup = dateExpenses.some(exp => excludedExpenseIds.has(exp.id));
-    const allExcluded = dateExpenses.every(exp => excludedExpenseIds.has(exp.id));
 
-    // Calculate total for this group (excluding excluded items)
+    // Calculate total for this group
     const groupTotal = dateExpenses
-      .filter(exp => !excludedExpenseIds.has(exp.id))
       .reduce((sum, exp) => {
         if (exp.fromIncome) {
           return sum - exp.amount;
@@ -1118,17 +1425,25 @@ function ExpenseListComponent({
 
     return (
       <div key={`group-${groupKey}`} className="space-y-1">
-        {/* ✨ Static Date Header (no collapse, no card border) */}
-        <div className="py-2 px-1 flex items-center gap-2 border-b border-border">
-          {isToday(actualDate) && (
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
-          )}
-          <span className={`text-base font-semibold ${isWeekend(actualDate) ? "text-green-600" : "text-foreground"} ${allExcluded ? 'line-through opacity-50' : ''}`}>
-            {formatDateShort(actualDate)}
+        {/* ✨ Static Date Header with Total (hierarchy clear) */}
+        <div className="py-2 px-1 flex items-center justify-between gap-4 border-b border-border mb-2">
+          {/* Left: Date with indicator */}
+          <div className="flex items-center gap-2">
+            {isToday(actualDate) && (
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
+            )}
+            <span className={`text-base font-bold ${isWeekend(actualDate) ? "text-green-600" : "text-foreground"}`}>
+              {formatDateShort(actualDate)}
+            </span>
+          </div>
+          
+          {/* Right: Total Harian (subtle, gray) */}
+          <span className="text-sm font-semibold text-muted-foreground opacity-70">
+            {groupTotal > 0 ? '-' : '+'}{formatCurrency(Math.abs(groupTotal))}
           </span>
         </div>
 
-        {/* ✨ Simple List Items (no card styling, clean layout) */}
+        {/* ✨ Simple List Items (indented, clean layout) */}
         <div className="space-y-1">
           {dateExpenses.map(expense => renderIndividualExpenseInGroup(expense))}
         </div>
@@ -1138,18 +1453,16 @@ function ExpenseListComponent({
 
   // Render individual expense within a group
   const renderIndividualExpenseInGroup = (expense: Expense) => {
-    const isExcluded = excludedExpenseIds.has(expense.id);
-
     if (expense.items && expense.items.length > 0) {
       // Template expense with items
       const isItemExpanded = expandedItems.has(expense.id);
       return (
         <Collapsible key={expense.id} open={isItemExpanded} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-lg' : ''} ${isExcluded ? 'opacity-50' : ''}`}>
+          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-lg' : ''}`}>
             <CollapsibleTrigger asChild>
               <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
                 {/* Mobile: Compact layout with badge below */}
-                <div className="md:hidden p-2 pl-4">
+                <div className="md:hidden p-2 pl-6">
                   <div className="flex items-start justify-between gap-2">
                     {/* Left: Checkbox, Name area, Chevron */}
                     <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1162,9 +1475,34 @@ function ExpenseListComponent({
                         />
                       )}
                       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                        <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
-                          {expense.category && <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>}
-                          {!expense.category && <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>}
+                        <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
+                          {/* ✨ Template Emoji (priority: template > expense) */}
+                          {(() => {
+                            const templateEmoji = getDisplayEmoji(expense);
+                            if (templateEmoji) {
+                              return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
+                            }
+                            return null;
+                          })()}
+                          {/* Category display: Check both expense.category and expense.items[].category */}
+                          {/* ⚠️ SKIP category emoji if expense has template emoji (groupId) to avoid double emoji */}
+                          {!expense.groupId && (() => {
+                            // Single expense with category
+                            if (expense.category) {
+                              return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
+                            }
+                            // Template expense: check if items have categories
+                            if (expense.items && expense.items.length > 0) {
+                              const itemsWithCategories = expense.items.filter((item: any) => item.category);
+                              if (itemsWithCategories.length > 0) {
+                                // Show first item's category emoji (template uses first item's category as representative)
+                                const firstCategory = itemsWithCategories[0].category;
+                                return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
+                              }
+                            }
+                            // No category found
+                            return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
+                          })()}
                           {expense.name}
                         </p>
                         {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1180,9 +1518,9 @@ function ExpenseListComponent({
                       )}
                     </div>
 
-                    {/* Right: Amount and action buttons */}
-                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                    {/* Right: Amount and action buttons (forced right-aligned) */}
+                    <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                      <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
                         {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                       </p>
                       {!isBulkSelectMode && (
@@ -1198,19 +1536,6 @@ function ExpenseListComponent({
                               <ArrowRight className="size-3.5 text-muted-foreground" />
                             </Button>
                           )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleToggleExclude(expense.id)}
-                            title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                          >
-                            {isExcluded ? (
-                              <EyeOff className="size-3.5 text-muted-foreground" />
-                            ) : (
-                              <Eye className="size-3.5 text-muted-foreground" />
-                            )}
-                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -1246,7 +1571,7 @@ function ExpenseListComponent({
                 </div>
 
                 {/* Desktop: Keep original single-line layout */}
-                <div className="hidden md:flex items-center justify-between p-2 pl-4">
+                <div className="hidden md:flex items-center justify-between p-2 pl-6">
                   <div className="flex-1 flex items-center gap-2 min-w-0">
                     {isBulkSelectMode && (
                       <Checkbox
@@ -1255,9 +1580,34 @@ function ExpenseListComponent({
                         onClick={(e) => e.stopPropagation()}
                       />
                     )}
-                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''}`}>
-                      {expense.category && <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>}
-                      {!expense.category && <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>}
+                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'}`}>
+                      {/* ✨ Template Emoji (priority: template > expense) */}
+                      {(() => {
+                        const templateEmoji = getDisplayEmoji(expense);
+                        if (templateEmoji) {
+                          return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
+                        }
+                        return null;
+                      })()}
+                      {/* Category display: Check both expense.category and expense.items[].category */}
+                      {/* ⚠️ SKIP category emoji if expense has template emoji (groupId) to avoid double emoji */}
+                      {!expense.groupId && (() => {
+                        // Single expense with category
+                        if (expense.category) {
+                          return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
+                        }
+                        // Template expense: check if items have categories
+                        if (expense.items && expense.items.length > 0) {
+                          const itemsWithCategories = expense.items.filter((item: any) => item.category);
+                          if (itemsWithCategories.length > 0) {
+                            // Show first item's category emoji (template uses first item's category as representative)
+                            const firstCategory = itemsWithCategories[0].category;
+                            return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
+                          }
+                        }
+                        // No category found
+                        return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
+                      })()}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1271,8 +1621,8 @@ function ExpenseListComponent({
                       <ChevronDown className="size-3" />
                     )}
                   </div>
-                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="flex items-center gap-2 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                    <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
                       {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                     </p>
                     {!isBulkSelectMode && (
@@ -1289,19 +1639,6 @@ function ExpenseListComponent({
                             <ArrowRight className="size-3 text-green-600" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 pointer-events-auto"
-                          onClick={() => handleToggleExclude(expense.id)}
-                          title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                        >
-                          {isExcluded ? (
-                            <EyeOff className="size-3 text-muted-foreground" />
-                          ) : (
-                            <Eye className="size-3 text-muted-foreground" />
-                          )}
-                        </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -1339,7 +1676,7 @@ function ExpenseListComponent({
             <CollapsibleContent>
               <div className="px-3 pb-3 space-y-2 border-t pt-3 mt-2 md:px-2 md:pb-2 md:space-y-1 md:pt-1 md:mt-1">
                 {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className={`flex items-center gap-2 text-xs text-green-600 pl-8 md:pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="flex items-center gap-2 text-xs text-green-600 pl-8 md:pl-6 mb-1">
                     <DollarSign className="size-3" />
                     <span>
                       {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -1350,18 +1687,26 @@ function ExpenseListComponent({
                   </div>
                 )}
                 {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className={`text-xs text-muted-foreground pl-8 md:pl-6 mb-1 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="text-xs text-muted-foreground pl-8 md:pl-6 mb-1">
                     <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                   </div>
                 )}
-                {expense.items.map((item, index) => (
-                  <div key={index} className={`flex justify-between items-center text-sm md:text-xs pl-8 md:pl-6 py-1.5 md:py-0 rounded-lg md:rounded-none hover:bg-accent/30 md:hover:bg-transparent transition-colors ${isExcluded ? 'line-through' : ''}`}>
-                    <span className="text-muted-foreground">{item.name}</span>
-                    <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
-                      {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))}
+                {expense.items.map((item, index) => {
+                  const itemCategory = (item as any).category; // Get category from item
+                  const categoryEmoji = itemCategory ? getCategoryEmoji(itemCategory, settings) : '';
+                  
+                  return (
+                    <div key={index} className="flex justify-between items-center text-sm md:text-xs pl-8 md:pl-6 py-1.5 md:py-0 rounded-lg md:rounded-none hover:bg-accent/30 md:hover:bg-transparent transition-colors">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        {categoryEmoji && <span className="text-base">{categoryEmoji}</span>}
+                        <span>{item.name}</span>
+                      </span>
+                      <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
+                        {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </CollapsibleContent>
           </div>
@@ -1372,10 +1717,10 @@ function ExpenseListComponent({
       return (
         <div
           key={expense.id}
-          className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''} ${isExcluded ? 'opacity-50' : ''}`}
+          className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''}`}
         >
           {/* Mobile: Compact layout with badge below */}
-          <div className="md:hidden p-2 pl-4">
+          <div className="md:hidden p-2 pl-6">
             <div className="flex items-start justify-between gap-2">
               {/* Left: Checkbox, Name area */}
               <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1388,9 +1733,34 @@ function ExpenseListComponent({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col gap-0.5">
-                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
-                      {expense.category && <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>}
-                      {!expense.category && <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>}
+                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
+                      {/* ✨ Template Emoji (priority: template > expense) */}
+                      {(() => {
+                        const templateEmoji = getDisplayEmoji(expense);
+                        if (templateEmoji) {
+                          return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
+                        }
+                        return null;
+                      })()}
+                      {/* Category display: Check both expense.category and expense.items[].category */}
+                      {/* ⚠️ SKIP category emoji if expense has template emoji (groupId) to avoid double emoji */}
+                      {!expense.groupId && (() => {
+                        // Single expense with category
+                        if (expense.category) {
+                          return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
+                        }
+                        // Template expense: check if items have categories
+                        if (expense.items && expense.items.length > 0) {
+                          const itemsWithCategories = expense.items.filter((item: any) => item.category);
+                          if (itemsWithCategories.length > 0) {
+                            // Show first item's category emoji (template uses first item's category as representative)
+                            const firstCategory = itemsWithCategories[0].category;
+                            return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
+                          }
+                        }
+                        // No category found
+                        return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
+                      })()}
                       {expense.name}
                     </p>
                     {expense.pocketId && getPocketName(expense.pocketId) && (
@@ -1400,7 +1770,7 @@ function ExpenseListComponent({
                     )}
                   </div>
                   {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                    <div className={`flex items-center gap-1 text-xs text-green-600 mt-0.5 ${isExcluded ? 'line-through' : ''}`}>
+                    <div className="flex items-center gap-1 text-xs text-green-600 mt-0.5">
                       <DollarSign className="size-3" />
                       <span className="truncate">
                         {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -1411,16 +1781,16 @@ function ExpenseListComponent({
                     </div>
                   )}
                   {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                    <div className={`text-xs text-muted-foreground mt-0.5 truncate ${isExcluded ? 'line-through' : ''}`}>
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
                       <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Right: Amount and action buttons */}
-              <div className="flex items-center gap-1 shrink-0">
-                <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+              {/* Right: Amount and action buttons (forced right-aligned) */}
+              <div className="flex items-center gap-1 shrink-0 ml-auto">
+                <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
                   {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                 </p>
                 {!isBulkSelectMode && (
@@ -1437,19 +1807,6 @@ function ExpenseListComponent({
                         <ArrowRight className="size-3.5 text-muted-foreground" />
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 pointer-events-auto"
-                      onClick={() => handleToggleExclude(expense.id)}
-                      title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                    >
-                      {isExcluded ? (
-                        <EyeOff className="size-3.5 text-muted-foreground" />
-                      ) : (
-                        <Eye className="size-3.5 text-muted-foreground" />
-                      )}
-                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -1485,7 +1842,7 @@ function ExpenseListComponent({
           </div>
 
           {/* Desktop: Keep original single-line layout */}
-          <div className="hidden md:flex items-center justify-between p-2 pl-4">
+          <div className="hidden md:flex items-center justify-between p-2 pl-6">
             <div className="flex-1 flex items-center gap-2 min-w-0">
               {isBulkSelectMode && (
                 <Checkbox
@@ -1495,7 +1852,14 @@ function ExpenseListComponent({
               )}
               <div>
                 <div className="flex items-center gap-2">
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''}`}>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
+                    {(() => {
+                      const templateEmoji = getDisplayEmoji(expense);
+                      if (templateEmoji) {
+                        return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
+                      }
+                      return null;
+                    })()}
                     {expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
                     {expense.name}
                   </p>
@@ -1506,7 +1870,7 @@ function ExpenseListComponent({
                   )}
                 </div>
                 {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className={`flex items-center gap-2 text-xs text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="flex items-center gap-2 text-xs text-green-600">
                     <DollarSign className="size-3" />
                     <span>
                       {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -1517,14 +1881,14 @@ function ExpenseListComponent({
                   </div>
                 )}
                 {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="text-xs text-muted-foreground">
                     <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                   </div>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''}`}>
+            <div className="flex items-center gap-2 shrink-0 ml-auto">
+              <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
                 {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
               </p>
               {!isBulkSelectMode && (
@@ -1540,19 +1904,6 @@ function ExpenseListComponent({
                       <ArrowRight className="size-3 text-green-600" />
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => handleToggleExclude(expense.id)}
-                    title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                  >
-                    {isExcluded ? (
-                      <EyeOff className="size-3 text-muted-foreground" />
-                    ) : (
-                      <Eye className="size-3 text-muted-foreground" />
-                    )}
-                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -1592,12 +1943,10 @@ function ExpenseListComponent({
 
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
-    const isExcluded = excludedExpenseIds.has(expense.id);
-    
     if (expense.items && expense.items.length > 0) {
       return (
         <Collapsible key={expense.id} open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}>
+          <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}>
             <CollapsibleTrigger asChild>
               <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg">
                 <div className="flex-1 flex items-center gap-2 min-w-0">
@@ -1612,12 +1961,13 @@ function ExpenseListComponent({
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
                   )}
                   <span 
-                    className={`${isWeekend(expense.date) || expense.fromIncome ? "text-green-600" : ""} ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}
+                    className={`${isWeekend(expense.date) || expense.fromIncome ? "text-green-600" : ""} whitespace-nowrap`}
                     style={expense.color && !isWeekend(expense.date) && !expense.fromIncome ? { color: expense.color } : {}}
                   >
                     {formatDateShort(expense.date)}
                   </span>
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} truncate`}>
+                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} truncate`}>
+                    {expense.emoji && <span className="mr-1">{expense.emoji}</span>}
                     {expense.category && <span className="mr-1">{getCategoryEmoji(expense.category, settings)}</span>}
                     {expense.name}
                   </p>
@@ -1633,7 +1983,7 @@ function ExpenseListComponent({
                   )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
+                  <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} text-sm sm:text-base whitespace-nowrap`}>
                     {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                   </p>
                   {!isBulkSelectMode && (
@@ -1649,19 +1999,6 @@ function ExpenseListComponent({
                           <ArrowLeft className="size-3.5 text-green-600" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => handleToggleExclude(expense.id)}
-                        title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                      >
-                        {isExcluded ? (
-                          <EyeOff className="size-3.5 text-muted-foreground" />
-                        ) : (
-                          <Eye className="size-3.5 text-muted-foreground" />
-                        )}
-                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -1699,7 +2036,7 @@ function ExpenseListComponent({
             <CollapsibleContent>
               <div className="px-3 pb-3 space-y-1 border-t pt-2 mt-1">
                 {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className={`flex items-center gap-2 text-sm text-green-600 pl-8 mb-2 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="flex items-center gap-2 text-sm text-green-600 pl-8 mb-2">
                     <DollarSign className="size-3" />
                     <span>
                       {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -1710,18 +2047,26 @@ function ExpenseListComponent({
                   </div>
                 )}
                 {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className={`text-xs text-muted-foreground pl-8 mb-2 ${isExcluded ? 'line-through' : ''}`}>
+                  <div className="text-xs text-muted-foreground pl-8 mb-2">
                     <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                   </div>
                 )}
-                {expense.items.map((item, index) => (
-                  <div key={index} className={`flex justify-between text-sm pl-8 ${isExcluded ? 'line-through' : ''}`}>
-                    <span className="text-muted-foreground">{item.name}</span>
-                    <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
-                      {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))}
+                {expense.items.map((item, index) => {
+                  const itemCategory = (item as any).category; // Get category from item
+                  const categoryEmoji = itemCategory ? getCategoryEmoji(itemCategory, settings) : '';
+                  
+                  return (
+                    <div key={index} className="flex justify-between text-sm pl-8">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        {categoryEmoji && <span className="text-base">{categoryEmoji}</span>}
+                        <span>{item.name}</span>
+                      </span>
+                      <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
+                        {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </CollapsibleContent>
           </div>
@@ -1731,7 +2076,7 @@ function ExpenseListComponent({
       return (
         <div
           key={expense.id}
-          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''} ${isExcluded ? 'opacity-50 bg-muted/30' : ''}`}
+          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}
         >
           <div className="flex-1 flex items-center gap-2 min-w-0">
             {isBulkSelectMode && (
@@ -1746,13 +2091,13 @@ function ExpenseListComponent({
             )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className={`${expense.fromIncome ? 'text-green-600' : ''} ${isExcluded ? 'line-through' : ''} truncate`}>
+                <p className={`${expense.fromIncome ? 'text-green-600' : ''} truncate`}>
                   {expense.category && <span className="mr-1" title={`Category: ${expense.category}`}>{getCategoryEmoji(expense.category, settings)}</span>}
                   {expense.name}
                 </p>
               </div>
               {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                <div className={`flex items-center gap-2 text-sm text-green-600 ${isExcluded ? 'line-through' : ''}`}>
+                <div className="flex items-center gap-2 text-sm text-green-600">
                   <DollarSign className="size-3" />
                   <span className="text-xs">
                     {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
@@ -1763,11 +2108,11 @@ function ExpenseListComponent({
                 </div>
               )}
               {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                <div className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
+                <div className="text-xs text-muted-foreground">
                   <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
                 </div>
               )}
-              <div className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} ${isExcluded ? 'line-through' : ''} flex items-center gap-1.5`}>
+              <div className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'} flex items-center gap-1.5`}>
                 <span>{formatDateShort(expense.date)}</span>
                 {expense.pocketId && getPocketName(expense.pocketId) && (
                   <>
@@ -1781,7 +2126,7 @@ function ExpenseListComponent({
             </div>
           </div>
           <div className="flex items-center justify-between sm:justify-end gap-1">
-            <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} ${isExcluded ? 'line-through' : ''} text-sm sm:text-base whitespace-nowrap`}>
+            <p className={`${expense.fromIncome ? 'text-green-600' : 'text-red-600'} text-sm sm:text-base whitespace-nowrap`}>
               {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
             </p>
             {!isBulkSelectMode && (
@@ -1797,19 +2142,6 @@ function ExpenseListComponent({
                     <ArrowRight className="size-3.5 text-green-600" />
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => handleToggleExclude(expense.id)}
-                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                >
-                  {isExcluded ? (
-                    <EyeOff className="size-3.5 text-muted-foreground" />
-                  ) : (
-                    <Eye className="size-3.5 text-muted-foreground" />
-                  )}
-                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -1854,11 +2186,11 @@ function ExpenseListComponent({
           {!isBulkSelectMode ? (
             // Normal Mode
             <>
-              {/* Row 1: Title + Add Button (desktop) + Category Menu */}
+              {/* Row 1: Title + Desktop Buttons + Mobile Action Buttons */}
               <div className="flex items-center justify-between">
                 <span className="text-base sm:text-lg">Daftar Transaksi</span>
                 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   {/* Desktop Add Transaction Button */}
                   {onOpenAddTransaction && (
                     <Button
@@ -1872,86 +2204,82 @@ function ExpenseListComponent({
                     </Button>
                   )}
                   
-                  {/* Category Breakdown Button */}
-                  <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className="h-8 w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
-                      title="Menu Kategori"
-                    >
-                      <span className="text-sm">📊</span>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem
-                      onClick={() => setShowCategoryDrawer(true)}
-                      className="cursor-pointer"
-                    >
-                      <BarChart3 className="size-4 mr-2" />
-                      <span>Lihat Breakdown</span>
-                    </DropdownMenuItem>
-                    {onOpenCategoryManager && (
-                      <DropdownMenuItem
-                        onClick={() => onOpenCategoryManager()}
-                        className="cursor-pointer"
-                      >
-                        <Settings className="size-4 mr-2" />
-                        <span>Kelola Kategori</span>
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                </div>
-              </div>
-              
-              {/* Row 2: Action Buttons + Lock + Total */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Phase 2: Simulation Sandbox Button (Desktop) */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenSandbox}
+                    className="hidden md:flex items-center gap-1.5"
+                    title="Buka Simulation Sandbox"
+                  >
+                    🧪 Simulasi
+                  </Button>
+                  
+                  {/* ✅ MOBILE: Pilih Button (only show if expenses exist) */}
                   {expenses.length > 0 && (
                     <button
                       onClick={handleActivateBulkMode}
-                      className="h-11 w-11 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
+                      className="h-11 w-11 md:hidden flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
                       aria-label="Pilih"
                     >
                       <ListChecks className="h-5 w-5" />
                     </button>
                   )}
-                  {activeTab === 'expense' && excludedExpenseIds.size > 0 && (
-                    <Badge variant="secondary" className="text-xs h-6 px-1.5">
-                      {excludedExpenseIds.size} excluded
-                    </Badge>
-                  )}
-                  {activeTab === 'income' && excludedIncomeIds.size > 0 && (
-                    <Badge variant="secondary" className="text-xs h-6 px-1.5">
-                      {excludedIncomeIds.size} excluded
-                    </Badge>
-                  )}
+                  
+                  {/* ✅ MOBILE: Simulation Sandbox Button */}
+                  <button
+                    onClick={handleOpenSandbox}
+                    className="h-11 w-11 md:hidden flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
+                    aria-label="Simulasi"
+                    title="Buka Simulation Sandbox"
+                  >
+                    <span className="text-xl">🧪</span>
+                  </button>
+                  
+                  {/* ✅ FIXED: Category Breakdown Button (now square 1:1) */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="h-11 w-11 md:h-8 md:w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
+                        title="Menu Kategori"
+                      >
+                        <span className="text-xl md:text-sm">📊</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        onClick={() => setShowCategoryDrawer(true)}
+                        className="cursor-pointer"
+                      >
+                        <BarChart3 className="size-4 mr-2" />
+                        <span>Lihat Breakdown</span>
+                      </DropdownMenuItem>
+                      {onOpenCategoryManager && (
+                        <DropdownMenuItem
+                          onClick={() => onOpenCategoryManager()}
+                          className="cursor-pointer"
+                        >
+                          <Settings className="size-4 mr-2" />
+                          <span>Kelola Kategori</span>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                <div className="flex items-center gap-2">
-                  {onToggleExcludeLock && (
-                    <button
-                      onClick={() => onToggleExcludeLock()}
-                      className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors ${
-                        isExcludeLocked 
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                          : 'bg-[rgba(38,38,38,0.3)] hover:bg-[rgba(38,38,38,0.5)] text-neutral-400'
-                      }`}
-                      title={isExcludeLocked ? "Unlock - perubahan tidak akan tersimpan" : "Lock - simpan state exclude saat refresh"}
-                    >
-                      {isExcludeLocked ? <Lock className="size-4" /> : <Unlock className="size-4" />}
-                    </button>
-                  )}
-                  <span className={`text-sm font-normal whitespace-nowrap ${
-                    activeTab === 'expense' 
-                      ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
-                      : 'text-green-600'
-                  }`}>
-                    {activeTab === 'expense' 
-                      ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
-                      : `+${formatCurrency(totalNetIncome)}`
-                    }
-                  </span>
-                </div>
+              </div>
+              
+              {/* Row 2: Total Only */}
+              <div className="flex items-center justify-end gap-2 p-[0px] mt-[8px] mr-[0px] mb-[0px] ml-[0px]">
+                <span className={`text-base font-normal whitespace-nowrap ${
+                  activeTab === 'expense' 
+                    ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
+                    : 'text-green-600'
+                }`}>
+                  {activeTab === 'expense' 
+                    ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
+                    : `+${formatCurrency(totalNetIncome)}`
+                  }
+                </span>
               </div>
             </>
           ) : (
@@ -2035,7 +2363,7 @@ function ExpenseListComponent({
             Belum ada pengeluaran untuk bulan ini
           </p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 p-[0px] mt-[-20px] mr-[0px] mb-[0px] ml-[0px]">
             {/* Tabs for Expense/Income - Figma Design */}
             <div className="bg-neutral-800 rounded-[14px] p-[3px] flex gap-0 w-full">
               <button
@@ -2061,18 +2389,81 @@ function ExpenseListComponent({
             </div>
             
             <div className="flex items-center gap-2">
+              {/* ✅ FIXED: Search bar container with integrated suggestions dropdown */}
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#a1a1a1]" />
                 <Input
                   type="text"
-                  placeholder="Cari nama, hari, atau tanggal..."
+                  placeholder={activeTab === 'expense' ? "Cari nama, kategori, hari, atau tanggal..." : "Cari nama, hari, atau tanggal..."}
                   value={searchQuery}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   ref={searchInputRef}
-                  className="pl-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
+                  className="pl-9 pr-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={handleClearSearch}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a1a1a1] hover:text-neutral-50 transition-colors"
+                    title="Hapus pencarian"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
+                
+                {/* ✅ INTEGRATED: Suggestions dropdown (now inside search container for proper alignment) */}
+                {showSuggestions && (suggestions.length > 0 || matchedCategories.size > 0) && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute left-0 top-full mt-1 w-full bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
+                  >
+                    {/* ✅ Matched categories section (clickable badges) */}
+                    {matchedCategories.size > 0 && activeTab === 'expense' && (
+                      <div className="px-3 py-2 border-b border-border">
+                        <div className="text-xs text-muted-foreground mb-2">Kategori ditemukan:</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Array.from(matchedCategories).map(categoryId => {
+                            const category = allCategories.find(c => c.id === categoryId);
+                            if (!category) return null;
+                            
+                            return (
+                              <button
+                                key={categoryId}
+                                onClick={() => {
+                                  setActiveCategoryFilter(new Set([categoryId as any]));
+                                  setShowSuggestions(false);
+                                  toast.success(`Filter kategori: ${getCategoryEmoji(categoryId as any, settings)} ${getCategoryLabel(categoryId as any, settings)}`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-accent/50 hover:bg-accent rounded-md text-xs transition-colors"
+                              >
+                                <span>{getCategoryEmoji(categoryId as any, settings)}</span>
+                                <span>{getCategoryLabel(categoryId as any, settings)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Regular suggestions */}
+                    {suggestions.map((suggestion, index) => (
+                      <div
+                        key={suggestion}
+                        className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
+                          index === selectedSuggestionIndex 
+                            ? 'bg-accent text-accent-foreground' 
+                            : 'hover:bg-accent/50'
+                        }`}
+                        onClick={() => handleSelectSuggestion(suggestion)}
+                        onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                      >
+                        {suggestion}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+              
               {activeTab === 'expense' && (
                 <button
                   onClick={toggleSortOrder}
@@ -2082,32 +2473,128 @@ function ExpenseListComponent({
                   <ArrowUpDown className="size-4" />
                 </button>
               )}
+              
+              {/* ✅ NEW: Advanced Filter Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        // Initialize selected filters from active filters when opening
+                        setSelectedCategoryFilters(new Set(activeFilters.categories));
+                        setSelectedPocketFilters(new Set(activeFilters.pockets));
+                        setSelectedIncomeSourceFilters(new Set(activeFilters.incomeSources));
+                        setIsFilterDrawerOpen(true);
+                      }}
+                      className={`h-9 w-9 flex items-center justify-center rounded-lg transition-colors flex-shrink-0 relative ${
+                        (activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0)
+                          ? 'bg-blue-500/20 text-blue-600 hover:bg-blue-500/30'
+                          : 'hover:bg-[rgba(38,38,38,0.3)]'
+                      }`}
+                      title="Filter Lanjutan"
+                    >
+                      <Filter className="size-4" />
+                      {/* Active filter badge */}
+                      {(activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0) && (
+                        <span className="absolute -top-1 -right-1 bg-blue-600 text-white rounded-full size-4 flex items-center justify-center" style={{ fontSize: '10px' }}>
+                          {activeFilters.categories.size + activeFilters.pockets.size + activeFilters.incomeSources.size}
+                        </span>
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Filter Lanjutan</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
-            {showSuggestions && suggestions.length > 0 && (
-              <div
-                ref={suggestionsRef}
-                className="absolute left-0 top-full mt-1 w-full bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
-              >
-                {suggestions.map((suggestion, index) => (
-                  <div
-                    key={suggestion}
-                    className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
-                      index === selectedSuggestionIndex 
-                        ? 'bg-accent text-accent-foreground' 
-                        : 'hover:bg-accent/50'
-                    }`}
-                    onClick={() => handleSelectSuggestion(suggestion)}
-                    onMouseEnter={() => setSelectedSuggestionIndex(index)}
-                  >
-                    {suggestion}
-                  </div>
+            
+            {/* ✅ NEW: Active Filter Chips */}
+            {(activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0) && (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                {/* Category Filter Chips (Expense) */}
+                {Array.from(activeFilters.categories).map(catId => (
+                  <Badge key={catId} variant="secondary" className="gap-1 pl-2 pr-1">
+                    <span>{getCategoryEmoji(catId as any, settings)}</span>
+                    <span>{getCategoryLabel(catId as any, settings)}</span>
+                    <button
+                      onClick={() => {
+                        const newFilters = new Set(activeFilters.categories);
+                        newFilters.delete(catId);
+                        setActiveFilters(prev => ({ ...prev, categories: newFilters }));
+                        setSelectedCategoryFilters(newFilters);
+                        toast.info(`Filter "${getCategoryLabel(catId as any, settings)}" dihapus`);
+                      }}
+                      className="ml-1 hover:bg-secondary-foreground/20 rounded-sm p-0.5"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </Badge>
                 ))}
+                
+                {/* Pocket Filter Chips (Expense) */}
+                {Array.from(activeFilters.pockets).map(pocketId => {
+                  const pocket = pockets.find(p => p.id === pocketId);
+                  if (!pocket) return null;
+                  return (
+                    <Badge key={pocketId} variant="secondary" className="gap-1 pl-2 pr-1">
+                      <span>{pocket.emoji || '💰'}</span>
+                      <span>{pocket.name}</span>
+                      <button
+                        onClick={() => {
+                          const newFilters = new Set(activeFilters.pockets);
+                          newFilters.delete(pocketId);
+                          setActiveFilters(prev => ({ ...prev, pockets: newFilters }));
+                          setSelectedPocketFilters(newFilters);
+                          toast.info(`Filter "${pocket.name}" dihapus`);
+                        }}
+                        className="ml-1 hover:bg-secondary-foreground/20 rounded-sm p-0.5"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  );
+                })}
+                
+                {/* Income Source Filter Chips (Income) */}
+                {Array.from(activeFilters.incomeSources).map(sourceName => (
+                  <Badge key={sourceName} variant="secondary" className="gap-1 pl-2 pr-1">
+                    <span>💵</span>
+                    <span>{sourceName}</span>
+                    <button
+                      onClick={() => {
+                        const newFilters = new Set(activeFilters.incomeSources);
+                        newFilters.delete(sourceName);
+                        setActiveFilters(prev => ({ ...prev, incomeSources: newFilters }));
+                        setSelectedIncomeSourceFilters(newFilters);
+                        toast.info(`Filter "${sourceName}" dihapus`);
+                      }}
+                      className="ml-1 hover:bg-secondary-foreground/20 rounded-sm p-0.5"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </Badge>
+                ))}
+                
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  onClick={resetFilters}
+                  className="h-6 px-2"
+                >
+                  ❌ Reset Semua
+                </Button>
               </div>
             )}
             
             {/* Conditional rendering based on active tab */}
             {activeTab === 'expense' ? (
-              <div>
+              <>
+                {/* ✅ NEW: Show "no results" message if search returns empty */}
+                {sortedAndFilteredExpenses.length === 0 && searchQuery.trim() ? (
+                  <p className="text-center text-muted-foreground py-8 text-sm">
+                    Tidak ada pengeluaran yang sesuai dengan pencarian "{searchQuery}"
+                  </p>
+                ) : (
+                  <>
                 <Collapsible open={upcomingExpanded} onOpenChange={setUpcomingExpanded}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
@@ -2132,9 +2619,11 @@ function ExpenseListComponent({
                         Tidak ada pengeluaran mendatang
                       </p>
                     ) : (
-                      Array.from(upcomingGrouped.entries()).map(([date, expenses]) => 
-                        renderGroupedExpenseItem(date, expenses)
-                      )
+                      Array.from(upcomingGrouped.entries())
+                        .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+                        .map(([date, expenses]) => 
+                          renderGroupedExpenseItem(date, expenses)
+                        )
                     )}
                   </div>
                   </CollapsibleContent>
@@ -2171,179 +2660,295 @@ function ExpenseListComponent({
                     </Collapsible>
                   </div>
                 )}
-              </div>
+                  </>
+                )}
+              </>
             ) : (
               /* Income Tab Content */
               <div className="space-y-2 mt-4">
-                {incomes.length === 0 ? (
+                {/* ✅ Show empty state if no incomes after filter */}
+                {filteredAndSortedIncomes.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
-                    Belum ada pemasukan tambahan untuk bulan ini
+                    {incomes.length === 0 
+                      ? 'Belum ada pemasukan tambahan untuk bulan ini'
+                      : searchQuery.trim() || activeFilters.incomeSources.size > 0
+                        ? `Tidak ada pemasukan yang sesuai dengan ${searchQuery.trim() ? 'pencarian' : 'filter'}`
+                        : 'Belum ada pemasukan tambahan untuk bulan ini'
+                    }
                   </p>
                 ) : (
                   <>
-                    {[...incomes]
-                      .sort((a, b) => {
-                        // Sort by date: newest first (descending)
-                        const dateA = new Date(a.date).getTime();
-                        const dateB = new Date(b.date).getTime();
-                        return dateB - dateA;
-                      })
-                      .map((income) => {
-                      const isExcluded = excludedIncomeIds.has(income.id);
-                      const isSelected = selectedIncomeIds.has(income.id);
-                      const isExpanded = expandedIncomeIds.has(income.id);
-                      const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
+                    {/* ✨ NEW: Grouped Income Rendering (same pattern as expenses!) */}
+                    {(() => {
+                      // Group incomes by date (YYYY-MM-DD only)
+                      const groupIncomesByDate = (incomes: AdditionalIncome[]): Map<string, AdditionalIncome[]> => {
+                        const grouped = new Map<string, AdditionalIncome[]>();
+                        
+                        incomes.forEach(income => {
+                          // ✅ FIX: Convert to LOCAL date, not UTC date!
+                          const localDate = new Date(income.date);
+                          const year = localDate.getFullYear();
+                          const month = String(localDate.getMonth() + 1).padStart(2, '0');
+                          const day = String(localDate.getDate()).padStart(2, '0');
+                          const dateOnly = `${year}-${month}-${day}`; // Local date in YYYY-MM-DD
+                          const groupKey = dateOnly;
+                          
+                          if (!grouped.has(groupKey)) {
+                            grouped.set(groupKey, []);
+                          }
+                          grouped.get(groupKey)!.push(income);
+                        });
+                        
+                        return grouped;
+                      };
                       
-                      return (
-                        <div
-                          key={income.id}
-                          className={`p-3 border rounded-lg transition-all cursor-pointer ${
-                            isExcluded ? 'opacity-50 bg-muted/30' : ''
-                          } ${
-                            'hover:bg-accent/50'
-                          } ${
-                            isSelected ? 'bg-accent border-primary' : ''
-                          }`}
-                          onClick={() => {
-                            if (isBulkSelectMode) {
-                              handleToggleSelectIncome(income.id);
-                            } else {
-                              toggleExpandIncome(income.id);
-                            }
-                          }}
-                        >
-                          <div className="flex items-start gap-2">
-                            {isBulkSelectMode && (
-                              <div className="pt-0.5">
-                                <Checkbox
-                                  checked={isSelected}
-                                  onCheckedChange={() => handleToggleSelectIncome(income.id)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="border-neutral-400 data-[state=checked]:border-primary"
-                                />
-                              </div>
-                            )}
-                            
-                            {!isBulkSelectMode && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleExpandIncome(income.id);
-                                }}
-                                className="pt-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                                title={isExpanded ? "Sembunyikan detail" : "Tampilkan detail"}
-                              >
-                                {isExpanded ? (
-                                  <ChevronUp className="size-4" />
-                                ) : (
-                                  <ChevronDown className="size-4" />
+                      // ✅ FIXED: Use filtered and sorted incomes
+                      const groupedIncomes = groupIncomesByDate(filteredAndSortedIncomes);
+                      
+                      // Render grouped income items
+                      const renderGroupedIncomeItem = (groupKey: string, incomes: AdditionalIncome[]) => {
+                        const actualDate = incomes[0].date;
+                        
+                        // Calculate daily total (NET after deductions)
+                        const groupTotal = incomes.reduce((sum, income) => {
+                          const netAmount = income.deduction > 0 
+                            ? income.amountIDR - income.deduction 
+                            : income.amountIDR;
+                          return sum + netAmount;
+                        }, 0);
+                        
+                        return (
+                          <div key={`group-${groupKey}`} className="space-y-1">
+                            {/* ✨ Date Header with Total (same as expenses!) */}
+                            <div className="py-2 px-1 flex items-center justify-between gap-4 border-b border-border mb-2">
+                              {/* Left: Date */}
+                              <div className="flex items-center gap-2">
+                                {isToday(actualDate) && (
+                                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0" title="Hari ini" />
                                 )}
-                              </button>
-                            )}
-                            
-                            <div className="flex-1 min-w-0">
-                              {/* Clean default view */}
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <p className={`${isExcluded ? 'line-through' : ''} truncate`}>{income.name}</p>
-                                  <span className={`text-xs text-muted-foreground ${isExcluded ? 'line-through' : ''}`}>
-                                    {formatDateSafe(income.date)}
-                                    {income.conversionType === "auto" && " • (Auto)"}
-                                    {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <p className={`text-base font-medium text-green-600 ${isExcluded ? 'line-through' : ''} whitespace-nowrap`}>
-                                    +{formatCurrency(netAmount)}
-                                  </p>
-                                  
-                                  {!isBulkSelectMode && (
-                                    <div className="flex items-center gap-0.5">
-                                <Button variant="ghost" size="icon" className="h-8 w-8"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const wasExcluded = excludedIncomeIds.has(income.id);
-                                    const newSet = new Set(excludedIncomeIds);
-                                    if (wasExcluded) {
-                                      newSet.delete(income.id);
-                                      toast.success(`${income.name} dimasukkan kembali dalam hitungan`);
-                                    } else {
-                                      newSet.add(income.id);
-                                      toast.info(`${income.name} dikecualikan dari hitungan`);
-                                    }
-                                    if (onExcludedIncomeIdsChange) onExcludedIncomeIdsChange(newSet);
-                                  }}
-                                  title={isExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                                >
-                                  {isExcluded ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5 text-muted-foreground" />}
-                                </Button>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8"
-                                      onClick={(e) => e.stopPropagation()}
-                                      title="More"
-                                    >
-                                      <MoreVertical className="size-3.5 text-muted-foreground" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem
-                                      onClick={() => {
-                                        setEditingIncomeId(income.id);
-                                        // FIX: Extract date directly without timezone conversion
-                                        const datePart = income.date.split('T')[0]; // Get YYYY-MM-DD directly
-                                        setEditingIncome({
-                                          ...income,
-                                          date: datePart
-                                        });
-                                      }}
-                                    >
-                                      <Pencil className="size-3.5 mr-2" />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => onDeleteIncome?.(income.id)}
-                                      className="text-destructive focus:text-destructive"
-                                    >
-                                      <Trash2 className="size-3.5 mr-2" />
-                                      Hapus
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                                    </div>
-                                  )}
-                                </div>
+                                <span className={`text-base font-bold ${isWeekend(actualDate) ? "text-green-600" : "text-foreground"}`}>
+                                  {formatDateShort(actualDate)}
+                                </span>
                               </div>
                               
-                              {/* Expandable details (hidden by default) */}
-                              {isExpanded && !isBulkSelectMode && (
-                                <div className="pl-6 pt-2 mt-2 space-y-1 text-xs text-muted-foreground border-l-2 border-muted ml-2">
+                              {/* Right: Total Harian (subtle, gray) */}
+                              <span className="text-sm font-semibold text-muted-foreground opacity-70">
+                                +{formatCurrency(groupTotal)}
+                              </span>
+                            </div>
+                            
+                            {/* ✨ Simple List Items (clean, no cards) */}
+                            <div className="space-y-1">
+                              {incomes.map(income => renderIndividualIncomeInGroup(income))}
+                            </div>
+                          </div>
+                        );
+                      };
+                      
+                      // Render individual income within a group
+                      const renderIndividualIncomeInGroup = (income: AdditionalIncome) => {
+                        const isSelected = selectedIncomeIds.has(income.id);
+                        const isExpanded = expandedIncomeIds.has(income.id);
+                        const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
+                        
+                        return (
+                          <Collapsible key={income.id} open={isExpanded} onOpenChange={() => toggleExpandIncome(income.id)}>
+                            <div className={`${isBulkSelectMode && isSelected ? 'bg-accent/30 rounded-lg' : ''}`}>
+                              <CollapsibleTrigger asChild>
+                                <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
+                                  {/* Mobile: Compact layout */}
+                                  <div className="md:hidden p-2 pl-6">
+                                    <div className="flex items-start justify-between gap-2">
+                                      {/* Left: Name + metadata */}
+                                      <div className="flex items-start gap-2 min-w-0 flex-1">
+                                        {isBulkSelectMode && (
+                                          <Checkbox
+                                            checked={isSelected}
+                                            onCheckedChange={() => handleToggleSelectIncome(income.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="mt-0.5"
+                                          />
+                                        )}
+                                        
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-sm truncate text-green-600">{income.name}</p>
+                                          <span className="text-xs text-muted-foreground">
+                                            {formatDateSafe(income.date)}
+                                            {income.conversionType === "auto" && " • (Auto)"}
+                                            {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
+                                          </span>
+                                        </div>
+                                        
+                                        {!isBulkSelectMode && (
+                                          isExpanded ? (
+                                            <ChevronUp className="size-3 text-muted-foreground shrink-0 mt-1" />
+                                          ) : (
+                                            <ChevronDown className="size-3 text-muted-foreground shrink-0 mt-1" />
+                                          )
+                                        )}
+                                      </div>
+                                      
+                                      {/* Right: Amount + actions (forced right-aligned) */}
+                                      <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                                        <p className="text-sm text-right text-green-600">
+                                          +{formatCurrency(netAmount)}
+                                        </p>
+                                        
+                                        {!isBulkSelectMode && (
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                <MoreVertical className="size-3.5 text-muted-foreground" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                              <DropdownMenuItem
+                                                onClick={() => {
+                                                  setEditingIncomeId(income.id);
+                                                  const datePart = getLocalDateFromISO(income.date);
+                                                  setEditingIncome({
+                                                    ...income,
+                                                    date: datePart
+                                                  });
+                                                }}
+                                              >
+                                                <Pencil className="size-3.5 mr-2" />
+                                                Edit
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={() => onDeleteIncome?.(income.id)}
+                                                className="text-destructive focus:text-destructive"
+                                              >
+                                                <Trash2 className="size-3.5 mr-2" />
+                                                Hapus
+                                              </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Desktop: Single-line layout */}
+                                  <div className="hidden md:flex items-center justify-between p-2 pl-6">
+                                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                                      {isBulkSelectMode && (
+                                        <Checkbox
+                                          checked={isSelected}
+                                          onCheckedChange={() => handleToggleSelectIncome(income.id)}
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                      )}
+                                      
+                                      <div className="min-w-0 flex-1">
+                                        <p className="text-sm text-green-600">{income.name}</p>
+                                        <span className="text-xs text-muted-foreground">
+                                          {formatDateSafe(income.date)}
+                                          {income.conversionType === "auto" && " • (Auto)"}
+                                          {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
+                                        </span>
+                                      </div>
+                                      
+                                      {!isBulkSelectMode && (
+                                        isExpanded ? (
+                                          <ChevronUp className="size-3" />
+                                        ) : (
+                                          <ChevronDown className="size-3" />
+                                        )
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                                      <p className="text-sm text-right text-green-600">
+                                        +{formatCurrency(netAmount)}
+                                      </p>
+                                      
+                                      {!isBulkSelectMode && (
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className="h-6 w-6"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <MoreVertical className="size-3 text-muted-foreground" />
+                                            </Button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            <DropdownMenuItem
+                                              onClick={() => {
+                                                setEditingIncomeId(income.id);
+                                                const datePart = getLocalDateFromISO(income.date);
+                                                setEditingIncome({
+                                                  ...income,
+                                                  date: datePart
+                                                });
+                                              }}
+                                            >
+                                              <Pencil className="size-3 mr-2" />
+                                              Edit
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => onDeleteIncome?.(income.id)}
+                                              className="text-destructive focus:text-destructive"
+                                            >
+                                              <Trash2 className="size-3 mr-2" />
+                                              Hapus
+                                            </DropdownMenuItem>
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </CollapsibleTrigger>
+                              
+                              <CollapsibleContent>
+                                {/* Expandable details */}
+                                <div className="px-3 pb-3 space-y-2 border-t pt-3 mt-2 md:px-2 md:pb-2 md:space-y-1 md:pt-1 md:mt-1">
                                   {income.currency === "USD" && (
-                                    <div className={isExcluded ? 'line-through' : ''}>
+                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
                                       <span className="font-medium">Kotor:</span> {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)} × {formatCurrency(income.exchangeRate || 0)} = {formatCurrency(income.amountIDR)}
                                     </div>
                                   )}
                                   {income.deduction > 0 && (
-                                    <div className={isExcluded ? 'line-through' : ''}>
+                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
                                       <span className="font-medium">Potongan:</span> -{formatCurrency(income.deduction)}
                                     </div>
                                   )}
                                   {(!income.currency || income.currency === "IDR") && (
-                                    <div className={isExcluded ? 'line-through' : ''}>
+                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
                                       <span className="font-medium">Jumlah:</span> {formatCurrency(income.amountIDR)}
                                     </div>
                                   )}
                                 </div>
-                              )}
+                              </CollapsibleContent>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          </Collapsible>
+                        );
+                      };
+                      
+                      // Return the grouped and sorted render
+                      const groupedEntries = Array.from(groupedIncomes.entries())
+                        .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
+                      
+                      // ✅ NEW: Show message if no results after filtering
+                      if (groupedEntries.length === 0 && searchQuery.trim()) {
+                        return (
+                          <p className="text-center text-muted-foreground py-8 text-sm">
+                            Tidak ada pemasukan yang sesuai dengan pencarian "{searchQuery}"
+                          </p>
+                        );
+                      }
+                      
+                      return groupedEntries.map(([date, incomes]) => renderGroupedIncomeItem(date, incomes));
+                    })()}
                     
                     {/* Income Breakdown Section */}
                     <div className="pt-4 border-t space-y-2 bg-muted/30 p-4 rounded-lg">
@@ -2372,10 +2977,10 @@ function ExpenseListComponent({
                       )}
                       
                       {/* Indented: Global Deduction with Info Tooltip */}
-                      <div className={`pl-4 space-y-2 ${isDeductionExcluded ? 'opacity-50' : ''}`}>
+                      <div className="pl-4 space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2 text-sm cursor-pointer" onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}>
-                            <span className={`text-muted-foreground ${isDeductionExcluded ? 'line-through' : ''}`}>
+                            <span className="text-muted-foreground">
                               Potongan Global
                             </span>
                             <TooltipProvider>
@@ -2391,7 +2996,6 @@ function ExpenseListComponent({
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
-                            {isDeductionExcluded && <Badge variant="secondary" className="text-xs">excluded</Badge>}
                           </div>
                           <div className="flex items-center gap-1">
                             <Button 
@@ -2401,20 +3005,10 @@ function ExpenseListComponent({
                               onClick={() => setShowGlobalDeductionInput(!showGlobalDeductionInput)}
                               title={showGlobalDeductionInput ? "Sembunyikan input" : "Tampilkan input"}
                             >
-                              {showGlobalDeductionInput ? <EyeOff className="size-3 text-muted-foreground" /> : <Eye className="size-3 text-muted-foreground" />}
+                              {showGlobalDeductionInput ? <ChevronUp className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
                             </Button>
-                            <Button variant="ghost" size="icon" className="size-6"
-                              onClick={() => {
-                                const newValue = !isDeductionExcluded;
-                                if (onDeductionExcludedChange) onDeductionExcludedChange(newValue);
-                                toast.info(newValue ? "Potongan dikecualikan dari hitungan" : "Potongan dimasukkan dalam hitungan");
-                              }}
-                              title={isDeductionExcluded ? "Masukkan dalam hitungan" : "Exclude dari hitungan"}
-                            >
-                              {isDeductionExcluded ? <Lock className="size-3 text-muted-foreground" /> : <Unlock className="size-3 text-muted-foreground" />}
-                            </Button>
-                            <span className={`text-sm ${isDeductionExcluded ? 'line-through text-muted-foreground' : 'text-red-600'}`}>
-                              {effectiveGlobalDeduction > 0 ? '-' : ''}{formatCurrency(effectiveGlobalDeduction)}
+                            <span className={`text-sm text-red-600`}>
+                              {globalDeduction > 0 ? '-' : ''}{formatCurrency(globalDeduction)}
                             </span>
                           </div>
                         </div>
@@ -2426,7 +3020,7 @@ function ExpenseListComponent({
                             value={formatCurrencyInput(globalDeduction || "")}
                             onChange={(e) => onUpdateGlobalDeduction?.(parseCurrencyInput(e.target.value))}
                             placeholder="0"
-                            className={`text-sm ${isDeductionExcluded ? 'line-through' : ''}`}
+                            className="text-sm"
                           />
                         )}
                       </div>
@@ -2449,7 +3043,7 @@ function ExpenseListComponent({
       {isMobile ? (
         <Drawer open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()} dismissible={true}>
           {editingExpenseId !== null && (
-            <DrawerContent className="max-h-[90vh] flex flex-col">
+            <DrawerContent className="h-[90vh] flex flex-col">
             <DrawerHeader className="text-left border-b">
               <DrawerTitle>Edit Pengeluaran</DrawerTitle>
             </DrawerHeader>
@@ -2505,51 +3099,68 @@ function ExpenseListComponent({
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="edit-category">Kategori (Opsional)</Label>
-              <select
-                id="edit-category"
-                value={editingExpense.category || ''}
-                onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">Pilih Kategori</option>
-                {allCategories.map(cat => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Only show global category if no items */}
+            {(!editingExpense.items || editingExpense.items.length === 0) && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-category">Kategori (Opsional)</Label>
+                <select
+                  id="edit-category"
+                  value={editingExpense.category || ''}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Pilih Kategori</option>
+                  {allCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             
             {editingExpense.items && editingExpense.items.length > 0 && (
               <div className="space-y-2">
                 <Label>Item Pengeluaran</Label>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {editingExpense.items.map((item, index) => (
-                    <div key={index} className="flex items-center gap-2">
+                    <div key={index} className="space-y-2 p-3 border border-border rounded-md bg-muted/30">
                       <Input
                         type="text"
                         value={item.name}
                         onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
                         placeholder="Nama Item"
-                        className="flex-1"
                       />
-                      <Input
-                        type="text"
-                        value={itemAmountInputs[index] ?? item.amount.toString()}
-                        onChange={(e) => handleUpdateItem(index, 'amount', e.target.value)}
-                        onBlur={() => handleBlurItemAmount(index)}
-                        placeholder="Jumlah"
-                        className="w-32"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemoveItem(index)}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="text"
+                          value={itemAmountInputs[index] ?? item.amount.toString()}
+                          onChange={(e) => handleUpdateItem(index, 'amount', e.target.value)}
+                          onBlur={() => handleBlurItemAmount(index)}
+                          placeholder="Jumlah"
+                          className="flex-1"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoveItem(index)}
+                          className="flex-shrink-0"
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                      <select
+                        value={item.category || ''}
+                        onChange={(e) => handleUpdateItem(index, 'category', e.target.value || undefined)}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        <X className="size-4" />
-                      </Button>
+                        <option value="">Pilih Kategori (Opsional)</option>
+                        {allCategories.map(cat => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   ))}
                   <Button
@@ -2640,51 +3251,68 @@ function ExpenseListComponent({
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="edit-category-desktop">Kategori (Opsional)</Label>
-                <select
-                  id="edit-category-desktop"
-                  value={editingExpense.category || ''}
-                  onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="">Pilih Kategori</option>
-                  {allCategories.map(cat => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Only show global category if no items */}
+              {(!editingExpense.items || editingExpense.items.length === 0) && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-category-desktop">Kategori (Opsional)</Label>
+                  <select
+                    id="edit-category-desktop"
+                    value={editingExpense.category || ''}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, category: e.target.value || undefined })}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Pilih Kategori</option>
+                    {allCategories.map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               
               {editingExpense.items && editingExpense.items.length > 0 && (
                 <div className="space-y-2">
                   <Label>Item Pengeluaran</Label>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {editingExpense.items.map((item, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <Input
-                          type="text"
-                          value={item.name}
-                          onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
-                          placeholder="Nama Item"
-                          className="flex-1"
-                        />
+                      <div key={index} className="space-y-2 p-3 border border-border rounded-md bg-muted/30">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="text"
+                            value={item.name}
+                            onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
+                            placeholder="Nama Item"
+                            className="flex-1"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleRemoveItem(index)}
+                            className="flex-shrink-0"
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </div>
                         <Input
                           type="text"
                           value={itemAmountInputs[index] ?? item.amount.toString()}
                           onChange={(e) => handleUpdateItem(index, 'amount', e.target.value)}
                           onBlur={() => handleBlurItemAmount(index)}
                           placeholder="Jumlah"
-                          className="w-32"
                         />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRemoveItem(index)}
+                        <select
+                          value={item.category || ''}
+                          onChange={(e) => handleUpdateItem(index, 'category', e.target.value || undefined)}
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         >
-                          <X className="size-4" />
-                        </Button>
+                          <option value="">Pilih Kategori (Opsional)</option>
+                          {allCategories.map(cat => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.emoji} {cat.label}{cat.isCustom ? ' (Custom)' : ''}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     ))}
                     <Button
@@ -2804,51 +3432,15 @@ function ExpenseListComponent({
         />
       )}
       
-      {/* Category Breakdown - Dialog (Desktop) / Drawer (Mobile) */}
-      {/* ✅ V4 FIX: Wrapper stays, content goes */}
-      {isMobile ? (
-        <Drawer 
-          open={showCategoryDrawer} 
-          onOpenChange={setShowCategoryDrawer}
-          modal={true}
-          dismissible={true}
-          shouldScaleBackground={false}
-        >
-          {showCategoryDrawer && (
-            <DrawerContent className="max-h-[85vh]">
-              <DrawerHeader>
-                <DrawerTitle>Breakdown Kategori</DrawerTitle>
-              </DrawerHeader>
-              <div className="overflow-y-auto px-4 pb-6">
-                <CategoryBreakdown
-                  monthKey=""
-                  expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
-                  onCategoryClick={handleCategoryClick}
-                  activeFilter={activeCategoryFilter}
-                />
-              </div>
-            </DrawerContent>
-          )}
-        </Drawer>
-      ) : (
-        <Dialog open={showCategoryDrawer} onOpenChange={setShowCategoryDrawer}>
-          {showCategoryDrawer && (
-            <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto" aria-describedby={undefined}>
-              <DialogHeader>
-                <DialogTitle>Breakdown Kategori</DialogTitle>
-              </DialogHeader>
-              <div className="mt-2">
-                <CategoryBreakdown
-                  monthKey=""
-                  expenses={expenses.filter(e => !excludedExpenseIds.has(e.id) && !e.fromIncome)}
-                  onCategoryClick={handleCategoryClick}
-                  activeFilter={activeCategoryFilter}
-                />
-              </div>
-            </DialogContent>
-          )}
-        </Dialog>
-      )}
+      {/* Category Breakdown - Now handles its own Dialog/Drawer with Insight Boxes */}
+      <CategoryBreakdown
+        open={showCategoryDrawer}
+        onOpenChange={setShowCategoryDrawer}
+        monthKey={monthKey}
+        expenses={expenses.filter(e => !e.fromIncome)}
+        onCategoryClick={handleCategoryClick}
+        activeFilter={activeCategoryFilter}
+      />
       
       {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}
       {isMobile ? (
@@ -2858,7 +3450,7 @@ function ExpenseListComponent({
           }
         }}>
           {editingIncomeId && editingIncome && onUpdateIncome && (
-            <DrawerContent className="max-h-[90vh] flex flex-col">
+            <DrawerContent className="h-[90vh] flex flex-col">
               <DrawerHeader className="text-left border-b">
                 <DrawerTitle>Edit Pemasukan</DrawerTitle>
               </DrawerHeader>
@@ -2948,6 +3540,49 @@ function ExpenseListComponent({
           )}
         </Dialog>
       )}
+      
+      {/* Phase 2: Simulation Sandbox */}
+      <SimulationSandbox
+        isOpen={showSandbox}
+        onClose={() => setShowSandbox(false)}
+        expenses={expenses}
+        incomes={incomes}
+        initialTab={sandboxContext}
+        globalDeduction={globalDeduction}
+        initialBudget={initialBudget}
+        carryOverAssets={carryOverAssets}
+        carryOverLiabilities={carryOverLiabilities}
+      />
+      
+      {/* ✅ NEW: Advanced Filter Drawer */}
+      <AdvancedFilterDrawer
+        open={isFilterDrawerOpen}
+        onOpenChange={setIsFilterDrawerOpen}
+        activeTab={activeTab}
+        selectedCategories={selectedCategoryFilters}
+        onCategoryToggle={toggleCategoryFilter}
+        selectedPockets={selectedPocketFilters}
+        onPocketToggle={togglePocketFilter}
+        selectedIncomeSources={selectedIncomeSourceFilters}
+        onIncomeSourceToggle={toggleIncomeSourceFilter}
+        onApply={applyFilters}
+        onReset={resetFilters}
+        allCategories={allCategories}
+        allPockets={pockets.map(p => {
+          const balance = Array.isArray(balances) 
+            ? (balances.find(b => b.pocketId === p.id)?.availableBalance || 0)
+            : 0;
+          return {
+            id: p.id,
+            name: p.name,
+            emoji: p.emoji || '💰',
+            balance: balance,
+            isActive: true
+          };
+        })}
+        allIncomeSources={allIncomeSources}
+        settings={settings}
+      />
     </Card>
   );
 }

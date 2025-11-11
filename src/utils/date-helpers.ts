@@ -28,21 +28,51 @@ export function parseLocalDate(dateString: string): string {
 
 /**
  * Format date string/timestamp for <input type="date"> value
+ * ⚠️ DEPRECATED: Use getLocalDateFromISO() instead for timezone-safe conversion!
  * @param dateString - Format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
  * @returns Date string in "YYYY-MM-DD" format
  */
 export function formatDateForInput(dateString: string | undefined | null): string {
   if (!dateString) {
-    // Return today's date in YYYY-MM-DD format (local timezone)
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return getTodayLocal();
   }
   
-  // Extract date part only (before 'T')
+  // ❌ TIMEZONE BUG: .split('T')[0] returns UTC date, not local date!
+  // For "2025-10-27T23:21:21.000Z" in WIB (UTC+7):
+  //   - .split('T')[0] → "2025-10-27" (UTC, WRONG!)
+  //   - Should be → "2025-10-28" (WIB, CORRECT!)
+  //
+  // Use getLocalDateFromISO() instead!
   return dateString.split('T')[0];
+}
+
+/**
+ * Extract local date from ISO timestamp (timezone-safe!)
+ * Converts UTC timestamp to user's local date
+ * 
+ * @param isoTimestamp - Format: "YYYY-MM-DDTHH:mm:ss.sssZ"
+ * @returns Local date string in "YYYY-MM-DD" format
+ * 
+ * @example
+ * // User in WIB (UTC+7):
+ * getLocalDateFromISO("2025-10-27T23:21:21.000Z")
+ * // Returns: "2025-10-28" (next day in WIB!)
+ * 
+ * getLocalDateFromISO("2025-10-27T16:00:00.000Z")
+ * // Returns: "2025-10-27" (same day in WIB)
+ */
+export function getLocalDateFromISO(isoTimestamp: string): string {
+  if (!isoTimestamp) return getTodayLocal();
+  
+  // Convert to Date object (automatically uses local timezone)
+  const localDate = new Date(isoTimestamp);
+  
+  // Extract local date components
+  const year = localDate.getFullYear();
+  const month = String(localDate.getMonth() + 1).padStart(2, '0');
+  const day = String(localDate.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
 }
 
 /**

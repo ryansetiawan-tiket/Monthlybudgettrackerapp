@@ -12,26 +12,30 @@ export function LoadingSkeleton() {
     >
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Sticky Header for Mobile - matches App.tsx layout */}
-        <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[30px] pr-[16px] pb-[16px] pl-[16px]">
-          {/* Header */}
-          <motion.div 
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.1 }}
-            className="text-center space-y-2 pt-2"
-          >
-            <Skeleton className="h-10 w-64 mx-auto" />
-            <Skeleton className="h-5 w-full max-w-xs mx-auto md:max-w-md" />
-          </motion.div>
+        <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[40px] pr-[16px] pb-[16px] pl-[16px]">
+          {/* Desktop: Split layout (Title left | Controls right) | Mobile: Stacked */}
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-8">
+            {/* LEFT SECTION: Title & Subtitle */}
+            <motion.div 
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="text-left space-y-2 pt-2 relative flex-shrink-0"
+            >
+              <Skeleton className="h-10 w-64" />
+              <Skeleton className="h-5 w-full max-w-xs md:max-w-md" />
+            </motion.div>
 
-          {/* Month Selector */}
-          <motion.div
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.15 }}
-          >
-            <Skeleton className="h-12 w-full max-w-md mx-auto rounded-lg" />
-          </motion.div>
+            {/* RIGHT SECTION: Month Selector with Controls */}
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.15 }}
+              className="md:flex-shrink-0"
+            >
+              <Skeleton className="h-12 w-full md:w-auto md:min-w-[400px] rounded-lg" />
+            </motion.div>
+          </div>
         </div>
 
         {/* Budget Overview Cards - Cleaner Mobile Layout */}

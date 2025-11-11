@@ -39,6 +39,7 @@ const DEFAULT_POCKETS: Pocket[] = [
     color: '#3b82f6',
     order: 1,
     createdAt: new Date().toISOString(),
+    status: 'active', // ✅ FASE 1: Explicit status
     enableWishlist: false  // Daily pocket doesn't need wishlist simulation
   },
   {
@@ -50,6 +51,7 @@ const DEFAULT_POCKETS: Pocket[] = [
     color: '#8b5cf6',
     order: 2,
     createdAt: new Date().toISOString(),
+    status: 'active', // ✅ FASE 1: Explicit status
     enableWishlist: true  // Cold money is perfect for wishlist planning
   }
 ];
@@ -57,10 +59,13 @@ const DEFAULT_POCKETS: Pocket[] = [
 interface PocketBalance {
   pocketId: string;
   originalAmount: number;
+  income: number; // 💰 Income for Cold Money & Custom pockets (current month)
   transferIn: number;
   transferOut: number;
   expenses: number;
-  availableBalance: number;
+  availableBalance: number; // ✅ BACKWARD COMPAT: Defaults to projected balance
+  realtimeBalance: number;   // ✅ NEW (TUGAS 1): Balance up to today (excludes future transactions)
+  projectedBalance: number;  // ✅ NEW (TUGAS 1): Balance including all future transactions
   lastUpdated: string;
 }
 
@@ -77,7 +82,7 @@ interface TransferTransaction {
   createdAt: string;
 }
 
-type TransactionType = 'income' | 'expense' | 'transfer';
+type TransactionType = 'income' | 'expense' | 'transfer' | 'initial_balance'; // ✅ FASE 3: Added initial_balance
 
 interface TimelineEntry {
   id: string;
@@ -214,49 +219,130 @@ interface CarryOverSummary {
 // POCKETS SYSTEM - HELPER FUNCTIONS
 // ============================================
 
+// ============================================
+// 🚀 FASE 1: GLOBAL POCKET REGISTRY
+// New approach: Pockets are permanent entities (global storage)
+// ============================================
+
+/**
+ * Get all pockets from GLOBAL registry (not month-specific)
+ * ✅ NEW APPROACH: Pockets are permanent entities
+ * 
+ * @returns Array of all active pockets
+ */
+async function getGlobalPockets(): Promise<Pocket[]> {
+  try {
+    const pockets = await kv.getByPrefix('pocket:global:');
+    
+    if (pockets.length === 0) {
+      // First time setup: Initialize default pockets
+      console.log('[GLOBAL POCKETS] First time setup - initializing default pockets');
+      await initializeDefaultPockets();
+      return DEFAULT_POCKETS;
+    }
+    
+    // Sort by order
+    return pockets.sort((a: Pocket, b: Pocket) => a.order - b.order);
+  } catch (error) {
+    console.error('[GLOBAL POCKETS] Error fetching pockets:', error);
+    return DEFAULT_POCKETS;
+  }
+}
+
+/**
+ * Initialize default pockets in global registry
+ * Called on first time setup
+ */
+async function initializeDefaultPockets(): Promise<void> {
+  const promises = DEFAULT_POCKETS.map(pocket => 
+    kv.set(`pocket:global:${pocket.id}`, pocket)
+  );
+  await Promise.all(promises);
+  console.log('[GLOBAL POCKETS] Default pockets initialized:', DEFAULT_POCKETS.map(p => p.name).join(', '));
+}
+
+/**
+ * Create a new pocket in GLOBAL registry
+ * 
+ * @param pocket - Pocket object to create
+ * @returns Created pocket
+ */
+async function createGlobalPocket(pocket: Pocket): Promise<Pocket> {
+  await kv.set(`pocket:global:${pocket.id}`, pocket);
+  console.log(`[GLOBAL POCKETS] Created pocket: ${pocket.name} (${pocket.id})`);
+  return pocket;
+}
+
+/**
+ * Update a pocket in GLOBAL registry
+ * 
+ * @param pocketId - ID of pocket to update
+ * @param updates - Partial pocket object with updates
+ * @returns Updated pocket
+ */
+async function updateGlobalPocket(
+  pocketId: string, 
+  updates: Partial<Pocket>
+): Promise<Pocket> {
+  const existing = await kv.get(`pocket:global:${pocketId}`);
+  if (!existing) {
+    throw new Error(`Pocket ${pocketId} not found`);
+  }
+  
+  const updated = { ...existing, ...updates };
+  await kv.set(`pocket:global:${pocketId}`, updated);
+  console.log(`[GLOBAL POCKETS] Updated pocket: ${pocketId}`, Object.keys(updates));
+  return updated;
+}
+
+/**
+ * Delete pocket (soft delete - archive)
+ * Pockets are NEVER truly deleted, only archived
+ * 
+ * @param pocketId - ID of pocket to archive
+ */
+async function archivePocket(pocketId: string): Promise<void> {
+  await updateGlobalPocket(pocketId, {
+    status: 'archived',
+    archivedAt: new Date().toISOString()
+  });
+  console.log(`[GLOBAL POCKETS] Archived pocket: ${pocketId}`);
+}
+
+/**
+ * Get active pockets only (exclude archived)
+ * 
+ * @returns Array of active pockets
+ */
+async function getActivePockets(): Promise<Pocket[]> {
+  const allPockets = await getGlobalPockets();
+  return allPockets.filter(p => p.status !== 'archived');
+}
+
+// ============================================
+// 🔧 BACKWARD COMPATIBILITY: Old getPockets() function
+// Kept for migration period, will be removed in Phase 2
+// ============================================
+
 /**
  * Get or create pockets for a month
  * Includes auto-migration for legacy icon names
+ * 
+ * ⚠️ UPDATED: Now fetches from global registry
+ * Month parameter kept for API compatibility
  */
 async function getPockets(monthKey: string): Promise<Pocket[]> {
-  let pockets = await kv.get(`pockets:${monthKey}`);
-  
-  if (!pockets || pockets.length === 0) {
-    // Auto-create default pockets
-    pockets = DEFAULT_POCKETS;
-    await kv.set(`pockets:${monthKey}`, pockets);
-    return pockets;
-  }
-  
-  // AUTO-MIGRATION: Convert old Lucide icon names to emoji
-  let needsUpdate = false;
-  const updatedPockets = pockets.map((pocket: Pocket) => {
-    // Convert Wallet icon to 💰 emoji
-    if (pocket.icon === 'Wallet') {
-      needsUpdate = true;
-      return { ...pocket, icon: '💰', color: pocket.color || '#3b82f6' };
-    }
-    // Convert Sparkles icon to ❄️ emoji
-    if (pocket.icon === 'Sparkles') {
-      needsUpdate = true;
-      return { ...pocket, icon: '❄️', color: pocket.color || '#8b5cf6' };
-    }
-    return pocket;
-  });
-  
-  // Save updated pockets if migration occurred
-  if (needsUpdate) {
-    await kv.set(`pockets:${monthKey}`, updatedPockets);
-    console.log(`[MIGRATION] Converted legacy icons to emoji for month ${monthKey}`);
-    return updatedPockets;
-  }
-  
-  return pockets;
+  // ✅ FASE 1: Now fetch from global registry (not per-month)
+  // Month parameter kept for backward compatibility with API
+  return await getActivePockets();
 }
 
 /**
  * Calculate balance for a specific pocket
  * @param sharedData - Optional shared data to avoid redundant fetches
+ * @param asOfDate - Optional date to calculate balance as of specific date (for realtime mode)
+ * 
+ * 🔥 UNIVERSAL CARRY-OVER V4: Now returns both realtime and projected balances
  */
 async function calculatePocketBalance(
   pocketId: string,
@@ -267,64 +353,229 @@ async function calculatePocketBalance(
     additionalIncome?: any[];
     transfers?: any[];
     excludeState?: any;
-  }
+  },
+  asOfDate?: string  // ✅ NEW: Optional date for realtime calculation (ISO format)
 ): Promise<PocketBalance> {
   // Get all data (use shared data if provided)
-  const budget = sharedData?.budget || await kv.get(`budget:${monthKey}`) || { initialBudget: 0, carryover: 0 };
-  const expensesData = sharedData?.expensesData || await kv.getByPrefix(`expense:${monthKey}:`) || [];
-  const additionalIncome = sharedData?.additionalIncome || await kv.getByPrefix(`income:${monthKey}:`) || [];
-  const transfers = sharedData?.transfers || await kv.getByPrefix(`transfer:${monthKey}:`) || [];
-  const excludeState = sharedData?.excludeState || await kv.get(`exclude-state:${monthKey}`) || { excludedExpenseIds: [], excludedIncomeIds: [] };
+  // ✅ BACKWARD COMPATIBILITY: carryover field removed, default to 0 for old data
+  let budget, expensesData, additionalIncome, transfers, excludeState;
+  
+  if (sharedData) {
+    budget = sharedData.budget;
+    expensesData = sharedData.expensesData;
+    additionalIncome = sharedData.additionalIncome;
+    transfers = sharedData.transfers;
+    excludeState = sharedData.excludeState;
+  } else {
+    try {
+      budget = await kv.get(`budget:${monthKey}`).catch(() => null);
+      expensesData = await kv.getByPrefix(`expense:${monthKey}:`).catch(() => []);
+      additionalIncome = await kv.getByPrefix(`income:${monthKey}:`).catch(() => []);
+      transfers = await kv.getByPrefix(`transfer:${monthKey}:`).catch(() => []);
+      excludeState = await kv.get(`exclude-state:${monthKey}`).catch(() => null);
+    } catch (error: any) {
+      console.warn(`[BALANCE] Failed to fetch data for ${monthKey}:`, error.message);
+      budget = null;
+      expensesData = [];
+      additionalIncome = [];
+      transfers = [];
+      excludeState = null;
+    }
+  }
+  
+  budget = budget || { initialBudget: 0 };
+  expensesData = expensesData || [];
+  additionalIncome = additionalIncome || [];
+  transfers = transfers || [];
+  excludeState = excludeState || { excludedExpenseIds: [], excludedIncomeIds: [] };
   
   const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
   const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
+  
+  // ✅ TUGAS 1: Date filtering for realtime vs projected
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cutoffDate = asOfDate ? new Date(asOfDate) : today;
+  cutoffDate.setHours(0, 0, 0, 0);
+  const cutoffTime = cutoffDate.getTime();
+  
+  const isOnOrBefore = (dateStr: string): boolean => {
+    const date = new Date(dateStr);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime() <= cutoffTime;
+  };
   
   let originalAmount = 0;
   let transferIn = 0;
   let transferOut = 0;
   let expensesTotal = 0;
   
+  // ============================================
+  // 🚀 FASE 2: PROPER CARRY-OVER LOGIC PER POCKET TYPE
+  // ============================================
+  
   // Calculate original amount for this month
   if (pocketId === POCKET_IDS.DAILY) {
-    // For DAILY pocket, use manual budget.carryover field (not auto-generated carry over)
-    originalAmount = (budget.initialBudget || 0) + (budget.carryover || 0);
-  } else if (pocketId === POCKET_IDS.COLD_MONEY) {
-    originalAmount = additionalIncome
-      .filter((income: any) => !excludedIncomeIds.has(income.id))
-      .reduce((sum: number, income: any) => sum + income.amountIDR - income.deduction, 0);
-  } else {
-    // For custom pockets, use auto-generated carry over from previous month
-    const carryOvers = await getCarryOvers(monthKey);
-    const carryOver = carryOvers.find((co: CarryOverEntry) => co.pocketId === pocketId);
+    // ✅ TIPE 1: SEHARI-HARI (Zero-Based Budgeting)
+    // Saldo Awal = Carry-over bulan lalu + Budget baru bulan ini
+    const carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    const newBudget = budget?.initialBudget || 0;
     
-    if (carryOver) {
-      originalAmount = carryOver.amount;
-    }
+    originalAmount = (carryOver?.amount || 0) + newBudget;
+    
+    console.log(`[BALANCE] 💰 Daily Pocket ${monthKey}:`, {
+      carryOverFromPrevMonth: carryOver?.amount || 0,
+      newMonthBudget: newBudget,
+      totalSaldoAwal: originalAmount
+    });
+    
+  } else if (pocketId === POCKET_IDS.COLD_MONEY) {
+    // ✅ TIPE 2: UANG DINGIN (Simple Carry-Over)
+    // Saldo Awal = Saldo akhir bulan lalu
+    // Income bulan ini ditambahkan TERPISAH (bukan di saldo awal)
+    const carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    
+    originalAmount = carryOver?.amount || 0;
+    
+    console.log(`[BALANCE] ❄️ Cold Money ${monthKey}:`, {
+      carryOverFromPrevMonth: carryOver?.amount || 0,
+      totalSaldoAwal: originalAmount
+    });
+    
+  } else {
+    // ✅ TIPE 3: CUSTOM POCKETS (Simple Carry-Over)
+    // Saldo Awal = Saldo akhir bulan lalu
+    const carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    
+    originalAmount = carryOver?.amount || 0;
+    
+    console.log(`[BALANCE] 🎯 Custom Pocket ${monthKey}:`, {
+      pocketId,
+      carryOverFromPrevMonth: carryOver?.amount || 0,
+      totalSaldoAwal: originalAmount
+    });
   }
   
-  // Calculate transfers
-  transferIn = transfers
+  // ============================================
+  // ✅ TUGAS 1: CALCULATE REALTIME BALANCE (up to cutoff date)
+  // ============================================
+  
+  // Calculate transfers (REALTIME - up to cutoff date)
+  const transferInRealtime = transfers
+    .filter((t: TransferTransaction) => t.toPocketId === pocketId && isOnOrBefore(t.date))
+    .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
+    
+  const transferOutRealtime = transfers
+    .filter((t: TransferTransaction) => t.fromPocketId === pocketId && isOnOrBefore(t.date))
+    .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
+  
+  // Calculate expenses for this pocket (REALTIME - up to cutoff date)
+  const expensesTotalRealtime = expensesData
+    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id) && isOnOrBefore(e.date))
+    .reduce((sum: number, e: any) => sum + e.amount, 0);
+  
+  // ✅ FASE 2: Add income for Uang Dingin and Custom Pockets (REALTIME - up to cutoff date)
+  let incomeTotalRealtime = 0;
+  if (pocketId === POCKET_IDS.COLD_MONEY || pocketId.startsWith('pocket_custom_')) {
+    // ✅ FIX: Handle cases where amountIDR might be missing (backward compat)
+    // ✅ BACKWARD COMPATIBILITY: If income.pocketId is undefined, default to COLD_MONEY
+    incomeTotalRealtime = additionalIncome
+      .filter((income: any) => {
+        const incomePocketId = income.pocketId || POCKET_IDS.COLD_MONEY;
+        return incomePocketId === pocketId && 
+               !excludedIncomeIds.has(income.id) &&
+               isOnOrBefore(income.date);
+      })
+      .reduce((sum: number, income: any) => {
+        const incomeAmount = income.amountIDR || income.amount || 0;
+        const deduction = income.deduction || 0;
+        return sum + (incomeAmount - deduction);
+      }, 0);
+  }
+  
+  const realtimeBalance = originalAmount + incomeTotalRealtime + transferInRealtime - transferOutRealtime - expensesTotalRealtime;
+  
+  // ============================================
+  // ✅ TUGAS 1: CALCULATE PROJECTED BALANCE (all transactions)
+  // ============================================
+  
+  // Calculate transfers (PROJECTED - all transactions)
+  const transferInProjected = transfers
     .filter((t: TransferTransaction) => t.toPocketId === pocketId)
     .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
     
-  transferOut = transfers
+  const transferOutProjected = transfers
     .filter((t: TransferTransaction) => t.fromPocketId === pocketId)
     .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
   
-  // Calculate expenses for this pocket
-  expensesTotal = expensesData
+  // Calculate expenses for this pocket (PROJECTED - all transactions)
+  const expensesTotalProjected = expensesData
     .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id))
     .reduce((sum: number, e: any) => sum + e.amount, 0);
   
-  const availableBalance = originalAmount + transferIn - transferOut - expensesTotal;
+  // ✅ FASE 2: Add income for Uang Dingin and Custom Pockets (PROJECTED - all transactions)
+  let incomeTotalProjected = 0;
+  if (pocketId === POCKET_IDS.COLD_MONEY || pocketId.startsWith('pocket_custom_')) {
+    // ✅ BACKWARD COMPATIBILITY: If income.pocketId is undefined, default to COLD_MONEY
+    const filteredIncome = additionalIncome.filter((income: any) => {
+      const incomePocketId = income.pocketId || POCKET_IDS.COLD_MONEY;
+      return incomePocketId === pocketId && !excludedIncomeIds.has(income.id);
+    });
+    
+    console.log(`[BALANCE DEBUG] ${pocketId} Income Count: ${filteredIncome.length}`);
+    filteredIncome.forEach((inc: any) => {
+      console.log(`[BALANCE DEBUG] Income:`, {
+        id: inc.id,
+        name: inc.name,
+        pocketId: inc.pocketId,
+        amount: inc.amount,
+        amountIDR: inc.amountIDR,
+        deduction: inc.deduction,
+        calculated: (inc.amountIDR || inc.amount || 0) - (inc.deduction || 0)
+      });
+    });
+    
+    // ✅ FIX: Handle cases where amountIDR might be missing (backward compat)
+    incomeTotalProjected = filteredIncome
+      .reduce((sum: number, income: any) => {
+        const incomeAmount = income.amountIDR || income.amount || 0;
+        const deduction = income.deduction || 0;
+        return sum + (incomeAmount - deduction);
+      }, 0);
+    
+    console.log(`[BALANCE DEBUG] Total Income Projected: ${incomeTotalProjected}`);
+  }
   
+  const projectedBalance = originalAmount + incomeTotalProjected + transferInProjected - transferOutProjected - expensesTotalProjected;
+  
+  console.log(`[BALANCE] 📊 ${pocketId} ${monthKey}:`, {
+    realtime: realtimeBalance,
+    projected: projectedBalance,
+    cutoffDate: cutoffDate.toISOString().split('T')[0],
+    breakdown: {
+      originalAmount,
+      incomeRealtime: incomeTotalRealtime,
+      incomeProjected: incomeTotalProjected,
+      transferInRealtime,
+      transferInProjected,
+      transferOutRealtime,
+      transferOutProjected,
+      expensesRealtime: expensesTotalRealtime,
+      expensesProjected: expensesTotalProjected
+    }
+  });
+  
+  // ✅ TUGAS 1: Return both realtime and projected balances
   return {
     pocketId,
     originalAmount,
-    transferIn,
-    transferOut,
-    expenses: expensesTotal,
-    availableBalance,
+    income: incomeTotalProjected, // 💰 Include income in response for breakdown display (use projected for compatibility)
+    transferIn: transferInProjected,
+    transferOut: transferOutProjected,
+    expenses: expensesTotalProjected,
+    availableBalance: projectedBalance, // ✅ BACKWARD COMPAT: Default to projected (end of month balance)
+    realtimeBalance,  // ✅ NEW: Realtime balance (up to cutoff date)
+    projectedBalance, // ✅ NEW: Projected balance (all transactions)
     lastUpdated: new Date().toISOString()
   };
 }
@@ -353,14 +604,138 @@ function formatMonth(monthKey: string): string {
   return `${months[parseInt(month) - 1]} ${year}`;
 }
 
+// ============================================
+// 🚀 FASE 2: CARRY-OVER LOGIC
+// Proper carry-over calculations per pocket type
+// ============================================
+
 /**
- * Generate carry overs for new month
- * Called when user first accesses a new month
+ * Get carry-over entry for a specific pocket
+ * Helper function to fetch carry-over data
+ * 
+ * @param pocketId - ID of pocket
+ * @param monthKey - Target month (e.g., "2025-12")
+ * @returns CarryOverEntry or null if not found
  */
-async function generateCarryOvers(
+async function getCarryOverForPocket(
+  pocketId: string,
+  monthKey: string
+): Promise<CarryOverEntry | null> {
+  try {
+    const carryOver = await kv.get(`carryover:${monthKey}:${pocketId}`);
+    return carryOver;
+  } catch (error) {
+    console.error(`[CARRY-OVER] Error fetching for ${pocketId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Check if carry-over data exists for a month
+ * Used to determine if we need to auto-generate
+ * 
+ * @param monthKey - Month to check (e.g., "2025-12")
+ * @returns true if carry-over data exists
+ */
+async function checkCarryOverExists(monthKey: string): Promise<boolean> {
+  const carryOvers = await kv.getByPrefix(`carryover:${monthKey}:`);
+  return carryOvers.length > 0;
+}
+
+/**
+ * Generate carry-over entries for next month
+ * Called automatically when user navigates to new month
+ * 
+ * @param currentMonthKey - Current month (e.g., "2025-11")
+ */
+async function generateCarryOversForNextMonth(
+  currentMonthKey: string
+): Promise<void> {
+  try {
+    // Parse current month
+    const [year, month] = currentMonthKey.split('-').map(Number);
+    
+    // Calculate next month
+    let nextYear = year;
+    let nextMonth = month + 1;
+    
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear = year + 1;
+    }
+    
+    const nextMonthKey = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+    
+    console.log(`[CARRY-OVER] Generating carry-overs: ${currentMonthKey} → ${nextMonthKey}`);
+    
+    // Get all active pockets
+    const pockets = await getActivePockets();
+    
+    // Generate carry-over for each pocket
+    const carryOverPromises = pockets.map(async (pocket) => {
+      try {
+        // Calculate final balance of current month
+        const balance = await calculatePocketBalance(pocket.id, currentMonthKey);
+        
+        // ✅ TUGAS 1 FIX: Use projectedBalance (includes ALL future transactions)
+        // This ensures carry-over amount matches "Saldo Proyeksi" shown in previous month
+        const carryOverAmount = balance.projectedBalance ?? balance.availableBalance;
+        
+        // Create carry-over entry
+        const carryOver: CarryOverEntry = {
+          id: `carryover_${nextMonthKey}_${pocket.id}`,
+          pocketId: pocket.id,
+          fromMonth: currentMonthKey,
+          toMonth: nextMonthKey,
+          amount: carryOverAmount,
+          breakdown: {
+            originalBalance: balance.originalAmount,
+            income: balance.income || 0, // ✅ Include income from previous month
+            expenses: balance.expenses,
+            transferIn: balance.transferIn,
+            transferOut: balance.transferOut,
+            finalBalance: carryOverAmount
+          },
+          createdAt: new Date().toISOString(),
+          autoGenerated: true
+        };
+        
+        // Save carry-over
+        await kv.set(`carryover:${nextMonthKey}:${pocket.id}`, carryOver);
+        
+        console.log(`[CARRY-OVER] ✅ Saved: ${pocket.name} (${pocket.id}) = ${carryOver.amount}`);
+        
+        return carryOver;
+      } catch (error) {
+        console.error(`[CARRY-OVER] ❌ Error for pocket ${pocket.id}:`, error);
+        return null;
+      }
+    });
+    
+    const results = await Promise.all(carryOverPromises);
+    const successful = results.filter(r => r !== null).length;
+    
+    console.log(`[CARRY-OVER] 🎉 Generated ${successful}/${pockets.length} carry-overs for ${nextMonthKey}`);
+  } catch (error) {
+    console.error('[CARRY-OVER] ❌ Error generating carry-overs:', error);
+    throw error;
+  }
+}
+
+/**
+ * ⚠️ DEPRECATED - Use generateCarryOversForNextMonth() instead (FASE 2)
+ * 
+ * OLD: Stores as array at `carryovers:${toMonth}` (plural)
+ * NEW: Stores per pocket at `carryover:${toMonth}:${pocketId}` (singular)
+ * 
+ * Kept for backward compatibility reference only.
+ */
+async function generateCarryOvers_DEPRECATED(
   fromMonth: string,
   toMonth: string
 ): Promise<CarryOverEntry[]> {
+  console.warn('[DEPRECATED] generateCarryOvers() called - use generateCarryOversForNextMonth() instead');
+  
   // Get all pockets from previous month
   const pockets = await getPockets(fromMonth);
   const carryOvers: CarryOverEntry[] = [];
@@ -369,20 +744,23 @@ async function generateCarryOvers(
     // Calculate final balance of previous month
     const balance = await calculatePocketBalance(pocket.id, fromMonth);
     
+    // ✅ TUGAS 1 FIX: Use projectedBalance for carry-over
+    const carryOverAmount = balance.projectedBalance ?? balance.availableBalance;
+    
     // Create carry over even if balance is 0 or negative (for tracking)
     const carryOver: CarryOverEntry = {
       id: `carryover_${toMonth}_${pocket.id}`,
       pocketId: pocket.id,
       fromMonth,
       toMonth,
-      amount: balance.availableBalance,
+      amount: carryOverAmount,
       breakdown: {
         originalBalance: balance.originalAmount,
-        income: 0, // Will be detailed in timeline
+        income: balance.income || 0, // ✅ Include income from previous month
         expenses: balance.expenses,
         transferIn: balance.transferIn,
         transferOut: balance.transferOut,
-        finalBalance: balance.availableBalance
+        finalBalance: carryOverAmount  // ✅ Use projected balance
       },
       createdAt: new Date().toISOString(),
       autoGenerated: true
@@ -391,7 +769,7 @@ async function generateCarryOvers(
     carryOvers.push(carryOver);
   }
   
-  // Save to KV store
+  // Save to KV store (OLD format)
   await kv.set(`carryovers:${toMonth}`, carryOvers);
   
   return carryOvers;
@@ -627,14 +1005,16 @@ async function calculateBudgetHealth(monthKey: string): Promise<BudgetHealth> {
 /**
  * Generate timeline entries for a pocket
  * Includes: initial balance, income, expenses, and transfers
+ * 
+ * ✅ FASE 3: Updated to filter by month and use proper carry-over data
  */
-function generatePocketTimeline(
+async function generatePocketTimeline(
   pocketId: string,
   monthKey: string,
   sortOrder: 'asc' | 'desc',
   sharedData: any
-): TimelineEntry[] {
-  const { budget, expenses, additionalIncome, transfers, excludeState, pockets, carryOvers } = sharedData;
+): Promise<TimelineEntry[]> {
+  const { budget, expenses, additionalIncome, transfers, excludeState, pockets } = sharedData;
   
   const excludedExpenseIds = new Set(excludeState.excludedExpenseIds || []);
   const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
@@ -643,57 +1023,124 @@ function generatePocketTimeline(
   const pocket = pockets.find((p: Pocket) => p.id === pocketId);
   const pocketName = pocket?.name || 'Unknown Pocket';
   
+  // ✅ FASE 3: Filter transactions by month
+  const [targetYear, targetMonth] = monthKey.split('-');
+  
+  const isInCurrentMonth = (dateStr: string): boolean => {
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}` === monthKey;
+  };
+  
   // Simple approach: collect all transactions, then sort and calculate balance
-  // No special handling - Budget Awal is just another income transaction
   const allTransactions: any[] = [];
   
-  // 1. Add initial balance as income transaction (if applicable)
+  // ============================================
+  // ✅ FASE 3: SALDO AWAL ENTRY (Top of Timeline)
+  // ============================================
+  
+  // 1. Add "Saldo Awal" entry for ALL pocket types
   if (pocketId === POCKET_IDS.DAILY) {
-    // Sehari-hari: Budget Awal = initialBudget + carryover
-    const budgetData = budget || { initialBudget: 0, carryover: 0 };
-    const initialAmount = (budgetData.initialBudget || 0) + (budgetData.carryover || 0);
+    // ✅ TIPE 1: SEHARI-HARI (Zero-Based Budgeting)
+    // Saldo Awal = Carry-over + Budget Baru
+    let carryOver = null;
+    try {
+      carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    } catch (error) {
+      console.warn('[TIMELINE] Error fetching carry-over for Daily pocket:', error);
+    }
+    const newBudget = budget?.initialBudget || 0;
+    const totalSaldoAwal = (carryOver?.amount || 0) + newBudget;
     
-    if (initialAmount !== 0) {
-      allTransactions.push({
-        id: `initial_${pocketId}`,
-        type: 'income',
-        date: `${monthKey}-01T00:00:00.000Z`,
-        description: 'Budget Awal',
-        amount: initialAmount,
-        icon: 'Wallet',
-        color: 'green',
-        metadata: {
-          initialBudget: budgetData.initialBudget,
-          carryover: budgetData.carryover,
-          isPrimaryPocket: true
-        }
-      });
-    }
+    allTransactions.push({
+      id: `initial_${pocketId}`,
+      type: 'initial_balance',
+      date: `${monthKey}-01T00:00:00.000Z`,
+      description: 'Saldo Awal',
+      amount: totalSaldoAwal,
+      icon: '💰',
+      color: 'blue',
+      metadata: {
+        pocketType: 'daily',
+        carryOverFromPrevMonth: carryOver?.amount || 0,
+        newMonthBudget: newBudget,
+        breakdown: {
+          carryOver: carryOver?.amount || 0,
+          newBudget: newBudget
+        },
+        isInitialBalance: true
+      }
+    });
+    
   } else if (pocketId === POCKET_IDS.COLD_MONEY) {
-    // Uang Dingin: no initial entry, all income shown separately
-  } else {
-    // Custom pockets: Saldo Awal from carry over
-    const carryOver = carryOvers.find((co: any) => co.pocketId === pocketId);
-    if (carryOver && carryOver.amount !== 0) {
-      allTransactions.push({
-        id: `initial_${pocketId}`,
-        type: 'income',
-        date: `${monthKey}-01T00:00:00.000Z`,
-        description: 'Saldo Awal (Carry Over)',
-        amount: carryOver.amount,
-        icon: 'TrendingUp',
-        color: 'green',
-        metadata: {
-          fromMonth: carryOver.fromMonth,
-          breakdown: carryOver.breakdown
-        }
-      });
+    // ✅ TIPE 2: UANG DINGIN (Simple Carry-Over)
+    // Saldo Awal = Saldo akhir bulan lalu
+    let carryOver = null;
+    try {
+      carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    } catch (error) {
+      console.warn('[TIMELINE] Error fetching carry-over for Cold Money:', error);
     }
+    const saldoAwal = carryOver?.amount || 0;
+    
+    // Always show Saldo Awal (even if 0) for consistency
+    allTransactions.push({
+      id: `initial_${pocketId}`,
+      type: 'initial_balance',
+      date: `${monthKey}-01T00:00:00.000Z`,
+      description: 'Saldo Awal',
+      amount: saldoAwal,
+      icon: '❄️',
+      color: 'blue',
+      metadata: {
+        pocketType: 'cold_money',
+        carryOverFromPrevMonth: saldoAwal,
+        fromMonth: carryOver?.fromMonth,
+        isInitialBalance: true
+      }
+    });
+    
+  } else {
+    // ✅ TIPE 3: CUSTOM POCKETS (Simple Carry-Over)
+    // Saldo Awal = Saldo akhir bulan lalu
+    let carryOver = null;
+    try {
+      carryOver = await getCarryOverForPocket(pocketId, monthKey);
+    } catch (error) {
+      console.warn('[TIMELINE] Error fetching carry-over for custom pocket:', error);
+    }
+    const saldoAwal = carryOver?.amount || 0;
+    
+    allTransactions.push({
+      id: `initial_${pocketId}`,
+      type: 'initial_balance',
+      date: `${monthKey}-01T00:00:00.000Z`,
+      description: 'Saldo Awal',
+      amount: saldoAwal,
+      icon: '🎯',
+      color: 'blue',
+      metadata: {
+        pocketType: 'custom',
+        carryOverFromPrevMonth: saldoAwal,
+        fromMonth: carryOver?.fromMonth,
+        breakdown: carryOver?.breakdown,
+        isInitialBalance: true
+      }
+    });
   }
   
-  // 2. Expenses for this pocket
+  // ============================================
+  // ✅ FASE 3: FILTER TRANSACTIONS BY MONTH
+  // ============================================
+  
+  // 2. Expenses for this pocket (ONLY current month)
   const pocketExpenses = expenses
-    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id))
+    .filter((e: any) => 
+      e.pocketId === pocketId && 
+      !excludedExpenseIds.has(e.id) &&
+      isInCurrentMonth(e.date) // ✅ Filter by month!
+    )
     .map((e: any) => ({
       id: e.id,
       type: 'expense' as TransactionType,
@@ -709,37 +1156,49 @@ function generatePocketTimeline(
       }
     }));
   
-  // 3. Additional income (for Cold Money pocket)
+  // 3. Additional income (ONLY current month)
   // Backward compatibility: if pocketId is undefined, default to Cold Money pocket
   const pocketIncome = additionalIncome
     .filter((i: any) => {
-      const incomePoketId = i.pocketId || POCKET_IDS.COLD_MONEY;
-      return incomePoketId === pocketId && !excludedIncomeIds.has(i.id);
+      const incomePocketId = i.pocketId || POCKET_IDS.COLD_MONEY;  // ✅ FIX: Typo "Poket" → "Pocket"
+      return incomePocketId === pocketId && 
+             !excludedIncomeIds.has(i.id) &&
+             isInCurrentMonth(i.date); // ✅ Filter by month!
     })
-    .map((i: any) => ({
-      id: i.id,
-      type: 'income' as TransactionType,
-      date: i.date,
-      description: i.name,
-      amount: i.amountIDR - i.deduction,
-      icon: 'DollarSign',
-      color: 'green',
-      metadata: {
-        amountUSD: i.amountUSD,
-        exchangeRate: i.exchangeRate,
-        deduction: i.deduction
-      }
-    }));
+    .map((i: any) => {
+      // ✅ BACKWARD COMPATIBILITY: Handle missing amountIDR (old data or IDR-only income)
+      const incomeAmount = i.amountIDR || i.amount || 0;
+      const deduction = i.deduction || 0;
+      
+      return {
+        id: i.id,
+        type: 'income' as TransactionType,
+        date: i.date,
+        description: i.name,
+        amount: incomeAmount - deduction,
+        icon: 'DollarSign',
+        color: 'green',
+        metadata: {
+          amountUSD: i.amountUSD,
+          exchangeRate: i.exchangeRate,
+          deduction: i.deduction
+        }
+      };
+    });
   
-  // 4. Transfers - show both incoming and outgoing
+  // 4. Transfers (ONLY current month)
   const pocketTransfers: any[] = [];
   
   transfers.forEach((t: any) => {
+    // ✅ FASE 3: Filter by month!
+    if (!isInCurrentMonth(t.date)) return;
+    
     // Transfer OUT (from this pocket)
     if (t.fromPocketId === pocketId) {
       // BACKWARD COMPATIBILITY: Use stored name if available, otherwise lookup from pockets array
       const toPocket = pockets.find((p: Pocket) => p.id === t.toPocketId);
-      const toPocketName = t.toPocketName || toPocket?.name || 'Unknown Pocket';
+      const isUnknownPocket = !t.toPocketName && !toPocket;
+      const toPocketName = t.toPocketName || toPocket?.name || 'Kantong Lama (Tidak Aktif)';
       
       pocketTransfers.push({
         id: `${t.id}_out`,
@@ -755,7 +1214,8 @@ function generatePocketTimeline(
           fromPocketId: t.fromPocketId,
           toPocketId: t.toPocketId,
           toPocketName: toPocketName,
-          note: t.note
+          note: t.note,
+          isUnknownPocket: isUnknownPocket // ⚠️ Flag for old data with missing pocket reference
         }
       });
     }
@@ -764,7 +1224,8 @@ function generatePocketTimeline(
     if (t.toPocketId === pocketId) {
       // BACKWARD COMPATIBILITY: Use stored name if available, otherwise lookup from pockets array
       const fromPocket = pockets.find((p: Pocket) => p.id === t.fromPocketId);
-      const fromPocketName = t.fromPocketName || fromPocket?.name || 'Unknown Pocket';
+      const isUnknownPocket = !t.fromPocketName && !fromPocket;
+      const fromPocketName = t.fromPocketName || fromPocket?.name || 'Kantong Lama (Tidak Aktif)';
       
       pocketTransfers.push({
         id: `${t.id}_in`,
@@ -780,7 +1241,8 @@ function generatePocketTimeline(
           fromPocketId: t.fromPocketId,
           toPocketId: t.toPocketId,
           fromPocketName: fromPocketName,
-          note: t.note
+          note: t.note,
+          isUnknownPocket: isUnknownPocket // ⚠️ Flag for old data with missing pocket reference
         }
       });
     }
@@ -819,13 +1281,15 @@ function generatePocketTimeline(
 }
 
 // ============================================
-// ARCHIVE SYSTEM - HELPER FUNCTIONS
+// ARCHIVE SYSTEM - HELPER FUNCTIONS (OLD/DEPRECATED)
+// ⚠️ These use OLD per-month storage, kept for backward compatibility
 // ============================================
 
 /**
  * Archive a pocket (must have balance = 0)
+ * ⚠️ DEPRECATED - Uses OLD per-month storage system
  */
-async function archivePocket(request: ArchiveRequest): Promise<ArchiveResult> {
+async function archivePocket_OLD(request: ArchiveRequest): Promise<ArchiveResult> {
   const { pocketId, monthKey, reason } = request;
   
   // 1. Get current pockets
@@ -890,8 +1354,9 @@ async function archivePocket(request: ArchiveRequest): Promise<ArchiveResult> {
 
 /**
  * Unarchive a pocket (restore to active)
+ * ⚠️ DEPRECATED - Uses OLD per-month storage system
  */
-async function unarchivePocket(pocketId: string, monthKey: string): Promise<ArchiveResult> {
+async function unarchivePocket_OLD(pocketId: string, monthKey: string): Promise<ArchiveResult> {
   // 1. Get archived pockets
   const archivedKey = 'archived_pockets';
   const archived = await kv.get(archivedKey) || [];
@@ -924,16 +1389,18 @@ async function unarchivePocket(pocketId: string, monthKey: string): Promise<Arch
 
 /**
  * Get archived pockets
+ * ⚠️ DEPRECATED - Uses OLD archive storage system
  */
-async function getArchivedPockets(): Promise<Pocket[]> {
+async function getArchivedPockets_OLD(): Promise<Pocket[]> {
   const archivedKey = 'archived_pockets';
   return await kv.get(archivedKey) || [];
 }
 
 /**
  * Get archive history
+ * ⚠️ DEPRECATED - Uses OLD archive storage system
  */
-async function getArchiveHistory(): Promise<ArchiveHistoryEntry[]> {
+async function getArchiveHistory_OLD(): Promise<ArchiveHistoryEntry[]> {
   const historyKey = 'archive_history';
   return await kv.get(historyKey) || [];
 }
@@ -966,6 +1433,15 @@ function validateTransfer(
 }
 
 const app = new Hono();
+
+// 🔥 CRITICAL DEBUG: Log ALL incoming requests FIRST
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  console.log(`\n🔥 [INCOMING] ${c.req.method} ${url.pathname}`);
+  console.log(`🔥 [INCOMING] Time: ${new Date().toISOString()}`);
+  await next();
+  console.log(`✅ [COMPLETED] ${c.req.method} ${url.pathname}\n`);
+});
 
 // Enable logger
 app.use('*', logger(console.log));
@@ -1002,10 +1478,22 @@ app.get("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
       calculatePreviousMonthRemaining(year, month)
     ]);
     
+    console.log(`🔍 [GET BUDGET DEBUG] ${monthKey}:`);
+    console.log(`  ├─ Query prefix: expense:${monthKey}:`);
+    console.log(`  ├─ Found ${expenses?.length || 0} expenses`);
+    if (expenses && expenses.length > 0) {
+      console.log(`  ├─ First 3 expenses:`);
+      expenses.slice(0, 3).forEach((exp: any) => {
+        const expDate = new Date(exp.date);
+        const expMonth = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}`;
+        console.log(`  │   • ${exp.name}: date=${expMonth}, id=${exp.id}`);
+      });
+    }
+    console.log(`  └─ ��� Expenses filtered by PREFIX (storage key), not date field`);
+    
     return c.json({
       budget: budget || {
         initialBudget: 0,
-        carryover: 0,
         notes: "",
         incomeDeduction: 0,
       },
@@ -1034,14 +1522,16 @@ async function calculatePreviousMonthRemaining(year: string, month: string): Pro
     const prevMonthKey = `${prevYear}-${prevMonth.toString().padStart(2, '0')}`;
     
     // Fetch previous month data
-    const prevBudget = await kv.get(`budget:${prevMonthKey}`) || { initialBudget: 0, carryover: 0, incomeDeduction: 0 };
+    // ✅ BACKWARD COMPATIBILITY: Old data may have carryover field, ignore it
+    const prevBudget = await kv.get(`budget:${prevMonthKey}`) || { initialBudget: 0, incomeDeduction: 0 };
     const prevExpenses = await kv.getByPrefix(`expense:${prevMonthKey}:`) || [];
     const prevIncomes = await kv.getByPrefix(`income:${prevMonthKey}:`) || [];
     
     // Calculate previous month remaining
     const prevGrossIncome = prevIncomes.reduce((sum: number, income: any) => sum + (income.amountIDR || 0), 0);
     const prevTotalAdditionalIncome = prevGrossIncome - (prevBudget.incomeDeduction || 0);
-    const prevTotalIncome = Number(prevBudget.initialBudget || 0) + Number(prevBudget.carryover || 0) + prevTotalAdditionalIncome;
+    // ✅ CARRYOVER REMOVED: Sistem kantong sudah handle carry-over otomatis
+    const prevTotalIncome = Number(prevBudget.initialBudget || 0) + prevTotalAdditionalIncome;
     const prevTotalExpenses = prevExpenses.reduce((sum: number, expense: any) => sum + (expense.amount || 0), 0);
     const remaining = prevTotalIncome - prevTotalExpenses;
     
@@ -1060,11 +1550,13 @@ app.post("/make-server-3adbeaf1/budget/:year/:month", async (c) => {
     const key = `budget:${year}-${month}`;
     
     const body = await c.req.json();
-    const { initialBudget, carryover, notes, incomeDeduction } = body;
+    const { initialBudget, notes, incomeDeduction } = body;
     
+    // ✅ CARRYOVER REMOVED: Sistem kantong sudah handle carry-over otomatis
+    // Carryover manual tidak diperlukan lagi karena setiap kantong memiliki
+    // logic carry-over sendiri sesuai tipenya (Daily, Cold Money, Custom)
     const budgetData = {
       initialBudget: Number(initialBudget) || 0,
-      carryover: Number(carryover) || 0,
       notes: notes || "",
       incomeDeduction: Number(incomeDeduction) || 0,
       updatedAt: new Date().toISOString(),
@@ -1100,14 +1592,11 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     const month = c.req.param("month");
     const body = await c.req.json();
     
-    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = body;
+    const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category, emoji } = body;
     
     if (!name || amount === undefined) {
       return c.json({ error: "Name and amount are required" }, 400);
     }
-    
-    const expenseId = crypto.randomUUID();
-    const key = `expense:${year}-${month}:${expenseId}`;
     
     console.log(`[Add Single Expense] Received date: ${date} | Name: ${name}`);
     
@@ -1129,6 +1618,23 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
     
     console.log(`[Add Single Expense] Final date stored: ${expenseDate}`);
     
+    // ✅ FIX: Extract year-month from ACTUAL expense date, not URL params!
+    // This ensures expenses are stored in the correct month bucket
+    const actualDate = new Date(expenseDate);
+    const actualYear = actualDate.getUTCFullYear();
+    const actualMonth = String(actualDate.getUTCMonth() + 1).padStart(2, '0');
+    const actualMonthKey = `${actualYear}-${actualMonth}`;
+    
+    const expenseId = crypto.randomUUID();
+    const key = `expense:${actualMonthKey}:${expenseId}`;
+    
+    console.log(`🔍 [ADD EXPENSE DEBUG]`);
+    console.log(`  ├─ URL params: year=${year}, month=${month}`);
+    console.log(`  ├─ Expense date: ${expenseDate}`);
+    console.log(`  ├─ Extracted from date: year=${actualYear}, month=${actualMonth}`);
+    console.log(`  ├─ Storage key: ${key}`);
+    console.log(`  └─ ✅ Using date-based key (NOT URL params!)`);
+    
     const expenseData = {
       id: expenseId,
       name,
@@ -1137,6 +1643,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
       pocketId: pocketId || POCKET_IDS.DAILY, // Default to daily pocket
       ...(items && items.length > 0 ? { items } : {}),
       ...(color ? { color } : {}),
+      ...(emoji ? { emoji } : {}),
       ...(fromIncome ? { fromIncome: true } : {}),
       ...(currency ? { currency } : {}),
       ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
@@ -1175,14 +1682,11 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
     console.log(`[Add Batch Expenses] Processing ${expenses.length} expenses`);
     
     for (const expense of expenses) {
-      const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = expense;
+      const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category, emoji } = expense;
       
       if (!name || amount === undefined) {
         continue; // Skip invalid entries
       }
-      
-      const expenseId = crypto.randomUUID();
-      const key = `expense:${year}-${month}:${expenseId}`;
       
       console.log(`[Batch Item] Received date: ${date} | Name: ${name}`);
       
@@ -1200,6 +1704,17 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
         expenseDate = currentTime.toISOString();
       }
       
+      // ✅ FIX: Extract year-month from ACTUAL expense date, not URL params!
+      const actualDate = new Date(expenseDate);
+      const actualYear = actualDate.getUTCFullYear();
+      const actualMonth = String(actualDate.getUTCMonth() + 1).padStart(2, '0');
+      const actualMonthKey = `${actualYear}-${actualMonth}`;
+      
+      const expenseId = crypto.randomUUID();
+      const key = `expense:${actualMonthKey}:${expenseId}`;
+      
+      console.log(`🔍 [BATCH ITEM DEBUG] ${name}: URL=${year}-${month} | Date=${actualYear}-${actualMonth} | Key=${key}`);
+      
       const expenseData = {
         id: expenseId,
         name,
@@ -1208,6 +1723,7 @@ app.post("/make-server-3adbeaf1/expenses/:year/:month/batch", async (c) => {
         pocketId: pocketId || POCKET_IDS.DAILY,
         ...(items && items.length > 0 ? { items } : {}),
         ...(color ? { color } : {}),
+        ...(emoji ? { emoji } : {}),
         ...(fromIncome ? { fromIncome: true } : {}),
         ...(currency ? { currency } : {}),
         ...(originalAmount !== undefined ? { originalAmount: Number(originalAmount) } : {}),
@@ -1237,7 +1753,11 @@ app.delete("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     const id = c.req.param("id");
     const key = `expense:${year}-${month}:${id}`;
     
+    console.log(`[Delete Expense ${id}] Deleting key: ${key}`);
+    
     await kv.del(key);
+    
+    console.log(`[Delete Expense ${id}] ✅ Deleted successfully`);
     
     return c.json({ success: true });
   } catch (error: any) {
@@ -1248,10 +1768,10 @@ app.delete("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
 // Update expense
 app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
   try {
-    const year = c.req.param("year");
-    const month = c.req.param("month");
+    const urlYear = c.req.param("year");
+    const urlMonth = c.req.param("month");
     const id = c.req.param("id");
-    const key = `expense:${year}-${month}:${id}`;
+    const oldKey = `expense:${urlYear}-${urlMonth}:${id}`;
     const body = await c.req.json();
     
     const { name, amount, date, items, color, fromIncome, currency, originalAmount, exchangeRate, conversionType, deduction, pocketId, groupId, category } = body;
@@ -1261,49 +1781,50 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     }
     
     // Get existing expense to preserve createdAt, pocketId, and groupId if not provided
-    const existingExpense = await kv.get(key);
+    const existingExpense = await kv.get(oldKey);
     
     console.log(`[Edit Expense ${id}] Received category:`, category, '| Existing category:', existingExpense?.category);
     console.log(`[Edit Expense ${id}] Received date:`, date, '| Existing date:', existingExpense?.date);
     
-    // Parse date: if date is in YYYY-MM-DD format, preserve the original time or add current time
+    // ✅ TIMEZONE FIX: Parse date correctly to avoid +1 day bug
+    // When frontend sends "YYYY-MM-DD", we need to preserve the EXACT timestamp from existing expense
+    // The bug was: getHours() returns LOCAL time, but we applied it to a date created with local constructor,
+    // causing double timezone application!
     let expenseDate;
     let dateChanged = false;
     if (date) {
       if (date.includes('T')) {
-        // Already has time component
+        // Already has full ISO timestamp - use it directly
         expenseDate = date;
-        // Check if date changed (compare date part only)
+        // Check if date changed (compare UTC date part only)
         if (existingExpense?.date) {
-          const oldDateOnly = existingExpense.date.split('T')[0];
-          const newDateOnly = date.split('T')[0];
+          const oldDateOnly = new Date(existingExpense.date).toISOString().split('T')[0];
+          const newDateOnly = new Date(date).toISOString().split('T')[0];
           dateChanged = oldDateOnly !== newDateOnly;
         }
       } else {
-        // Just a date (YYYY-MM-DD), use the new date but preserve time component from existing expense if available
-        // Check if date changed
-        if (existingExpense?.date) {
-          const oldDateOnly = existingExpense.date.split('T')[0];
-          dateChanged = oldDateOnly !== date;
-        }
-        
+        // Just a date string (YYYY-MM-DD) from frontend
+        // We need to preserve the EXACT time from existing expense, but change the date part
         if (existingExpense?.date && existingExpense.date.includes('T')) {
-          // Extract time from existing expense, apply to new date
-          const existingDate = new Date(existingExpense.date);
-          // Parse the new date as YYYY-MM-DD and combine with existing time
-          // Use UTC parsing to avoid timezone shifts: "2024-11-06" -> parse as local date at midnight
-          const [year, month, day] = date.split('-').map(Number);
-          const newDateObj = new Date(year, month - 1, day); // Local timezone date at midnight
-          newDateObj.setHours(existingDate.getHours());
-          newDateObj.setMinutes(existingDate.getMinutes());
-          newDateObj.setSeconds(existingDate.getSeconds());
-          newDateObj.setMilliseconds(existingDate.getMilliseconds());
-          expenseDate = newDateObj.toISOString();
+          // Get the local date from existing expense to compare
+          const existingDateObj = new Date(existingExpense.date);
+          const existingLocalYear = existingDateObj.getFullYear();
+          const existingLocalMonth = existingDateObj.getMonth() + 1;
+          const existingLocalDay = existingDateObj.getDate();
+          const oldDateOnly = `${existingLocalYear}-${String(existingLocalMonth).padStart(2, '0')}-${String(existingLocalDay).padStart(2, '0')}`;
+          dateChanged = oldDateOnly !== date;
+          
+          // Extract ONLY the time part (HH:mm:ss.SSS) from existing ISO timestamp
+          const timePart = existingExpense.date.split('T')[1]; // e.g., "16:00:00.000Z"
+          
+          // Combine new date with EXACT time from existing (preserving UTC timezone!)
+          expenseDate = `${date}T${timePart}`;
         } else {
-          // Add current time to the new date
+          // No existing timestamp - create new one with current time
+          dateChanged = true;
           const currentTime = new Date();
           const [year, month, day] = date.split('-').map(Number);
-          const dateObj = new Date(year, month - 1, day); // Local timezone date at midnight
+          const dateObj = new Date(year, month - 1, day);
           dateObj.setHours(currentTime.getHours());
           dateObj.setMinutes(currentTime.getMinutes());
           dateObj.setSeconds(currentTime.getSeconds());
@@ -1356,7 +1877,63 @@ app.put("/make-server-3adbeaf1/expenses/:year/:month/:id", async (c) => {
     
     console.log(`[Edit Expense ${id}] Final category being saved:`, finalCategory);
     
-    await kv.set(key, expenseData);
+    // 🔧 CRITICAL FIX: Extract ACTUAL month from date field (like POST does)
+    // This handles migration from old wrong keys to correct keys!
+    const actualDate = new Date(expenseDate);
+    const actualYear = actualDate.getUTCFullYear();
+    const actualMonth = String(actualDate.getUTCMonth() + 1).padStart(2, '0');
+    const actualMonthKey = `${actualYear}-${actualMonth}`;
+    const correctKey = `expense:${actualMonthKey}:${id}`;
+    
+    // Check if key needs migration (month changed)
+    const oldMonthKey = `${urlYear}-${urlMonth}`;
+    const keyNeedsMigration = (actualMonthKey !== oldMonthKey);
+    
+    if (keyNeedsMigration) {
+      // 🔄 MIGRATION: Delete old key, save to correct key
+      console.log(`[Edit Expense ${id}] 🔄 MIGRATING from ${oldKey} to ${correctKey}`);
+      console.log(`  └─ Old month: ${oldMonthKey} | New month: ${actualMonthKey}`);
+      
+      // Delete old key
+      await kv.del(oldKey);
+      
+      // Save to correct key
+      await kv.set(correctKey, expenseData);
+      
+      console.log(`[Edit Expense ${id}] ✅ Migration complete!`);
+      
+      // 🔄 CRITICAL: Regenerate carry-over for affected months
+      // When expense moves from Month B to Month A, we need to regenerate:
+      // 1. Carry-over from Month A → next month (includes migrated expense)
+      // 2. Carry-over from Month B → next month (excludes migrated expense)
+      try {
+        console.log(`[Edit Expense ${id}] 🔄 Regenerating carry-overs for affected months...`);
+        
+        // Regenerate carry-over from OLD month (where expense was removed)
+        await generateCarryOversForNextMonth(oldMonthKey);
+        
+        // Regenerate carry-over from NEW month (where expense was added)
+        await generateCarryOversForNextMonth(actualMonthKey);
+        
+        console.log(`[Edit Expense ${id}] ✅ Carry-overs regenerated!`);
+      } catch (error) {
+        console.error(`[Edit Expense ${id}] ⚠️ Error regenerating carry-overs:`, error);
+        // Don't fail the request - carry-over will be regenerated on next month navigation
+      }
+    } else {
+      // No migration needed - just update
+      console.log(`[Edit Expense ${id}] ✅ Updating same key: ${correctKey}`);
+      await kv.set(correctKey, expenseData);
+      
+      // 🔄 Regenerate carry-over for current month (expense amount might have changed)
+      try {
+        console.log(`[Edit Expense ${id}] 🔄 Regenerating carry-over for current month...`);
+        await generateCarryOversForNextMonth(actualMonthKey);
+        console.log(`[Edit Expense ${id}] ✅ Carry-over regenerated!`);
+      } catch (error) {
+        console.error(`[Edit Expense ${id}] ⚠️ Error regenerating carry-over:`, error);
+      }
+    }
     
     return c.json({ success: true, data: expenseData });
   } catch (error: any) {
@@ -1418,7 +1995,8 @@ app.post("/make-server-3adbeaf1/additional-income/:year/:month", async (c) => {
     const incomeData = {
       id: incomeId,
       name,
-      amount: Number(amount),
+      amount: Number(amount), // Legacy field (keep for backward compat)
+      amountUSD: Number(amount), // ✅ NEW: Proper field name for TypeScript
       currency: currency || "IDR",
       exchangeRate: exchangeRate ? Number(exchangeRate) : null,
       amountIDR: Number(amountIDR),
@@ -1460,10 +2038,10 @@ app.delete("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c)
 // Update additional income
 app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) => {
   try {
-    const year = c.req.param("year");
-    const month = c.req.param("month");
+    const urlYear = c.req.param("year");
+    const urlMonth = c.req.param("month");
     const id = c.req.param("id");
-    const key = `income:${year}-${month}:${id}`;
+    const oldKey = `income:${urlYear}-${urlMonth}:${id}`;
     const body = await c.req.json();
     
     const { name, amount, currency, exchangeRate, amountIDR, conversionType, date, deduction, pocketId } = body;
@@ -1473,7 +2051,7 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
     }
     
     // Get existing data to preserve createdAt and pocketId
-    const existingIncome = await kv.get(key);
+    const existingIncome = await kv.get(oldKey);
     
     // Use provided pocketId, or fallback to existing pocketId, or default to cold money
     const finalPocketId = pocketId || existingIncome?.pocketId || POCKET_IDS.COLD_MONEY;
@@ -1495,7 +2073,8 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
     const incomeData = {
       id,
       name,
-      amount: Number(amount),
+      amount: Number(amount), // Legacy field (keep for backward compat)
+      amountUSD: Number(amount), // ✅ NEW: Proper field name for TypeScript
       currency: currency || "IDR",
       exchangeRate: exchangeRate ? Number(exchangeRate) : null,
       amountIDR: Number(amountIDR),
@@ -1507,7 +2086,65 @@ app.put("/make-server-3adbeaf1/additional-income/:year/:month/:id", async (c) =>
       updatedAt: new Date().toISOString(),
     };
     
-    await kv.set(key, incomeData);
+    console.log(`[Edit Income ${id}] Received date:`, date, '| Parsed date:', incomeDate);
+    
+    // 🔧 CRITICAL FIX: Extract ACTUAL month from date field (same as expense auto-migration)
+    // This handles migration from old wrong keys to correct keys!
+    const actualDate = new Date(incomeDate);
+    const actualYear = actualDate.getUTCFullYear();
+    const actualMonth = String(actualDate.getUTCMonth() + 1).padStart(2, '0');
+    const actualMonthKey = `${actualYear}-${actualMonth}`;
+    const correctKey = `income:${actualMonthKey}:${id}`;
+    
+    // Check if key needs migration (month changed)
+    const oldMonthKey = `${urlYear}-${urlMonth}`;
+    const keyNeedsMigration = (actualMonthKey !== oldMonthKey);
+    
+    if (keyNeedsMigration) {
+      // 🔄 MIGRATION: Delete old key, save to correct key
+      console.log(`[Edit Income ${id}] 🔄 MIGRATING from ${oldKey} to ${correctKey}`);
+      console.log(`  └─ Old month: ${oldMonthKey} | New month: ${actualMonthKey}`);
+      
+      // Delete old key
+      await kv.del(oldKey);
+      
+      // Save to correct key
+      await kv.set(correctKey, incomeData);
+      
+      console.log(`[Edit Income ${id}] ✅ Migration complete!`);
+      
+      // 🔄 CRITICAL: Regenerate carry-over for affected months
+      // When income moves from Month B to Month A, we need to regenerate:
+      // 1. Carry-over from Month A → next month (includes migrated income)
+      // 2. Carry-over from Month B → next month (excludes migrated income)
+      try {
+        console.log(`[Edit Income ${id}] 🔄 Regenerating carry-overs for affected months...`);
+        
+        // Regenerate carry-over from OLD month (where income was removed)
+        await generateCarryOversForNextMonth(oldMonthKey);
+        
+        // Regenerate carry-over from NEW month (where income was added)
+        await generateCarryOversForNextMonth(actualMonthKey);
+        
+        console.log(`[Edit Income ${id}] ✅ Carry-overs regenerated!`);
+      } catch (error) {
+        console.error(`[Edit Income ${id}] ⚠️ Error regenerating carry-overs:`, error);
+        // Don't fail the request - carry-over will be regenerated on next month navigation
+      }
+    } else {
+      // No migration needed - just update
+      console.log(`[Edit Income ${id}] ✅ Updating same key: ${correctKey}`);
+      await kv.set(correctKey, incomeData);
+      
+      // 🔄 Regenerate carry-over for current month (income amount might have changed)
+      try {
+        console.log(`[Edit Income ${id}] ��� Regenerating carry-over for current month...`);
+        await generateCarryOversForNextMonth(actualMonthKey);
+        console.log(`[Edit Income ${id}] ✅ Carry-over regenerated!`);
+      } catch (error) {
+        console.error(`[Edit Income ${id}] ⚠️ Error regenerating carry-over:`, error);
+      }
+    }
     
     // Update income name for autocomplete suggestions
     const nameKey = `income-name:${name.toLowerCase()}`;
@@ -1584,7 +2221,7 @@ app.get("/make-server-3adbeaf1/templates", async (c) => {
 app.post("/make-server-3adbeaf1/templates", async (c) => {
   try {
     const body = await c.req.json();
-    const { name, items, color } = body;
+    const { name, items, color, emoji } = body;
     
     if (!name || !items || !Array.isArray(items)) {
       return c.json({ error: "Name and items are required" }, 400);
@@ -1597,14 +2234,18 @@ app.post("/make-server-3adbeaf1/templates", async (c) => {
       id: templateId,
       name,
       items,
-      ...(color ? { color } : {}),
+      ...(color !== undefined && color !== "" ? { color } : {}),
+      ...(emoji !== undefined && emoji !== "" ? { emoji } : {}),
       createdAt: new Date().toISOString(),
     };
     
     await kv.set(key, templateData);
     
+    console.log(`✅ Template created - ID: ${templateId}, Name: ${name}, Emoji: ${emoji || '(none)'}, Color: ${color || '(none)'}`);
+    
     return c.json({ success: true, data: templateData });
   } catch (error: any) {
+    console.error(`❌ Failed to add template: ${error.message}`);
     return c.json({ error: `Failed to add template: ${error.message}` }, 500);
   }
 });
@@ -1616,24 +2257,41 @@ app.put("/make-server-3adbeaf1/templates/:id", async (c) => {
     const key = `template:${id}`;
     const body = await c.req.json();
     
-    const { name, items, color } = body;
+    const { name, items, color, emoji } = body;
     
     if (!name || !items || !Array.isArray(items)) {
       return c.json({ error: "Name and items are required" }, 400);
     }
     
+    // 🔧 FIX: Load existing template first to preserve all fields
+    const existingTemplate = await kv.get(key);
+    
+    // Merge with existing data, preserving fields like createdAt
     const templateData = {
+      ...(existingTemplate || {}), // Preserve existing fields
       id,
       name,
       items,
-      ...(color ? { color } : {}),
+      ...(color !== undefined && color !== "" ? { color } : {}),
+      ...(emoji !== undefined && emoji !== "" ? { emoji } : {}),
       updatedAt: new Date().toISOString(),
     };
     
+    // If color or emoji is explicitly cleared (empty string), remove from object
+    if (color === "") {
+      delete templateData.color;
+    }
+    if (emoji === "") {
+      delete templateData.emoji;
+    }
+    
     await kv.set(key, templateData);
+    
+    console.log(`✅ Template updated - ID: ${id}, Emoji: ${emoji || '(none)'}, Color: ${color || '(none)'}`);
     
     return c.json({ success: true, data: templateData });
   } catch (error: any) {
+    console.error(`❌ Failed to update template: ${error.message}`);
     return c.json({ error: `Failed to update template: ${error.message}` }, 500);
   }
 });
@@ -1649,6 +2307,97 @@ app.delete("/make-server-3adbeaf1/templates/:id", async (c) => {
     return c.json({ success: true });
   } catch (error: any) {
     return c.json({ error: `Failed to delete template: ${error.message}` }, 500);
+  }
+});
+
+// 🔧 MIGRATION: Add groupId to expenses created from templates
+app.post("/make-server-3adbeaf1/migrate-template-groupids", async (c) => {
+  try {
+    console.log('[MIGRATION] Starting template groupId migration...');
+    
+    // 1. Get all templates
+    const templates = await kv.getByPrefix("template:");
+    console.log(`[MIGRATION] Found ${templates.length} templates`);
+    
+    if (templates.length === 0) {
+      return c.json({
+        success: true,
+        message: 'No templates found',
+        stats: { templatesFound: 0, expensesUpdated: 0, expensesSkipped: 0 }
+      });
+    }
+    
+    // Create map: template name -> template id
+    const templateNameMap = new Map<string, string>();
+    templates.forEach((t: any) => {
+      templateNameMap.set(t.name.toLowerCase().trim(), t.id);
+      console.log(`[MIGRATION] Template: "${t.name}" -> ${t.id}`);
+    });
+    
+    // 2. Get all expenses (all months) - this returns the full data
+    const allExpenses = await kv.getByPrefix("expense:");
+    console.log(`[MIGRATION] Found ${allExpenses.length} total expenses`);
+    
+    let updated = 0;
+    let skipped = 0;
+    const updatePromises = [];
+    
+    // 3. Process each expense
+    for (const expense of allExpenses) {
+      // Skip if already has groupId
+      if (expense.groupId) {
+        skipped++;
+        continue;
+      }
+      
+      // Try to match expense name with template name
+      const expenseName = expense.name.toLowerCase().trim();
+      const matchedTemplateId = templateNameMap.get(expenseName);
+      
+      if (matchedTemplateId && expense.date) {
+        // Extract monthKey from date (format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)
+        const dateMatch = expense.date.match(/^(\d{4})-(\d{2})/);
+        if (dateMatch) {
+          const expenseKey = `expense:${dateMatch[1]}-${dateMatch[2]}:${expense.id}`;
+          
+          console.log(`[MIGRATION] ✅ Updating expense "${expense.name}" (${expense.id}) with groupId: ${matchedTemplateId}`);
+          
+          const updatedExpense = {
+            ...expense,
+            groupId: matchedTemplateId
+          };
+          
+          updatePromises.push(kv.set(expenseKey, updatedExpense));
+          updated++;
+        } else {
+          console.warn(`[MIGRATION] ⚠️ Could not parse date for expense ${expense.id}: ${expense.date}`);
+          skipped++;
+        }
+      } else {
+        skipped++;
+      }
+    }
+    
+    // Execute all updates
+    await Promise.all(updatePromises);
+    
+    console.log(`[MIGRATION] 🎉 Complete! Updated: ${updated}, Skipped: ${skipped}`);
+    
+    return c.json({
+      success: true,
+      message: `Migration complete: ${updated} expenses updated, ${skipped} skipped`,
+      stats: {
+        templatesFound: templates.length,
+        expensesUpdated: updated,
+        expensesSkipped: skipped
+      }
+    });
+  } catch (error: any) {
+    console.error('[MIGRATION] ❌ Error:', error);
+    return c.json({ 
+      success: false, 
+      error: `Migration failed: ${error.message}` 
+    }, 500);
   }
 });
 
@@ -1719,6 +2468,61 @@ app.delete("/make-server-3adbeaf1/exclude-state/:year/:month", async (c) => {
 });
 
 // ============================================
+// CARRY-OVER SYSTEM - EMERGENCY ENDPOINT
+// ============================================
+
+// ⚠️ EMERGENCY USE ONLY - Manual regenerate carry-over
+// This endpoint is kept for emergency debugging but removed from UI
+// Use case: Fix carry-over data when transactions were migrated cross-month
+// Normal flow: Auto-regenerate happens on edit/migration (see PUT expense/income endpoints)
+app.post("/make-server-3adbeaf1/carry-over/regenerate/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    
+    console.log(`[MANUAL REGENERATE] 🔄 User requested carry-over regeneration for ${monthKey}`);
+    
+    // Calculate previous month
+    const prevMonthKey = getPreviousMonth(monthKey);
+    
+    console.log(`[MANUAL REGENERATE] Regenerating carry-overs from ${prevMonthKey} → ${monthKey}`);
+    
+    // Regenerate carry-over data
+    await generateCarryOversForNextMonth(prevMonthKey);
+    
+    console.log(`[MANUAL REGENERATE] ✅ Successfully regenerated carry-overs for ${monthKey}`);
+    
+    // Return new carry-over summary
+    const pockets = await getActivePockets();
+    const carryOverSummary = [];
+    
+    for (const pocket of pockets) {
+      const carryOver = await getCarryOverForPocket(pocket.id, monthKey);
+      carryOverSummary.push({
+        pocketId: pocket.id,
+        pocketName: pocket.name,
+        carryOverAmount: carryOver?.amount || 0,
+        fromMonth: prevMonthKey
+      });
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: `Carry-over berhasil dikalkulasi ulang untuk ${formatMonth(monthKey)}`,
+      data: {
+        monthKey,
+        fromMonth: prevMonthKey,
+        pockets: carryOverSummary
+      }
+    });
+  } catch (error: any) {
+    console.error('[MANUAL REGENERATE] ❌ Error:', error);
+    return c.json({ error: `Failed to regenerate carry-over: ${error.message}` }, 500);
+  }
+});
+
+// ============================================
 // POCKETS SYSTEM - ENDPOINTS
 // ============================================
 
@@ -1729,19 +2533,63 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
     const month = c.req.param("month");
     const monthKey = `${year}-${month}`;
     
+    // ✅ FASE 2: Auto-generate carry-over if not exists
+    // Check if this is a new month (no carry-over data yet)
+    const hasCarryOvers = await checkCarryOverExists(monthKey);
+    
+    if (!hasCarryOvers) {
+      // Calculate previous month
+      const prevMonthKey = getPreviousMonth(monthKey);
+      
+      console.log(`[AUTO-CARRYOVER] First time accessing ${monthKey}, generating carry-overs from ${prevMonthKey}`);
+      
+      try {
+        await generateCarryOversForNextMonth(prevMonthKey);
+      } catch (error) {
+        console.warn('[AUTO-CARRYOVER] Could not generate carry-overs (maybe first month):', error);
+        // Don't fail the whole request if carry-over generation fails
+      }
+    }
+    
     const pockets = await getPockets(monthKey);
     
-    // Fetch shared data once instead of per-pocket
-    const [budget, expensesData, additionalIncome, transfers, excludeState] = await Promise.all([
-      kv.get(`budget:${monthKey}`),
-      kv.getByPrefix(`expense:${monthKey}:`),
-      kv.getByPrefix(`income:${monthKey}:`),
-      kv.getByPrefix(`transfer:${monthKey}:`),
-      kv.get(`exclude-state:${monthKey}`)
-    ]);
+    // Fetch shared data once instead of per-pocket with individual error handling
+    let budget, expensesData, additionalIncome, transfers, excludeState;
+    
+    try {
+      [budget, expensesData, additionalIncome, transfers, excludeState] = await Promise.all([
+        kv.get(`budget:${monthKey}`).catch(err => {
+          console.warn('[POCKETS] Failed to get budget, using default:', err.message);
+          return null;
+        }),
+        kv.getByPrefix(`expense:${monthKey}:`).catch(err => {
+          console.warn('[POCKETS] Failed to get expenses, using empty array:', err.message);
+          return [];
+        }),
+        kv.getByPrefix(`income:${monthKey}:`).catch(err => {
+          console.warn('[POCKETS] Failed to get income, using empty array:', err.message);
+          return [];
+        }),
+        kv.getByPrefix(`transfer:${monthKey}:`).catch(err => {
+          console.warn('[POCKETS] Failed to get transfers, using empty array:', err.message);
+          return [];
+        }),
+        kv.get(`exclude-state:${monthKey}`).catch(err => {
+          console.warn('[POCKETS] Failed to get exclude state, using default:', err.message);
+          return null;
+        })
+      ]);
+    } catch (error: any) {
+      console.error('[POCKETS] Critical error in Promise.all, using all defaults:', error.message);
+      budget = null;
+      expensesData = [];
+      additionalIncome = [];
+      transfers = [];
+      excludeState = null;
+    }
     
     const sharedData = {
-      budget: budget || { initialBudget: 0, carryover: 0 },
+      budget: budget || { initialBudget: 0 },
       expensesData: expensesData || [],
       additionalIncome: additionalIncome || [],
       transfers: transfers || [],
@@ -1761,7 +2609,330 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
       }
     });
   } catch (error: any) {
+    console.error('[POCKETS] Error in GET /pockets:', error);
+    console.error('[POCKETS] Error stack:', error.stack);
     return c.json({ error: `Failed to fetch pockets: ${error.message}` }, 500);
+  }
+});
+
+// ============================================
+// TIMELINE ENDPOINT - MONTHLY STATEMENT MODEL
+// ============================================
+
+/**
+ * ⚠️ DEPRECATED ENDPOINT - DO NOT USE!
+ * This old endpoint does NOT use auto carry-over system and had bugs:
+ * - Bug 1: Used income.description instead of income.name
+ * - Bug 2: Used income.amount (USD) instead of income.amountIDR
+ * - Bug 3: Manual carry-over calculation instead of using getCarryOverForPocket()
+ * 
+ * ✅ USE NEW ENDPOINT instead: Line ~2808 (uses generatePocketTimeline)
+ * 
+ * Kept here for reference only. Route changed to prevent conflicts.
+ */
+app.get("/make-server-3adbeaf1/timeline-OLD-DEPRECATED/:year/:month/:pocketId", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const pocketId = c.req.param("pocketId");
+    const sortOrder = c.req.query("sortOrder") || "desc"; // desc = newest first
+    
+    const monthKey = `${year}-${month}`;
+    const monthStart = new Date(`${year}-${month}-01T00:00:00.000Z`);
+    const monthEnd = new Date(monthStart);
+    monthEnd.setMonth(monthEnd.getMonth() + 1); // First day of next month
+    
+    console.log(`[TIMELINE] Fetching data for pocket ${pocketId}, month ${monthKey}`);
+    
+    // 🔧 FIX: Fetch only YEAR-scoped data instead of ALL data to prevent connection timeout
+    // Old approach: getByPrefix(`expense:`) fetched EVERYTHING (thousands of records!)
+    // New approach: Fetch only current year data (much more efficient)
+    
+    const currentYear = parseInt(year);
+    
+    // 1. Fetch expenses for CURRENT YEAR only (not all time!)
+    const yearExpenses: any[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const monthStr = String(m).padStart(2, '0');
+      const expensePrefix = `expense:${currentYear}-${monthStr}:`;
+      try {
+        const monthExpenses = await kv.getByPrefix(expensePrefix);
+        yearExpenses.push(...(monthExpenses || []));
+      } catch (error: any) {
+        console.warn(`[TIMELINE] Failed to get expenses for ${currentYear}-${monthStr}:`, error.message);
+      }
+    }
+    
+    const allPocketExpenses = yearExpenses.filter((exp: any) => exp.pocketId === pocketId);
+    
+    // Filter: Expenses for CURRENT month only
+    const currentMonthExpenses = allPocketExpenses.filter((exp: any) => {
+      const expDate = new Date(exp.date);
+      return expDate >= monthStart && expDate < monthEnd;
+    });
+    
+    // Filter: Expenses BEFORE current month (for Initial Balance calculation)
+    const previousExpenses = allPocketExpenses.filter((exp: any) => {
+      const expDate = new Date(exp.date);
+      return expDate < monthStart;
+    });
+    
+    // 2. Fetch income for CURRENT YEAR only
+    const yearIncome: any[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const monthStr = String(m).padStart(2, '0');
+      const incomePrefix = `income:${currentYear}-${monthStr}:`;
+      try {
+        const monthIncome = await kv.getByPrefix(incomePrefix);
+        yearIncome.push(...(monthIncome || []));
+      } catch (error: any) {
+        console.warn(`[TIMELINE] Failed to get income for ${currentYear}-${monthStr}:`, error.message);
+      }
+    }
+    
+    const allPocketIncome = yearIncome.filter((inc: any) => {
+      return inc.pocketId === pocketId || inc.targetPocketId === pocketId;
+    });
+    
+    // Filter: Income for CURRENT month only
+    const currentMonthIncome = allPocketIncome.filter((inc: any) => {
+      const incDate = new Date(inc.date);
+      return incDate >= monthStart && incDate < monthEnd;
+    });
+    
+    // Filter: Income BEFORE current month
+    const previousIncome = allPocketIncome.filter((inc: any) => {
+      const incDate = new Date(inc.date);
+      return incDate < monthStart;
+    });
+    
+    // 3. Fetch transfers for CURRENT YEAR only
+    const yearTransfers: any[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const monthStr = String(m).padStart(2, '0');
+      const transferPrefix = `transfer:${currentYear}-${monthStr}:`;
+      try {
+        const monthTransfers = await kv.getByPrefix(transferPrefix);
+        yearTransfers.push(...(monthTransfers || []));
+      } catch (error: any) {
+        console.warn(`[TIMELINE] Failed to get transfers for ${currentYear}-${monthStr}:`, error.message);
+      }
+    }
+    
+    const allPocketTransfers = yearTransfers.filter((t: any) => 
+      t.fromPocketId === pocketId || t.toPocketId === pocketId
+    );
+    
+    // Filter: Transfers for CURRENT month only
+    const currentMonthTransfers = allPocketTransfers.filter((t: any) => {
+      const tDate = new Date(t.date);
+      return tDate >= monthStart && tDate < monthEnd;
+    });
+    
+    // Filter: Transfers BEFORE current month
+    const previousTransfers = allPocketTransfers.filter((t: any) => {
+      const tDate = new Date(t.date);
+      return tDate < monthStart;
+    });
+    
+    console.log(`[TIMELINE] Current month: ${currentMonthExpenses.length} expenses, ${currentMonthIncome.length} income, ${currentMonthTransfers.length} transfers`);
+    console.log(`[TIMELINE] Previous data: ${previousExpenses.length} expenses, ${previousIncome.length} income, ${previousTransfers.length} transfers`);
+    
+    // 4. Calculate Initial Balance (Saldo Awal)
+    // ✅ FIX NOV 10: Use auto-generated carry-over data instead of manual calculation
+    // This ensures consistency with the carry-over system
+    let initialBalance = 0;
+    
+    // ✅ FIX: Use constant from POCKET_IDS (pocket_daily), not hardcoded 'pocket_sehari_hari'!
+    if (pocketId === POCKET_IDS.DAILY) {
+      // ✅ SEHARI-HARI: Budget Awal + Carry-over
+      // This pocket is funded by monthly budget allocation
+      
+      // Fetch budget data for current month
+      const budgetKey = `budget:${monthKey}`;
+      console.log(`[TIMELINE DEBUG] Fetching budget with key: "${budgetKey}"`);
+      
+      let budgetData = null;
+      try {
+        budgetData = await kv.get(budgetKey);
+        console.log(`[TIMELINE DEBUG] budgetData raw:`, JSON.stringify(budgetData, null, 2));
+      } catch (error: any) {
+        console.warn(`[TIMELINE] Failed to get budget for ${monthKey}:`, error.message);
+      }
+      
+      // ⚠️ CRITICAL: budgetData could be null if budget hasn't been set for this month
+      // In that case, budgetAwal = 0 is correct (no budget allocated yet)
+      const budgetAwal = budgetData?.initialBudget || 0;
+      console.log(`[TIMELINE DEBUG] budgetAwal extracted: ${budgetAwal}`);
+      
+      // ✅ NEW: Use auto-generated carry-over data (consistent with carry-over system)
+      let carryOver = null;
+      try {
+        carryOver = await getCarryOverForPocket(pocketId, monthKey);
+      } catch (error) {
+        console.warn('[TIMELINE] Error fetching carry-over:', error);
+      }
+      const carryoverFromPrevious = carryOver?.amount || 0;
+      
+      // Initial Balance = Budget Awal (this month) + Carry-over from previous
+      initialBalance = budgetAwal + carryoverFromPrevious;
+      
+      console.log(`[TIMELINE] 🏦 Sehari-hari Special Logic:`);
+      console.log(`  - Month: ${monthKey}`);
+      console.log(`  - Budget Key: "${budgetKey}"`);
+      console.log(`  - Budget Data Found: ${budgetData ? 'YES' : 'NO'}`);
+      console.log(`  - Budget Awal (${monthKey}): ${budgetAwal}`);
+      console.log(`  - Carry-over from auto-generated data: ${carryoverFromPrevious}`);
+      console.log(`  - Carry-over breakdown:`, carryOver?.breakdown);
+      console.log(`  - Initial Balance (FINAL): ${initialBalance}`);
+      
+    } else {
+      // ✅ OTHER POCKETS: Only carry-over
+      // Uang Dingin, Custom pockets are income-driven, not budget-driven
+      
+      // ✅ NEW: Use auto-generated carry-over data
+      let carryOver = null;
+      try {
+        carryOver = await getCarryOverForPocket(pocketId, monthKey);
+      } catch (error) {
+        console.warn('[TIMELINE] Error fetching carry-over:', error);
+      }
+      initialBalance = carryOver?.amount || 0;
+      
+      console.log(`[TIMELINE] ${pocketId} - Carry-over only: ${initialBalance}`);
+      console.log(`  - Carry-over breakdown:`, carryOver?.breakdown);
+    }
+    
+    // 5. Build timeline entries for CURRENT month ONLY
+    const entries: TimelineEntry[] = [];
+    
+    // Add current month expenses
+    currentMonthExpenses.forEach((expense: any) => {
+      entries.push({
+        id: expense.id,
+        type: 'expense',
+        date: expense.date,
+        description: expense.name,
+        amount: -expense.amount, // Negative for expense
+        balanceAfter: 0, // Will be calculated later
+        icon: expense.icon || '💸',
+        color: expense.color || 'red',
+        metadata: { 
+          ...expense,
+          category: expense.category
+        }
+      });
+    });
+    
+    // Add current month income
+    currentMonthIncome.forEach((income: any) => {
+      entries.push({
+        id: income.id,
+        type: 'income',
+        date: income.date,
+        description: income.name || 'Pemasukan',  // ✅ FIX: Use income.name (not description)
+        amount: (income.amountIDR || income.amount) - (income.deduction || 0), // ✅ FIX: Use amountIDR (not amount/USD)
+        balanceAfter: 0, // Will be calculated later
+        icon: '💰',
+        color: 'green',
+        metadata: { 
+          ...income,
+          amountUSD: income.amountUSD || income.amount,
+          exchangeRate: income.exchangeRate,
+          deduction: income.deduction
+        }
+      });
+    });
+    
+    // Add current month transfers
+    currentMonthTransfers.forEach((transfer: any) => {
+      const isIncoming = transfer.toPocketId === pocketId;
+      entries.push({
+        id: transfer.id,
+        type: 'transfer',
+        date: transfer.date,
+        description: isIncoming 
+          ? `Transfer dari ${transfer.fromPocketName || 'Unknown'}`
+          : `Transfer ke ${transfer.toPocketName || 'Unknown'}`,
+        amount: isIncoming ? transfer.amount : -transfer.amount,
+        balanceAfter: 0, // Will be calculated later
+        icon: isIncoming ? '⬅️' : '➡️',
+        color: isIncoming ? 'green' : 'blue',
+        metadata: { 
+          ...transfer,
+          direction: isIncoming ? 'in' : 'out'
+        }
+      });
+    });
+    
+    // 6. Sort entries by date
+    entries.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+    
+    console.log(`[TIMELINE] Total entries for ${monthKey}: ${entries.length}`);
+    
+    // 7. Calculate balanceAfter for each entry (cumulative from initialBalance)
+    let runningBalance = initialBalance; // ✅ Start from carry-over!
+    
+    // Start from oldest (end of sorted DESC array)
+    if (sortOrder === 'desc') {
+      // Process in reverse to calculate cumulative balance from oldest to newest
+      for (let i = entries.length - 1; i >= 0; i--) {
+        runningBalance += entries[i].amount;
+        entries[i].balanceAfter = runningBalance;
+      }
+    } else {
+      // Process forward for ASC
+      for (let i = 0; i < entries.length; i++) {
+        runningBalance += entries[i].amount;
+        entries[i].balanceAfter = runningBalance;
+      }
+    }
+    
+    // 8. Add Initial Balance entry (Saldo Awal) at the beginning of month
+    const initialBalanceEntry = {
+      id: 'initial_balance',
+      type: 'initial_balance' as const,
+      date: monthStart.toISOString(),
+      description: 'Saldo Awal',
+      amount: initialBalance,
+      balanceAfter: initialBalance,
+      icon: '🏦',
+      color: 'blue',
+      metadata: { 
+        isInitialBalance: true,
+        fromPreviousMonths: true,
+        monthKey: monthKey
+      }
+    };
+    
+    // Add to end of array (will be displayed first after sorting DESC)
+    entries.push(initialBalanceEntry);
+    
+    console.log(`[TIMELINE] Month ${monthKey} - Initial Balance: ${initialBalance}, Final Balance: ${runningBalance}`);
+    
+    return c.json({
+      success: true,
+      data: {
+        entries,
+        count: entries.length,
+        monthKey,
+        initialBalance,
+        finalBalance: runningBalance,
+        monthStart: monthStart.toISOString(),
+        monthEnd: monthEnd.toISOString()
+      }
+    });
+  } catch (error: any) {
+    console.error('[TIMELINE] Error:', error);
+    console.error('[TIMELINE] Stack:', error.stack);
+    return c.json({ 
+      success: false, 
+      error: `Failed to fetch timeline: ${error.message}` 
+    }, 500);
   }
 });
 
@@ -1797,14 +2968,12 @@ app.post("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
       color: color || 'blue',
       order: maxOrder + 1,
       createdAt: new Date().toISOString(),
+      status: 'active', // ✅ FASE 1: Explicit status
       enableWishlist: enableWishlist !== undefined ? enableWishlist : true // Default true for custom pockets
     };
     
-    // Save to month-specific pockets list
-    const pocketsKey = `pockets:${monthKey}`;
-    const allPockets = await kv.get(pocketsKey) || [...DEFAULT_POCKETS];
-    allPockets.push(newPocket);
-    await kv.set(pocketsKey, allPockets);
+    // ✅ FASE 1: Save to global registry (not per-month)
+    await createGlobalPocket(newPocket);
     
     return c.json({
       success: true,
@@ -1839,34 +3008,108 @@ app.put("/make-server-3adbeaf1/pockets/:year/:month/:pocketId/wishlist-setting",
       }, 400);
     }
     
-    // Get pockets for this month - use the correct key!
-    const pocketsKey = `pockets:${monthKey}`;
-    const allPockets = await kv.get(pocketsKey) || [...DEFAULT_POCKETS];
-    
-    // Find and update the pocket
-    const pocketIndex = allPockets.findIndex((p: Pocket) => p.id === pocketId);
-    
-    if (pocketIndex === -1) {
+    // ✅ FASE 1: Update in global registry
+    try {
+      const updatedPocket = await updateGlobalPocket(pocketId, {
+        enableWishlist: Boolean(enableWishlist)
+      });
+      
+      return c.json({
+        success: true,
+        data: updatedPocket
+      });
+    } catch (error: any) {
       return c.json({ 
         success: false, 
-        error: 'Pocket not found' 
+        error: error.message 
       }, 404);
     }
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// ✅ FASE 1: Update pocket (general updates - name, icon, color, etc.)
+app.put("/make-server-3adbeaf1/pockets/:year/:month/:pocketId", async (c) => {
+  try {
+    const pocketId = c.req.param("pocketId");
+    const body = await c.req.json();
     
-    // Update the pocket
-    allPockets[pocketIndex] = {
-      ...allPockets[pocketIndex],
-      enableWishlist: Boolean(enableWishlist)
-    };
+    if (!pocketId) {
+      return c.json({ 
+        success: false, 
+        error: 'Pocket ID is required' 
+      }, 400);
+    }
     
-    // Save back to the correct key
-    await kv.set(pocketsKey, allPockets);
+    // ✅ FASE 1: Update in global registry
+    try {
+      const updatedPocket = await updateGlobalPocket(pocketId, body);
+      
+      return c.json({
+        success: true,
+        data: updatedPocket
+      });
+    } catch (error: any) {
+      return c.json({ 
+        success: false, 
+        error: error.message 
+      }, 404);
+    }
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// ✅ FASE 1: Delete pocket (soft delete - archive)
+app.delete("/make-server-3adbeaf1/pockets/:year/:month/:pocketId", async (c) => {
+  try {
+    const pocketId = c.req.param("pocketId");
+    
+    // Prevent deletion of default pockets
+    if (pocketId === POCKET_IDS.DAILY || pocketId === POCKET_IDS.COLD_MONEY) {
+      return c.json({ 
+        success: false, 
+        error: 'Cannot delete default pockets' 
+      }, 400);
+    }
+    
+    // ✅ FASE 1: Soft delete (archive) in global registry
+    try {
+      await archivePocket(pocketId);
+      
+      return c.json({
+        success: true,
+        message: 'Pocket archived successfully'
+      });
+    } catch (error: any) {
+      return c.json({ 
+        success: false, 
+        error: error.message 
+      }, 404);
+    }
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// ✅ FASE 2: Manual trigger for carry-over generation
+app.post("/make-server-3adbeaf1/carryover/generate/:year/:month", async (c) => {
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    
+    console.log(`[MANUAL-CARRYOVER] Manual trigger for ${monthKey}`);
+    
+    await generateCarryOversForNextMonth(monthKey);
     
     return c.json({
       success: true,
-      data: allPockets[pocketIndex]
+      message: `Carry-overs generated for next month after ${monthKey}`
     });
   } catch (error: any) {
+    console.error('[MANUAL-CARRYOVER] Error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -2015,29 +3258,28 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       return c.json({ success: false, error: 'Missing pocket ID' }, 400);
     }
     
-    // Fetch shared data once (same optimization as pockets endpoint)
-    const [budget, expenses, additionalIncome, transfers, excludeState, pockets, carryOvers] = await Promise.all([
+    // ✅ FASE 3: Fetch shared data (removed old carryOvers fetch)
+    const [budget, expenses, additionalIncome, transfers, excludeState, pockets] = await Promise.all([
       kv.get(`budget:${monthKey}`),
       kv.getByPrefix(`expense:${monthKey}:`),
       kv.getByPrefix(`income:${monthKey}:`),
       kv.getByPrefix(`transfer:${monthKey}:`),
       kv.get(`exclude-state:${monthKey}`),
-      getPockets(monthKey),
-      getCarryOvers(monthKey)
+      getPockets(monthKey)
     ]);
     
     const sharedData = {
-      budget: budget || { initialBudget: 0, carryover: 0 },
+      budget: budget || { initialBudget: 0 },
       expenses: expenses || [],
       additionalIncome: additionalIncome || [],
       transfers: transfers || [],
       excludeState: excludeState || { excludedExpenseIds: [], excludedIncomeIds: [] },
-      pockets,
-      carryOvers
+      pockets
+      // ✅ FASE 3: No longer passing carryOvers - fetched individually in generatePocketTimeline
     };
     
-    // Generate timeline with shared data
-    const entries = generatePocketTimeline(pocketId, monthKey, sortOrder, sharedData);
+    // ✅ FASE 3: Generate timeline with shared data (now async!)
+    const entries = await generatePocketTimeline(pocketId, monthKey, sortOrder, sharedData);
     
     // Calculate summary
     const summary = {
@@ -2052,6 +3294,147 @@ app.get("/make-server-3adbeaf1/timeline/:year/:month/:pocketId", async (c) => {
       data: { entries, summary }
     });
   } catch (error: any) {
+    console.error('[TIMELINE] Error in GET /timeline:', error);
+    console.error('[TIMELINE] Error stack:', error.stack);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// ============================================
+// EXPENSES AGGREGATION ENDPOINT (for CategoryBreakdown MoM)
+// ============================================
+
+// Get all expenses for a month (across all pockets) - for MoM comparison
+app.get("/make-server-3adbeaf1/expenses/:year/:month", async (c) => {
+  // 🔥 CRITICAL: Force logging to ensure endpoint is hit
+  console.log(`\n\n🔥🔥🔥 [EXPENSES ENDPOINT HIT] 🔥🔥🔥`);
+  console.log(`[EXPENSES ENDPOINT] URL: ${c.req.url}`);
+  console.log(`[EXPENSES ENDPOINT] Method: ${c.req.method}`);
+  console.log(`[EXPENSES ENDPOINT] Time: ${new Date().toISOString()}`);
+  
+  try {
+    const year = c.req.param("year");
+    const month = c.req.param("month");
+    const monthKey = `${year}-${month}`;
+    
+    console.log(`📊 [Expenses Endpoint] ============ START DEBUG ============`);
+    console.log(`📊 [Expenses Endpoint] Request params:`, { year, month, monthKey });
+    console.log(`📊 [Expenses Endpoint] Query prefix: expense:${monthKey}:`);
+    
+    // Fetch all expenses for the month
+    const expenses = await kv.getByPrefix(`expense:${monthKey}:`);
+    
+    console.log(`📊 [Expenses Endpoint] Raw result:`, {
+      isNull: expenses === null,
+      isUndefined: expenses === undefined,
+      isArray: Array.isArray(expenses),
+      length: expenses?.length || 0,
+      type: typeof expenses
+    });
+    
+    if (!expenses || expenses.length === 0) {
+      console.log(`⚠️ [Expenses Endpoint] No expenses found for ${monthKey}`);
+      
+      // 🔍 DEBUG: Check if data exists with different format
+      console.log(`🔍 [DEBUG] Checking alternate key formats...`);
+      const altFormat1 = await kv.getByPrefix(`expense:${month}-${year}:`); // MM-YYYY
+      const altFormat2 = await kv.getByPrefix(`expense:${year}${month}:`); // YYYYMM
+      const altFormat3 = await kv.getByPrefix(`expense:${year}-${month.padStart(2, '0')}:`); // YYYY-MM (with leading zero)
+      
+      console.log(`🔍 [DEBUG] Alt format 1 (${month}-${year}):`, altFormat1?.length || 0);
+      console.log(`🔍 [DEBUG] Alt format 2 (${year}${month}):`, altFormat2?.length || 0);
+      console.log(`🔍 [DEBUG] Alt format 3 (${year}-${month.padStart(2, '0')}):`, altFormat3?.length || 0);
+      
+      // 🔍 CRITICAL: Log first result from each format to see actual key structure
+      if (altFormat1?.length > 0) {
+        console.log(`🔍 [DEBUG] Sample alt1:`, altFormat1[0]);
+      }
+      if (altFormat2?.length > 0) {
+        console.log(`🔍 [DEBUG] Sample alt2:`, altFormat2[0]);
+      }
+      if (altFormat3?.length > 0) {
+        console.log(`🔍 [DEBUG] Sample alt3:`, altFormat3[0]);
+      }
+      
+      // Try alternate format 3 (with leading zero)
+      if (altFormat3 && altFormat3.length > 0) {
+        console.log(`✅ [Expenses Endpoint] Using alternate format 3 (${altFormat3.length} expenses)`);
+        return c.json({
+          success: true,
+          data: altFormat3,
+          debug: {
+            usedFormat: `expense:${year}-${month.padStart(2, '0')}:`,
+            originalFormat: `expense:${monthKey}:`
+          }
+        });
+      }
+      
+      return c.json({
+        success: true,
+        data: [],
+        debug: {
+          queriedKey: `expense:${monthKey}:`,
+          alternateFormats: {
+            'MM-YYYY': altFormat1?.length || 0,
+            'YYYYMM': altFormat2?.length || 0,
+            'YYYY-MM': altFormat3?.length || 0
+          }
+        }
+      });
+    }
+    
+    console.log(`✅ [Expenses Endpoint] Found ${expenses.length} expenses for ${monthKey}`);
+    console.log(`✅ [Expenses Endpoint] First 3 expenses:`, 
+      expenses.slice(0, 3).map((e: any) => ({
+        id: e.id,
+        name: e.name,
+        date: e.date,
+        amount: e.amount,
+        category: e.category,
+        hasItems: !!(e.items && e.items.length > 0),
+        itemCount: e.items?.length || 0
+      }))
+    );
+    console.log(`📊 [Expenses Endpoint] ============ END DEBUG ============`);
+    
+    return c.json({
+      success: true,
+      data: expenses
+    });
+  } catch (error: any) {
+    console.error(`❌ [Expenses Endpoint] Error:`, error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 🔍 DEBUG HELPER: List all expense keys for a specific prefix (for debugging)
+app.get("/make-server-3adbeaf1/debug/keys", async (c) => {
+  try {
+    const prefix = c.req.query('prefix') || 'expense:2025-';
+    
+    console.log(`🔍 [Debug Keys] Listing all keys with prefix: ${prefix}`);
+    
+    const results = await kv.getByPrefix(prefix);
+    
+    console.log(`🔍 [Debug Keys] Found ${results?.length || 0} keys`);
+    
+    return c.json({
+      success: true,
+      prefix,
+      count: results?.length || 0,
+      keys: results?.slice(0, 20).map((item: any) => ({
+        id: item.id,
+        date: item.date,
+        name: item.name,
+        amount: item.amount,
+        category: item.category,
+        pocketId: item.pocketId,
+        items: item.items || undefined  // 🔍 DEBUG: Include items to check template structure
+      })) || [],
+      message: results?.length > 20 ? `Showing first 20 of ${results.length} results` : undefined
+    });
+  } catch (error: any) {
+    console.error(`❌ [Debug Keys] Error:`, error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -2067,8 +3450,11 @@ app.get("/make-server-3adbeaf1/carryover/:year/:month", async (c) => {
     const month = c.req.param("month");
     const monthKey = `${year}-${month}`;
     
-    const carryOvers = await getCarryOvers(monthKey);
-    const pockets = await getPockets(monthKey);
+    // ✅ FASE 2: Fetch NEW carry-over format (per pocket)
+    const pockets = await getActivePockets();
+    const carryOverPromises = pockets.map(p => getCarryOverForPocket(p.id, monthKey));
+    const carryOverResults = await Promise.all(carryOverPromises);
+    const carryOvers = carryOverResults.filter(co => co !== null) as CarryOverEntry[];
     
     // Build summary
     const summary: CarryOverSummary = {
@@ -2094,6 +3480,7 @@ app.get("/make-server-3adbeaf1/carryover/:year/:month", async (c) => {
       }
     });
   } catch (error: any) {
+    console.error('[CARRYOVER/GET] Error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -2111,17 +3498,24 @@ app.post("/make-server-3adbeaf1/carryover/generate", async (c) => {
       }, 400);
     }
     
-    // Generate carry overs
-    const carryOvers = await generateCarryOvers(fromMonth, toMonth);
+    // ✅ FASE 2: Use NEW carry-over generation function
+    await generateCarryOversForNextMonth(fromMonth);
+    
+    // Fetch the generated carry-overs to return
+    const pockets = await getActivePockets();
+    const carryOvers = await Promise.all(
+      pockets.map(p => getCarryOverForPocket(p.id, toMonth))
+    );
     
     return c.json({
       success: true,
       data: {
-        generated: carryOvers,
-        message: `Generated ${carryOvers.length} carry over entries from ${fromMonth} to ${toMonth}`
+        generated: carryOvers.filter(co => co !== null),
+        message: `Generated ${carryOvers.filter(co => co !== null).length} carry over entries from ${fromMonth} to ${toMonth}`
       }
     });
   } catch (error: any) {
+    console.error('[CARRYOVER/GENERATE] Error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -2134,21 +3528,29 @@ app.put("/make-server-3adbeaf1/carryover/recalculate/:year/:month", async (c) =>
     const monthKey = `${year}-${month}`;
     const prevMonth = getPreviousMonth(monthKey);
     
-    // Delete existing carry overs
-    await kv.set(`carryovers:${monthKey}`, []);
+    // ✅ FASE 2: Delete existing NEW carry-over entries (per pocket)
+    const pockets = await getActivePockets();
+    await Promise.all(
+      pockets.map(p => kv.del(`carryover:${monthKey}:${p.id}`))
+    );
     
-    // Regenerate
-    const carryOvers = await generateCarryOvers(prevMonth, monthKey);
+    // Regenerate using NEW function
+    await generateCarryOversForNextMonth(prevMonth);
+    
+    // Fetch newly generated carry-overs
+    const carryOvers = await Promise.all(
+      pockets.map(p => getCarryOverForPocket(p.id, monthKey))
+    );
     
     return c.json({
       success: true,
       data: {
-        updated: carryOvers,
+        updated: carryOvers.filter(co => co !== null),
         message: `Recalculated carry overs for ${monthKey}`
       }
     });
-  } catch (error) {
-    console.log(`Error recalculating carry overs: ${error}`);
+  } catch (error: any) {
+    console.error('[CARRYOVER/RECALCULATE] Error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -3664,6 +5066,151 @@ app.post("/make-server-3adbeaf1/migrations/fix-income-timestamps", async (c) => 
     
   } catch (error: any) {
     console.error("[MIGRATION] Fatal error:", error);
+    return c.json({ 
+      success: false, 
+      error: `Migration failed: ${error.message}` 
+    }, 500);
+  }
+});
+
+// 🔧 MIGRATION ENDPOINT: Fix expenses with wrong month keys
+// Example: expense:2025-11:xxx with date 2025-10-25 → move to expense:2025-10:xxx
+app.post("/make-server-3adbeaf1/migrate-expense-keys", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { year, month, dryRun = true } = body;
+    
+    console.log(`[EXPENSE KEY MIGRATION] Starting for ${year}-${month} (dryRun: ${dryRun})`);
+    
+    if (!year || !month) {
+      return c.json({ 
+        success: false, 
+        error: "year and month are required" 
+      }, 400);
+    }
+    
+    const prefix = `expense:${year}-${month}:`;
+    const expenses = await kv.getByPrefix(prefix);
+    
+    console.log(`[EXPENSE KEY MIGRATION] Found ${expenses.length} expenses with prefix ${prefix}`);
+    
+    const results = {
+      scanned: 0,
+      needsMigration: 0,
+      migrated: 0,
+      skipped: 0,
+      errors: 0,
+      details: [] as Array<{
+        id: string;
+        status: string;
+        oldKey?: string;
+        newKey?: string;
+        oldMonth?: string;
+        actualMonth?: string;
+        reason?: string;
+      }>
+    };
+    
+    for (const expense of expenses) {
+      results.scanned++;
+      
+      try {
+        const { id, date } = expense;
+        
+        if (!date || !id) {
+          results.skipped++;
+          results.details.push({
+            id: expense.id || 'unknown',
+            status: 'skipped',
+            reason: 'Missing date or id'
+          });
+          continue;
+        }
+        
+        // Extract actual month from date field
+        const actualDate = new Date(date);
+        const actualYear = actualDate.getUTCFullYear();
+        const actualMonth = String(actualDate.getUTCMonth() + 1).padStart(2, '0');
+        const actualMonthKey = `${actualYear}-${actualMonth}`;
+        const urlMonthKey = `${year}-${month}`;
+        
+        // Check if migration needed
+        if (actualMonthKey === urlMonthKey) {
+          results.skipped++;
+          results.details.push({
+            id,
+            status: 'correct',
+            actualMonth: actualMonthKey
+          });
+          continue;
+        }
+        
+        // Needs migration!
+        results.needsMigration++;
+        
+        const oldKey = `expense:${urlMonthKey}:${id}`;
+        const newKey = `expense:${actualMonthKey}:${id}`;
+        
+        console.log(`[EXPENSE KEY MIGRATION] ${id}: ${oldKey} → ${newKey}`);
+        
+        if (!dryRun) {
+          // Delete old key
+          await kv.del(oldKey);
+          
+          // Save to correct key
+          await kv.set(newKey, expense);
+          
+          results.migrated++;
+          results.details.push({
+            id,
+            status: 'migrated',
+            oldKey,
+            newKey,
+            oldMonth: urlMonthKey,
+            actualMonth: actualMonthKey
+          });
+        } else {
+          results.details.push({
+            id,
+            status: 'would_migrate',
+            oldKey,
+            newKey,
+            oldMonth: urlMonthKey,
+            actualMonth: actualMonthKey
+          });
+        }
+        
+      } catch (error: any) {
+        results.errors++;
+        results.details.push({
+          id: expense.id || 'unknown',
+          status: 'error',
+          reason: error.message
+        });
+        console.error(`[EXPENSE KEY MIGRATION] Error processing ${expense.id}:`, error);
+      }
+    }
+    
+    console.log(`[EXPENSE KEY MIGRATION] Complete. Scanned: ${results.scanned}, Needs Migration: ${results.needsMigration}, Migrated: ${results.migrated}, Skipped: ${results.skipped}, Errors: ${results.errors}`);
+    
+    return c.json({
+      success: true,
+      dryRun,
+      summary: {
+        scanned: results.scanned,
+        needsMigration: results.needsMigration,
+        migrated: results.migrated,
+        skipped: results.skipped,
+        errors: results.errors
+      },
+      details: results.details,
+      message: dryRun 
+        ? `DRY RUN: Found ${results.needsMigration} expenses that need migration` 
+        : `Successfully migrated ${results.migrated} expenses`,
+    });
+    
+  } catch (error: any) {
+    console.error("[EXPENSE KEY MIGRATION] Fatal error:", error);
     return c.json({ 
       success: false, 
       error: `Migration failed: ${error.message}` 

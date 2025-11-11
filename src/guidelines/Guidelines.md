@@ -34,6 +34,85 @@
 **See full documentation in the files above. This is NOT optional!**
 
 ---
+
+## ♿ CRITICAL - ACCESSIBILITY WARNINGS!
+
+**🚨 NEVER SUPPRESS ACCESSIBILITY WARNINGS!**
+
+**When you see these console warnings:**
+```
+❌ DialogContent requires a DialogTitle for screen reader users
+⚠️ Warning: Missing Description or aria-describedby={undefined}
+```
+
+**⚠️ MANDATORY ACTIONS:**
+
+### 1. DO NOT Suppress or Ignore!
+```
+❌ DON'T use global console filters
+❌ DON'T disable warnings
+❌ DON'T think "not harmful"
+✅ DO fix properly (takes 30 seconds!)
+```
+
+### 2. Proper Fix for All Dialogs:
+
+**Desktop Dialog Pattern:**
+```tsx
+<Dialog open={open} onOpenChange={setOpen}>
+  <DialogContent aria-describedby={undefined}>
+    <DialogHeader>
+      <DialogTitle>Your Title Here</DialogTitle>
+    </DialogHeader>
+    {content}
+  </DialogContent>
+</Dialog>
+```
+
+**Mobile Drawer Pattern (with visible title):**
+```tsx
+<Drawer open={open} onOpenChange={setOpen}>
+  <DrawerContent>
+    <DrawerHeader>
+      <DrawerTitle>Your Title Here</DrawerTitle>
+    </DrawerHeader>
+    {content}
+  </DrawerContent>
+</Drawer>
+```
+
+**Mobile Drawer Pattern (without visible title):**
+```tsx
+import { Drawer, DrawerContent, DrawerTitle } from './ui/drawer';
+
+<Drawer open={open} onOpenChange={setOpen}>
+  <DrawerContent>
+    <DrawerTitle className="sr-only">Your Title Here</DrawerTitle>
+    {content}
+  </DrawerContent>
+</Drawer>
+```
+⚠️ **CRITICAL:** Must use `<DrawerTitle>` component, NOT `<h2 className="sr-only">`!  
+Radix UI requires proper `DrawerTitle` component for accessibility detection.
+
+### 3. Why This Matters:
+- ✅ **5-10% users use screen readers** (must be accessible!)
+- ✅ **WCAG 2.1 compliance** (legal requirement in many countries)
+- ✅ **Professional standard** (all major apps comply)
+- ✅ **Easy to fix** (1-2 lines, 30 seconds per dialog)
+
+### 4. Debugging Guide:
+If warnings persist after fix:
+1. Hard refresh browser (`Ctrl+Shift+R`)
+2. Clear caches (`rm -rf .next/`)
+3. Restart dev server
+4. Use debug command in `/ACCESSIBILITY_WARNINGS_SUPPRESS_GUIDE.md`
+
+**📚 Full Documentation:** `/ACCESSIBILITY_WARNINGS_SUPPRESS_GUIDE.md`
+
+**Accessibility is NOT optional - it's fundamental!** ♿✨
+
+---
 <!--
 
 System Guidelines

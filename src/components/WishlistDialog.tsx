@@ -15,6 +15,7 @@ import { DialogPriority } from "../constants";
 import { useIsMobile } from "./ui/use-mobile";
 import { cn } from "./ui/utils";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { getLocalDateFromISO } from "../utils/date-helpers";
 
 interface WishlistItem {
   id: string;
@@ -82,7 +83,7 @@ export function WishlistDialog({
           priority: item.priority || 2,
           description: item.description || '',
           url: item.url || '',
-          targetDate: item.targetDate?.split('T')[0] || '',
+          targetDate: item.targetDate ? getLocalDateFromISO(item.targetDate) : '',
           notes: item.notes || ''
         });
       } else {
@@ -253,7 +254,7 @@ export function WishlistDialog({
     return (
       <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
         <DrawerContent 
-          className="h-[85vh] flex flex-col rounded-t-2xl p-0"
+          className="h-[90vh] flex flex-col rounded-t-2xl p-0"
           aria-describedby={undefined}
         >
           <DrawerHeader className="px-4 pt-6 pb-4 border-b shrink-0">
