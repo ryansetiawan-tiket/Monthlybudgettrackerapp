@@ -5249,6 +5249,12 @@
   }
 
   @media (width >= 40rem) {
+    .sm\:text-\[16px\] {
+      font-size: 16px;
+    }
+  }
+
+  @media (width >= 40rem) {
     .data-\[vaul-drawer-direction\=left\]\:sm\:max-w-sm[data-vaul-drawer-direction="left"] {
       max-width: var(--container-sm);
     }

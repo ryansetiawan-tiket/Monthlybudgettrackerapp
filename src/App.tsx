@@ -1485,7 +1485,7 @@ function AppContent() {
                     </Button>
                   </div>
                 )}
-                <p className="text-muted-foreground text-[14px]">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
+                <p className="text-muted-foreground text-[14px] sm:text-[16px]">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
               </motion.div>
 
               {/* RIGHT SECTION: Month Selector with Controls */}
