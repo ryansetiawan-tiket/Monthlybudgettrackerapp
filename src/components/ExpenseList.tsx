@@ -49,6 +49,7 @@ import { DialogPriority } from "../constants";
 import SimulationSandbox from "./SimulationSandbox";
 import { AdvancedFilterDrawer } from "./AdvancedFilterDrawer";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
+import { useLongPress } from "../hooks/useLongPress";
 
 interface ExpenseItem {
   name: string;
@@ -336,6 +337,9 @@ function ExpenseListComponent({
   
   // Income editing states
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
+  
+  // 🎯 NEW: Track open dropdown for mobile long-press (controlled DropdownMenu)
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   
   // Register edit income drawer for back button handling
   useDialogRegistration(
@@ -952,7 +956,7 @@ function ExpenseListComponent({
       }
     }
     
-    // ✅ NEW: Advanced Pocket Filter (multi-select, expense only)
+    // ��� NEW: Advanced Pocket Filter (multi-select, expense only)
     if (activeFilters.pockets.size > 0 && activeTab === 'expense') {
       filtered = filtered.filter(expense => {
         return expense.pocketId && activeFilters.pockets.has(expense.pocketId);
@@ -1714,13 +1718,25 @@ function ExpenseListComponent({
       );
     } else {
       // Single expense without items
+      const longPressHandlers = useLongPress({
+        onLongPress: () => {
+          if (!isBulkSelectMode) {
+            setOpenDropdownId(expense.id);
+          }
+        },
+        delay: 500,
+      });
+      
       return (
         <div
           key={expense.id}
           className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''}`}
         >
-          {/* Mobile: Compact layout with badge below */}
-          <div className="md:hidden p-2 pl-6">
+          {/* Mobile: Compact layout with badge below + long-press */}
+          <div 
+            className="md:hidden p-2 pl-6"
+            {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+          >
             <div className="flex items-start justify-between gap-2">
               {/* Left: Checkbox, Name area */}
               <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1794,55 +1810,55 @@ function ExpenseListComponent({
                   {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                 </p>
                 {!isBulkSelectMode && (
-                  /* 🔧 FIX: Allow scroll even when touching button area */
-                  <div className="pointer-events-none flex items-center gap-1">
-                    {expense.fromIncome && onMoveToIncome && (
+                  /* 🎯 Mobile: Invisible button (anchor for dropdown) */
+                  <DropdownMenu open={openDropdownId === expense.id} onOpenChange={(open) => !open && setOpenDropdownId(null)}>
+                    <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 pointer-events-auto"
-                        onClick={() => onMoveToIncome(expense)}
-                        title="Kembalikan ke pemasukan tambahan"
+                        className="h-7 w-7 pointer-events-none opacity-0"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <ArrowRight className="size-3.5 text-muted-foreground" />
+                        <MoreVertical className="size-3.5 text-muted-foreground" />
                       </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 pointer-events-auto"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical className="size-3.5 text-muted-foreground" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
-                          <Pencil className="size-3.5 mr-2" />
-                          Edit
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {expense.fromIncome && onMoveToIncome && (
+                        <DropdownMenuItem onClick={() => {
+                          onMoveToIncome(expense);
+                          setOpenDropdownId(null);
+                        }}>
+                          <ArrowRight className="size-3.5 mr-2 text-green-600" />
+                          Kembalikan ke Pemasukan
                         </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={() => {
-                            setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                            setDeleteConfirmOpen(true);
-                          }}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="size-3.5 mr-2" />
-                          Hapus
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                      )}
+                      <DropdownMenuItem onClick={() => {
+                        handleEditExpense(expense.id);
+                        setOpenDropdownId(null);
+                      }}>
+                        <Pencil className="size-3.5 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => {
+                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
+                          setDeleteConfirmOpen(true);
+                          setOpenDropdownId(null);
+                        }}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="size-3.5 mr-2" />
+                        Hapus
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Desktop: Keep original single-line layout */}
-          <div className="hidden md:flex items-center justify-between p-2 pl-6">
+          {/* Desktop: Keep original single-line layout with hover behavior */}
+          <div className="hidden md:flex items-center justify-between p-2 pl-6 group">
             <div className="flex-1 flex items-center gap-2 min-w-0">
               {isBulkSelectMode && (
                 <Checkbox
@@ -1897,7 +1913,7 @@ function ExpenseListComponent({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={() => onMoveToIncome(expense)}
                       title="Kembalikan ke pemasukan tambahan"
                     >
@@ -1909,7 +1925,7 @@ function ExpenseListComponent({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <MoreVertical className="size-3 text-muted-foreground" />
@@ -1944,11 +1960,23 @@ function ExpenseListComponent({
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
     if (expense.items && expense.items.length > 0) {
+      const longPressHandlers = useLongPress({
+        onLongPress: () => {
+          if (!isBulkSelectMode) {
+            setOpenDropdownId(expense.id);
+          }
+        },
+        delay: 500,
+      });
+      
       return (
         <Collapsible key={expense.id} open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
           <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}>
             <CollapsibleTrigger asChild>
-              <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg">
+              <div 
+                className="group flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg"
+                {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+              >
                 <div className="flex-1 flex items-center gap-2 min-w-0">
                   {isBulkSelectMode && (
                     <Checkbox
@@ -1987,19 +2015,22 @@ function ExpenseListComponent({
                     {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
                   </p>
                   {!isBulkSelectMode && (
-                    <div className="flex items-center gap-0.5">
+                    <div className={`flex items-center gap-0.5 transition-opacity ${isMobile ? 'pointer-events-none opacity-0' : 'opacity-0 group-hover:opacity-100'}`}>
                       {expense.fromIncome && onMoveToIncome && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => onMoveToIncome(expense)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMoveToIncome(expense);
+                          }}
                           title="Kembalikan ke pemasukan tambahan"
                         >
                           <ArrowLeft className="size-3.5 text-green-600" />
                         </Button>
                       )}
-                      <DropdownMenu>
+                      <DropdownMenu open={isMobile ? (openDropdownId === expense.id) : undefined} onOpenChange={isMobile ? ((open) => !open && setOpenDropdownId(null)) : undefined}>
                         <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
@@ -2012,7 +2043,19 @@ function ExpenseListComponent({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                          {expense.fromIncome && onMoveToIncome && isMobile && (
+                            <DropdownMenuItem onClick={() => {
+                              onMoveToIncome(expense);
+                              setOpenDropdownId(null);
+                            }}>
+                              <ArrowLeft className="size-3.5 mr-2 text-green-600" />
+                              Kembalikan ke Pemasukan
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => {
+                            handleEditExpense(expense.id);
+                            setOpenDropdownId(null);
+                          }}>
                             <Pencil className="size-3.5 mr-2" />
                             Edit
                           </DropdownMenuItem>
@@ -2020,6 +2063,7 @@ function ExpenseListComponent({
                             onClick={() => {
                               setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
                               setDeleteConfirmOpen(true);
+                              setOpenDropdownId(null);
                             }}
                             className="text-destructive focus:text-destructive"
                           >
@@ -2073,10 +2117,20 @@ function ExpenseListComponent({
         </Collapsible>
       );
     } else {
+      const longPressHandlers = useLongPress({
+        onLongPress: () => {
+          if (!isBulkSelectMode) {
+            setOpenDropdownId(expense.id);
+          }
+        },
+        delay: 500,
+      });
+      
       return (
         <div
           key={expense.id}
-          className={`flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}
+          className={`group flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}
+          {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
         >
           <div className="flex-1 flex items-center gap-2 min-w-0">
             {isBulkSelectMode && (
@@ -2130,19 +2184,22 @@ function ExpenseListComponent({
               {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
             </p>
             {!isBulkSelectMode && (
-              <div className="flex items-center gap-0.5">
+              <div className={`flex items-center gap-0.5 transition-opacity ${isMobile ? 'pointer-events-none opacity-0' : 'opacity-0 group-hover:opacity-100'}`}>
                 {expense.fromIncome && onMoveToIncome && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8"
-                    onClick={() => onMoveToIncome(expense)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMoveToIncome(expense);
+                    }}
                     title="Kembalikan ke pemasukan tambahan"
                   >
                     <ArrowRight className="size-3.5 text-green-600" />
                   </Button>
                 )}
-                <DropdownMenu>
+                <DropdownMenu open={isMobile ? (openDropdownId === expense.id) : undefined} onOpenChange={isMobile ? ((open) => !open && setOpenDropdownId(null)) : undefined}>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
@@ -2155,7 +2212,19 @@ function ExpenseListComponent({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
+                    {expense.fromIncome && onMoveToIncome && isMobile && (
+                      <DropdownMenuItem onClick={() => {
+                        onMoveToIncome(expense);
+                        setOpenDropdownId(null);
+                      }}>
+                        <ArrowRight className="size-3.5 mr-2 text-green-600" />
+                        Kembalikan ke Pemasukan
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => {
+                      handleEditExpense(expense.id);
+                      setOpenDropdownId(null);
+                    }}>
                       <Pencil className="size-3.5 mr-2" />
                       Edit
                     </DropdownMenuItem>
@@ -2163,6 +2232,7 @@ function ExpenseListComponent({
                       onClick={() => {
                         setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
                         setDeleteConfirmOpen(true);
+                        setOpenDropdownId(null);
                       }}
                       className="text-destructive focus:text-destructive"
                     >
@@ -2750,14 +2820,25 @@ function ExpenseListComponent({
                         const isSelected = selectedIncomeIds.has(income.id);
                         const isExpanded = expandedIncomeIds.has(income.id);
                         const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
+                        const longPressHandlers = useLongPress({
+                          onLongPress: () => {
+                            if (!isBulkSelectMode) {
+                              setOpenDropdownId(income.id);
+                            }
+                          },
+                          delay: 500,
+                        });
                         
                         return (
                           <Collapsible key={income.id} open={isExpanded} onOpenChange={() => toggleExpandIncome(income.id)}>
                             <div className={`${isBulkSelectMode && isSelected ? 'bg-accent/30 rounded-lg' : ''}`}>
                               <CollapsibleTrigger asChild>
-                                <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
-                                  {/* Mobile: Compact layout */}
-                                  <div className="md:hidden p-2 pl-6">
+                                <div className="group cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
+                                  {/* Mobile: Compact layout with long-press */}
+                                  <div 
+                                    className="md:hidden p-2 pl-6"
+                                    {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+                                  >
                                     <div className="flex items-start justify-between gap-2">
                                       {/* Left: Name + metadata */}
                                       <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -2795,12 +2876,12 @@ function ExpenseListComponent({
                                         </p>
                                         
                                         {!isBulkSelectMode && (
-                                          <DropdownMenu>
+                                          <DropdownMenu open={openDropdownId === income.id} onOpenChange={(open) => !open && setOpenDropdownId(null)}>
                                             <DropdownMenuTrigger asChild>
                                               <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="h-7 w-7"
+                                                className="h-7 w-7 pointer-events-none opacity-0"
                                                 onClick={(e) => e.stopPropagation()}
                                               >
                                                 <MoreVertical className="size-3.5 text-muted-foreground" />
@@ -2815,13 +2896,17 @@ function ExpenseListComponent({
                                                     ...income,
                                                     date: datePart
                                                   });
+                                                  setOpenDropdownId(null);
                                                 }}
                                               >
                                                 <Pencil className="size-3.5 mr-2" />
                                                 Edit
                                               </DropdownMenuItem>
                                               <DropdownMenuItem
-                                                onClick={() => onDeleteIncome?.(income.id)}
+                                                onClick={() => {
+                                                  onDeleteIncome?.(income.id);
+                                                  setOpenDropdownId(null);
+                                                }}
                                                 className="text-destructive focus:text-destructive"
                                               >
                                                 <Trash2 className="size-3.5 mr-2" />
@@ -2874,7 +2959,7 @@ function ExpenseListComponent({
                                             <Button
                                               variant="ghost"
                                               size="icon"
-                                              className="h-6 w-6"
+                                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                                               onClick={(e) => e.stopPropagation()}
                                             >
                                               <MoreVertical className="size-3 text-muted-foreground" />

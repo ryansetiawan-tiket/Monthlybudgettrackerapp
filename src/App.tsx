@@ -8,6 +8,7 @@ import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { PocketsSummary } from "./components/PocketsSummary";
 import { FloatingActionButton } from "./components/FloatingActionButton";
 import { CategoryBreakdown } from "./components/CategoryBreakdown";
+import RemLogo from "./imports/Rem-369-259";
 
 // Lazy load heavy dialogs for better initial bundle size (200-300KB reduction)
 const AddExpenseDialog = lazy(() => 
@@ -1447,7 +1448,7 @@ function AppContent() {
 
         <div className="max-w-5xl mx-auto space-y-8">
           {/* Sticky Header for Mobile with Native App Space */}
-          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[40px] pr-[16px] pb-[16px] pl-[16px]">
+          <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[44px] pr-[16px] pb-[16px] pl-[16px]">
             {/* Desktop: Split layout (Title left | Controls right) | Mobile: Stacked */}
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 md:gap-8">
               {/* LEFT SECTION: Title & Subtitle */}
@@ -1457,7 +1458,10 @@ function AppContent() {
                 transition={{ delay: 0.1 }}
                 className="text-left space-y-2 pt-2 relative flex-shrink-0"
               >
-                <h1>Budget Tracker</h1>
+                {/* Logo REM */}
+                <div className="w-[110px] h-[37px] sm:w-[140px] sm:h-[47px]">
+                  <RemLogo />
+                </div>
                 {/* Action buttons - Mobile only, positioned at top right */}
                 {isMobile && (
                   <div className="absolute top-0 right-0 flex items-center gap-1">
@@ -1481,7 +1485,7 @@ function AppContent() {
                     </Button>
                   </div>
                 )}
-                <p className="text-muted-foreground">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
+                <p className="text-muted-foreground text-[14px]">{randomQuote || "Kelola budget bulanan Anda dengan mudah"}</p>
               </motion.div>
 
               {/* RIGHT SECTION: Month Selector with Controls */}

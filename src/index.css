@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Fugaz+One&display=swap");
 /*! tailwindcss v4.1.3 | MIT License | https://tailwindcss.com */
 @layer properties {
   @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
@@ -1175,6 +1176,10 @@
     height: calc(var(--spacing) * 64);
   }
 
+  .h-\[37px\] {
+    height: 37px;
+  }
+
   .h-\[60vh\] {
     height: 60vh;
   }
@@ -1413,6 +1418,10 @@
 
   .w-\[100px\] {
     width: 100px;
+  }
+
+  .w-\[110px\] {
+    width: 110px;
   }
 
   .w-\[115px\] {
@@ -3164,6 +3173,10 @@
     padding-top: 40px;
   }
 
+  .pt-\[44px\] {
+    padding-top: 44px;
+  }
+
   .pr-1 {
     padding-right: calc(var(--spacing) * 1);
   }
@@ -3347,6 +3360,10 @@
 
   .text-\[11px\] {
     font-size: 11px;
+  }
+
+  .text-\[14px\] {
+    font-size: 14px;
   }
 
   .leading-none {
@@ -3659,6 +3676,10 @@
     text-underline-offset: 4px;
   }
 
+  .opacity-0 {
+    opacity: 0;
+  }
+
   .opacity-30 {
     opacity: .3;
   }
@@ -3880,6 +3901,12 @@
 
   .zoom-in-95 {
     --tw-enter-scale: .95;
+  }
+
+  @media (hover: hover) {
+    .group-hover\:opacity-100:is(:where(.group):hover *) {
+      opacity: 1;
+    }
   }
 
   .group-data-\[disabled\=true\]\:pointer-events-none:is(:where(.group)[data-disabled="true"] *) {
@@ -5093,6 +5120,18 @@
   }
 
   @media (width >= 40rem) {
+    .sm\:h-\[47px\] {
+      height: 47px;
+    }
+  }
+
+  @media (width >= 40rem) {
+    .sm\:w-\[140px\] {
+      width: 140px;
+    }
+  }
+
+  @media (width >= 40rem) {
     .sm\:w-full {
       width: 100%;
     }
@@ -6128,6 +6167,7 @@
   }
 }
 
+
 :root {
   --font-size: 16px;
   --background: #fff;
@@ -6243,6 +6283,15 @@ html {
 
 [data-slot="progress"] [data-slot="indicator"] {
   background-color: var(--progress-background, var(--color-primary)) !important;
+}
+
+.logo-text {
+  background: linear-gradient(#318650 0%, #0c2013 100%);
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 1px 2px #0003;
+  letter-spacing: -.02em;
+  background-clip: text;
+  font-family: Fugaz One, sans-serif;
 }
 
 @property --tw-translate-x {

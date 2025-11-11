@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Fugaz+One&display=swap');
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -234,4 +236,15 @@ html {
 /* Support for --progress-background custom property */
 [data-slot="progress"] [data-slot="indicator"] {
   background-color: var(--progress-background, var(--color-primary)) !important;
+}
+
+/* Logo Text (Fugaz One) - Optional CSS-based alternative */
+.logo-text {
+  font-family: 'Fugaz One', sans-serif;
+  background: linear-gradient(180deg, #318650 0%, #0C2013 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  letter-spacing: -0.02em;
 }
