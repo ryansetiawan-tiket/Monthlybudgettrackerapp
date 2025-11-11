@@ -1,7 +1,7 @@
 
-  # Monthly Budget Tracker App
+  # REM_v1
 
-  This is a code bundle for Monthly Budget Tracker App. The original project is available at https://www.figma.com/design/XDWa8NNhr1iVsocj3nma5l/Monthly-Budget-Tracker-App.
+  This is a code bundle for REM_v1. The original project is available at https://www.figma.com/design/XDWa8NNhr1iVsocj3nma5l/REM_v1.
 
   ## Running the code
 
