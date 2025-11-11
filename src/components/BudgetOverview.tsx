@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { ChevronDown, ChevronUp, Info } from "lucide-react";
+import { ChevronDown, ChevronUp, Info, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { formatCurrency } from "../utils/currency";
 
@@ -18,6 +18,10 @@ interface BudgetOverviewProps {
   carryOverAssets?: number;
   currentMonthExpenses?: number;
   carryOverLiabilities?: number;
+  // ✨ NEW: Smart shortcut to open Category Breakdown modal
+  onOpenCategoryBreakdown?: () => void;
+  // ✨ NEW: Smart shortcut to open Income Breakdown modal
+  onOpenIncomeBreakdown?: () => void;
 }
 
 export const BudgetOverview = memo(function BudgetOverview({ 
@@ -31,14 +35,29 @@ export const BudgetOverview = memo(function BudgetOverview({
   globalDeduction = 0,
   carryOverAssets = 0,
   currentMonthExpenses = 0,
-  carryOverLiabilities = 0
+  carryOverLiabilities = 0,
+  onOpenCategoryBreakdown,
+  onOpenIncomeBreakdown
 }: BudgetOverviewProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <Card>
         <CardContent className="p-6 space-y-5">
-          <div className="space-y-1.5">
+          {/* ✨ SMART SHORTCUT: Clickable Total Pemasukan section */}
+          <div 
+            className="space-y-1.5 cursor-pointer hover:bg-muted/30 active:bg-muted/50 transition-colors rounded-lg p-2 -mx-2 -mt-2"
+            onClick={() => onOpenIncomeBreakdown?.()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenIncomeBreakdown?.();
+              }
+            }}
+            aria-label="Buka breakdown pemasukan"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-sm font-medium leading-none">Total Pemasukan</p>
@@ -98,12 +117,26 @@ export const BudgetOverview = memo(function BudgetOverview({
                   </Popover>
                 )}
               </div>
-              <div className="size-2 rounded-full bg-green-500"></div>
+              {/* ✨ NEW: Visual cue - Green chevron indicates clickable */}
+              <ChevronRight className="size-4 text-green-500 opacity-80 hover:opacity-100 transition-opacity" />
             </div>
             <p className="text-2xl text-green-600">{formatCurrency(totalIncome)}</p>
           </div>
           <div className="h-px bg-border"></div>
-          <div className="space-y-1.5">
+          {/* ✨ SMART SHORTCUT: Clickable Total Pengeluaran section */}
+          <div 
+            className="space-y-1.5 cursor-pointer hover:bg-muted/30 active:bg-muted/50 transition-colors rounded-lg p-2 -mx-2 -mb-2"
+            onClick={() => onOpenCategoryBreakdown?.()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenCategoryBreakdown?.();
+              }
+            }}
+            aria-label="Buka breakdown kategori pengeluaran"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <p className="text-sm font-medium leading-none">Total Pengeluaran</p>
@@ -127,7 +160,7 @@ export const BudgetOverview = memo(function BudgetOverview({
                         <span className="text-muted-foreground">Pengeluaran Bulan Ini:</span>
                         <span className="text-red-600 font-medium">-{formatCurrency(currentMonthExpenses)}</span>
                       </div>
-                      {/* 🏗️ ARCHITECTURE FIX: NEW - Carry-Over Kewajiban (Utang) */}
+                      {/* ️ ARCHITECTURE FIX: NEW - Carry-Over Kewajiban (Utang) */}
                       {carryOverLiabilities > 0 && (
                         <div className="flex justify-between gap-2">
                           <span className="text-muted-foreground">
@@ -145,7 +178,8 @@ export const BudgetOverview = memo(function BudgetOverview({
                   </PopoverContent>
                 </Popover>
               </div>
-              <div className="size-2 rounded-full bg-red-500"></div>
+              {/* ✨ NEW: Visual cue - Red chevron indicates clickable */}
+              <ChevronRight className="size-4 text-red-500 opacity-80 hover:opacity-100 transition-opacity" />
             </div>
             <p className="text-2xl text-red-600">{formatCurrency(totalExpenses)}</p>
           </div>

@@ -540,7 +540,7 @@ export function CategoryBreakdown({
             </h3>
             
             {/* Dynamic Insight Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className={isMobile ? 'space-y-3' : 'grid grid-cols-1 md:grid-cols-3 gap-3'}>
               {selectedInsights.map(insightId => {
                 const config = INSIGHTS_POOL.find(i => i.id === insightId);
                 if (!config) return null;
@@ -551,38 +551,96 @@ export function CategoryBreakdown({
                 const isActive = selectedInsight === insightId;
                 
                 return (
-                  <Card 
-                    key={insightId}
-                    className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
-                    onClick={() => setSelectedInsight(isActive ? null : insightId)}
-                  >
-                    <CardContent className={isMobile ? 'p-4' : 'p-4'}>
-                      <div className="flex items-start gap-3">
-                        <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
-                          <p className="font-semibold text-sm mb-1 truncate">
-                            {result.category ? result.category.label : '-'}
-                          </p>
-                          <p className={`${config.textColor} font-bold`}>{result.value}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {config.subtitle}
-                          </p>
+                  <div key={insightId}>
+                    {/* Insight Card */}
+                    <Card 
+                      className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
+                      onClick={() => setSelectedInsight(isActive ? null : insightId)}
+                    >
+                      <CardContent className={isMobile ? 'p-4' : 'p-4'}>
+                        <div className="flex items-start gap-3">
+                          <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
+                            <p className="font-semibold text-sm mb-1 truncate">
+                              {result.category ? result.category.label : '-'}
+                            </p>
+                            <p className={`${config.textColor} font-bold`}>{result.value}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {config.subtitle}
+                            </p>
+                          </div>
+                          {isActive ? (
+                            <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                          ) : (
+                            <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                          )}
                         </div>
-                        {isActive ? (
-                          <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
-                        ) : (
-                          <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+
+                    {/* Transaction List - Immediately Below This Card (Mobile Only) */}
+                    {isMobile && isActive && (() => {
+                      const filteredExpenses = config.getFilteredExpenses(result.category!, expenses);
+                      const sortedExpenses = [...filteredExpenses].sort((a, b) => b.amount - a.amount);
+                      
+                      // Extract border color (e.g., 'border-red-500/30' -> 'red')
+                      const colorMatch = config.borderColor.match(/border-(\w+)-/);
+                      const baseColor = colorMatch ? colorMatch[1] : 'gray';
+                      
+                      return (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.3, ease: 'easeInOut' }}
+                          className="overflow-hidden mt-2"
+                        >
+                          <div className="grid grid-cols-1 gap-2">
+                            {sortedExpenses.map((exp, idx) => {
+                              const isLargest = idx === 0;
+                              
+                              return (
+                                <motion.div
+                                  key={exp.id}
+                                  initial={{ opacity: 0, y: -10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: idx * 0.05 }}
+                                >
+                                  <Card className={`bg-muted/30 border-${baseColor}-500/20 h-full`}>
+                                    <CardContent className="p-3">
+                                      <div className="flex items-center justify-between">
+                                        <p className="font-medium truncate flex-1 text-sm">
+                                          {exp.name}
+                                        </p>
+                                        <p className={`font-semibold text-${baseColor}-600 ml-2 text-sm`}>
+                                          {formatCurrency(exp.amount)}
+                                        </p>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        {new Date(exp.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                      </p>
+                                      {isLargest && (
+                                        <div className={`mt-2 pt-2 border-t border-${baseColor}-500/20`}>
+                                          <p className={`text-xs text-${baseColor}-600 font-medium`}>💰 Transaksi Terbesar</p>
+                                        </div>
+                                      )}
+                                    </CardContent>
+                                  </Card>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+                  </div>
                 );
               })}
             </div>
 
-            {/* Dynamic Transaction Lists - Full Width Outside Grid */}
-            {selectedInsight && (() => {
+            {/* Desktop Transaction Lists - Full Width Outside Grid */}
+            {!isMobile && selectedInsight && (() => {
               const config = INSIGHTS_POOL.find(i => i.id === selectedInsight);
               if (!config) return null;
               
@@ -721,8 +779,8 @@ export function CategoryBreakdown({
                     💡 Fun Insights Bulan Ini
                   </h3>
                   
-                  {/* Dynamic Insight Cards Grid */}
-                  <div className="grid grid-cols-1 gap-3">
+                  {/* Dynamic Insight Cards with Inline Transaction Lists */}
+                  <div className="space-y-3">
                     {selectedInsights.map(insightId => {
                       const config = INSIGHTS_POOL.find(i => i.id === insightId);
                       if (!config) return null;
@@ -733,97 +791,93 @@ export function CategoryBreakdown({
                       const isActive = selectedInsight === insightId;
                       
                       return (
-                        <Card 
-                          key={insightId}
-                          className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
-                          onClick={() => setSelectedInsight(isActive ? null : insightId)}
-                        >
-                          <CardContent className="p-4">
-                            <div className="flex items-start gap-3">
-                              <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
-                                <p className="font-semibold text-sm mb-1 truncate">
-                                  {result.category ? result.category.label : '-'}
-                                </p>
-                                <p className={`${config.textColor} font-bold`}>{result.value}</p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  {config.subtitle}
-                                </p>
+                        <div key={insightId}>
+                          {/* Insight Card */}
+                          <Card 
+                            className={`relative overflow-hidden bg-gradient-to-br ${config.gradient} ${config.borderColor} transition-colors cursor-pointer`}
+                            onClick={() => setSelectedInsight(isActive ? null : insightId)}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-start gap-3">
+                                <span className="text-3xl">{result.category ? result.category.emoji : config.icon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-muted-foreground mb-1">{config.icon} {config.title}</p>
+                                  <p className="font-semibold text-sm mb-1 truncate">
+                                    {result.category ? result.category.label : '-'}
+                                  </p>
+                                  <p className={`${config.textColor} font-bold`}>{result.value}</p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {config.subtitle}
+                                  </p>
+                                </div>
+                                {isActive ? (
+                                  <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                                ) : (
+                                  <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
+                                )}
                               </div>
-                              {isActive ? (
-                                <ChevronUp className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
-                              ) : (
-                                <ChevronDown className="size-4 text-muted-foreground ml-auto flex-shrink-0" />
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
+                            </CardContent>
+                          </Card>
 
-                  {/* Dynamic Transaction Lists */}
-                  {selectedInsight && (() => {
-                    const config = INSIGHTS_POOL.find(i => i.id === selectedInsight);
-                    if (!config) return null;
-                    
-                    const result = config.calculate(categoryData, expenses, previousMonthData, settings);
-                    if (!result.hasData || !result.category) return null;
-                    
-                    const filteredExpenses = config.getFilteredExpenses(result.category, expenses);
-                    const sortedExpenses = [...filteredExpenses].sort((a, b) => b.amount - a.amount);
-                    
-                    // Extract border color
-                    const colorMatch = config.borderColor.match(/border-(\w+)-/);
-                    const baseColor = colorMatch ? colorMatch[1] : 'gray';
-                    
-                    return (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.3, ease: 'easeInOut' }}
-                        className="overflow-hidden mt-3"
-                      >
-                        <div className="grid grid-cols-1 gap-2">
-                          {sortedExpenses.map((exp, idx) => {
-                            const isLargest = idx === 0;
+                          {/* Transaction List - Immediately Below This Card */}
+                          {isActive && (() => {
+                            const filteredExpenses = config.getFilteredExpenses(result.category!, expenses);
+                            const sortedExpenses = [...filteredExpenses].sort((a, b) => b.amount - a.amount);
+                            
+                            // Extract border color
+                            const colorMatch = config.borderColor.match(/border-(\w+)-/);
+                            const baseColor = colorMatch ? colorMatch[1] : 'gray';
                             
                             return (
                               <motion.div
-                                key={exp.id}
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: idx * 0.05 }}
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.3, ease: 'easeInOut' }}
+                                className="overflow-hidden mt-2"
                               >
-                                <Card className={`bg-muted/30 border-${baseColor}-500/20`}>
-                                  <CardContent className="p-3">
-                                    <div className="flex items-center justify-between">
-                                      <p className={`font-medium truncate flex-1 ${isLargest ? 'text-base' : 'text-sm'}`}>
-                                        {exp.name}
-                                      </p>
-                                      <p className={`font-semibold text-${baseColor}-600 ml-2 ${isLargest ? 'text-base' : 'text-sm'}`}>
-                                        {formatCurrency(exp.amount)}
-                                      </p>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                      {new Date(exp.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                    </p>
-                                    {isLargest && (
-                                      <div className={`mt-2 pt-2 border-t border-${baseColor}-500/20`}>
-                                        <p className={`text-xs text-${baseColor}-600 font-medium`}>💰 Transaksi Terbesar</p>
-                                      </div>
-                                    )}
-                                  </CardContent>
-                                </Card>
+                                <div className="grid grid-cols-1 gap-2">
+                                  {sortedExpenses.map((exp, idx) => {
+                                    const isLargest = idx === 0;
+                                    
+                                    return (
+                                      <motion.div
+                                        key={exp.id}
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: idx * 0.05 }}
+                                      >
+                                        <Card className={`bg-muted/30 border-${baseColor}-500/20`}>
+                                          <CardContent className="p-3">
+                                            <div className="flex items-center justify-between">
+                                              <p className="font-medium truncate flex-1 text-sm">
+                                                {exp.name}
+                                              </p>
+                                              <p className={`font-semibold text-${baseColor}-600 ml-2 text-sm`}>
+                                                {formatCurrency(exp.amount)}
+                                              </p>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-1">
+                                              {new Date(exp.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                            </p>
+                                            {isLargest && (
+                                              <div className={`mt-2 pt-2 border-t border-${baseColor}-500/20`}>
+                                                <p className={`text-xs text-${baseColor}-600 font-medium`}>💰 Transaksi Terbesar</p>
+                                              </div>
+                                            )}
+                                          </CardContent>
+                                        </Card>
+                                      </motion.div>
+                                    );
+                                  })}
+                                </div>
                               </motion.div>
                             );
-                          })}
+                          })()}
                         </div>
-                      </motion.div>
-                    );
-                  })()}
+                      );
+                    })}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>

@@ -8,6 +8,7 @@ import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { PocketsSummary } from "./components/PocketsSummary";
 import { FloatingActionButton } from "./components/FloatingActionButton";
 import { CategoryBreakdown } from "./components/CategoryBreakdown";
+import { IncomeBreakdown } from "./components/IncomeBreakdown";
 import RemLogo from "./imports/Rem-369-259";
 
 // Lazy load heavy dialogs for better initial bundle size (200-300KB reduction)
@@ -237,6 +238,12 @@ function AppContent() {
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false); // Desktop unified dialog
   const [managePocketsInitialMode, setManagePocketsInitialMode] = useState<'list' | 'create'>('list');
+  
+  // ✨ NEW: Smart shortcut - Category Breakdown state
+  const [openCategoryBreakdownFromCard, setOpenCategoryBreakdownFromCard] = useState(false);
+  
+  // ✨ NEW: Smart shortcut - Income Breakdown state
+  const [openIncomeBreakdownFromCard, setOpenIncomeBreakdownFromCard] = useState(false);
   
   // Show/Hide Pockets state (persistent)
   const [showPockets, setShowPockets] = useState(() => {
@@ -1459,7 +1466,7 @@ function AppContent() {
                 className="text-left space-y-2 pt-2 relative flex-shrink-0"
               >
                 {/* Logo REM */}
-                <div className="w-[110px] h-[37px] sm:w-[140px] sm:h-[47px]">
+                <div className="w-[95px] h-[32px] sm:w-[120px] sm:h-[40px]">
                   <RemLogo />
                 </div>
                 {/* Action buttons - Mobile only, positioned at top right */}
@@ -1523,6 +1530,8 @@ function AppContent() {
               carryOverAssets={carryOverAssets}
               currentMonthExpenses={currentMonthExpenses}
               carryOverLiabilities={carryOverLiabilities}
+              onOpenCategoryBreakdown={() => setOpenCategoryBreakdownFromCard(true)}
+              onOpenIncomeBreakdown={() => setOpenIncomeBreakdownFromCard(true)}
             />
           </motion.div>
 
@@ -1715,6 +1724,9 @@ function AppContent() {
               // 🏗️ ARCHITECTURE FIX: Carry-over breakdown props
               carryOverAssets={carryOverAssets}
               carryOverLiabilities={carryOverLiabilities}
+              // ✨ NEW: Smart shortcut - External category breakdown control
+              externalOpenCategoryBreakdown={openCategoryBreakdownFromCard}
+              onCategoryBreakdownClose={() => setOpenCategoryBreakdownFromCard(false)}
             />
           </motion.div>
         </div>
@@ -1777,6 +1789,24 @@ function AppContent() {
             />
           )}
         </Suspense>
+        
+        {/* ✨ NEW: Income Breakdown Dialog */}
+        <IncomeBreakdown
+          open={openIncomeBreakdownFromCard}
+          onOpenChange={setOpenIncomeBreakdownFromCard}
+          initialBudget={Number(budget.initialBudget) || 0}
+          additionalIncome={additionalIncomes.map(income => ({
+            id: income.id,
+            name: income.name,
+            amount: income.amountIDR - (income.deduction || 0),
+            date: income.date,
+            usdAmount: income.currency === 'USD' ? income.amount : undefined,
+            exchangeRate: income.exchangeRate || undefined
+          }))}
+          carryOverAssets={carryOverAssets}
+          globalDeduction={budget.incomeDeduction || 0}
+          totalIncome={totalIncome}
+        />
         
         <Toaster />
       </motion.div>

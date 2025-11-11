@@ -1,19 +1,13 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Button } from "./ui/button";
-import { Plus, CalendarIcon, FileText, Trash2, ChevronLeft, ChevronRight, X, ChevronDown } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar } from "./ui/calendar";
-import { format } from "date-fns";
-import { id } from "date-fns/locale";
-import { cn } from "./ui/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import type { FixedExpenseTemplate } from "./FixedExpenseTemplates";
-import { FixedExpenseTemplates } from "./FixedExpenseTemplates";
-import { Card } from "./ui/card";
+import { Trash2, ChevronDown, ChevronUp, Plus, PencilLine, FileText, Settings } from "lucide-react";
+import { cn } from "./ui/utils";
 import { Separator } from "./ui/separator";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { Card } from "./ui/card";
+import type { FixedExpenseTemplate } from "../types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { EXPENSE_CATEGORIES } from "../constants";
 import type { ExpenseCategory } from "../types";
@@ -21,11 +15,21 @@ import { useCategorySettings } from "../hooks/useCategorySettings";
 import { getAllCategories } from "../utils/categoryManager";
 import { showBudgetAlertIfNeeded, calculateCategoryTotal } from "../utils/budgetAlerts";
 import { BudgetExceedDialog, BudgetExceedInfo } from "./BudgetExceedDialog";
-import { getCategoryLabel } from "../utils/calculations";
-import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
 import { formatCurrency } from "../utils/currency";
+import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
+import { format } from "date-fns";
+import { id } from "date-fns/locale";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { getCategoryLabel } from "../utils/calculations";
 import { SmartSuggestions } from "./SmartSuggestions";
 import { getSuggestions, filterSuggestions, type Suggestion } from "../utils/smartSuggestions";
+import { InsufficientBalanceDialog } from "./InsufficientBalanceDialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { X } from "lucide-react";
+import { CategoryManager } from "./CategoryManager";
+import { useIsMobile } from "./ui/use-mobile";
 
 interface AddExpenseFormProps {
   onAddExpense: (name: string, amount: number, date: string, items?: Array<{name: string, amount: number}>, color?: string, pocketId?: string, groupId?: string, silent?: boolean, category?: string, emoji?: string) => Promise<any>;
@@ -58,6 +62,28 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
   // Phase 8: Get custom categories
   const { settings } = useCategorySettings();
   const allCategories = useMemo(() => getAllCategories(settings), [settings]);
+  
+  // ✨ Smart Category Suggestions - Calculate most frequently used categories
+  const topCategories = useMemo(() => {
+    // Count category usage from all expenses
+    const categoryCount = new Map<string, number>();
+    
+    expenses.forEach(expense => {
+      // Skip if no category
+      if (!expense.category) return;
+      
+      const count = categoryCount.get(expense.category) || 0;
+      categoryCount.set(expense.category, count + 1);
+    });
+    
+    // Sort by frequency and get top 3
+    const sorted = Array.from(categoryCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([categoryId, count]) => ({ categoryId, count }));
+    
+    return sorted;
+  }, [expenses]);
   
   // Smart Suggestions state
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -107,6 +133,10 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
   
   // Expand/collapse state - track which entry is expanded
   const [expandedEntryId, setExpandedEntryId] = useState<string>(initialEntryId);
+  
+  // Category Manager state
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const isMobile = useIsMobile();
   
   // Update selected pocket when pockets load
   useEffect(() => {
@@ -807,27 +837,71 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
 
                     <div className="space-y-2">
                       <Label>Kategori (Opsional)</Label>
-                      <Select 
-                        value={entry.category || ""} 
-                        onValueChange={(value) => updateEntryField(entry.id, 'category', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih kategori" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {allCategories.map((cat) => (
-                            <SelectItem key={cat.id} value={cat.id}>
-                              <span className="flex items-center gap-2">
-                                <span>{cat.emoji}</span>
-                                <span>{cat.label}</span>
-                                {cat.isCustom && (
-                                  <span className="text-xs text-muted-foreground">(Custom)</span>
-                                )}
-                              </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      
+                      {/* ✨ Smart Category Suggestions */}
+                      {topCategories.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          <span className="text-xs text-muted-foreground self-center">Sering dipakai:</span>
+                          {topCategories.map(({ categoryId, count }) => {
+                            const category = allCategories.find(c => c.id === categoryId);
+                            if (!category) return null;
+                            
+                            const isSelected = entry.category === categoryId;
+                            
+                            return (
+                              <button
+                                key={categoryId}
+                                type="button"
+                                onClick={() => updateEntryField(entry.id, 'category', categoryId)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                                  isSelected
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-muted hover:bg-muted/70'
+                                }`}
+                              >
+                                <span>{category.emoji}</span>
+                                <span>{category.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2">
+                        <Select 
+                          value={entry.category || ""} 
+                          onValueChange={(value) => updateEntryField(entry.id, 'category', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pilih kategori" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[220px]">
+                            {allCategories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                <span className="flex items-center gap-2">
+                                  <span>{cat.emoji}</span>
+                                  <span>{cat.label}</span>
+                                  {cat.isCustom && (
+                                    <span className="text-xs text-muted-foreground">(Custom)</span>
+                                  )}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        
+                        {/* Icon Button Gear untuk Edit Kategori */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setShowCategoryManager(true)}
+                          className="flex-shrink-0"
+                          title="Edit kategori"
+                        >
+                          <Settings className="size-4" />
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -1027,6 +1101,14 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
           pocketName={insufficientDetails.pocketName}
           availableBalance={insufficientDetails.availableBalance}
           attemptedAmount={insufficientDetails.attemptedAmount}
+        />
+      )}
+      
+      {/* Category Manager */}
+      {showCategoryManager && (
+        <CategoryManager
+          open={showCategoryManager}
+          onOpenChange={setShowCategoryManager}
         />
       )}
     </div>

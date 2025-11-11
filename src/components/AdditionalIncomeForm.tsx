@@ -103,6 +103,10 @@ export function AdditionalIncomeForm({
   const [deduction, setDeduction] = useState(initialValues?.deduction?.toString() || "");
   const [targetPocketId, setTargetPocketId] = useState(initialValues?.pocketId || "");
 
+  // USD amount with decimal & math operations support
+  const [amountExpression, setAmountExpression] = useState(initialValues?.amount?.toString() || "");
+  const [calculatedAmount, setCalculatedAmount] = useState<number | null>(null);
+
   // Balance validation state (for deduction validation)
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [isInsufficientBalance, setIsInsufficientBalance] = useState(false);
@@ -116,6 +120,62 @@ export function AdditionalIncomeForm({
   } | null>(null);
 
   const baseUrl = getBaseUrl(projectId);
+
+  /**
+   * Math expression evaluator - supports decimal and operations
+   * Examples: "1234.56", "100+50", "1000-10%", "500*2"
+   */
+  const evaluateExpression = (expression: string): number | null => {
+    try {
+      // Remove spaces and validate
+      const cleaned = expression.replace(/\s/g, '');
+      if (!cleaned) return null;
+      
+      // Only allow numbers, operators, decimal point, and parentheses
+      if (!/^[0-9+\-*/.()%]+$/.test(cleaned)) {
+        return null;
+      }
+
+      // Handle percentage calculations
+      let processed = cleaned;
+      
+      // Match pattern: number followed by operator followed by number followed by %
+      const percentPattern = /([0-9.]+)([\+\-\*\/])([0-9.]+)%/g;
+      processed = processed.replace(percentPattern, (match, base, operator, percent) => {
+        return `${base}${operator}(${base}*${percent}/100)`;
+      });
+      
+      // Match pattern: just number followed by %
+      const simplePercentPattern = /([0-9.]+)%/g;
+      processed = processed.replace(simplePercentPattern, (match, num) => {
+        return `(${num}/100)`;
+      });
+
+      // Safely evaluate using Function constructor
+      const result = new Function('return ' + processed)();
+      
+      if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
+        // For USD, keep 2 decimal places
+        return currency === 'USD' ? Math.round(result * 100) / 100 : Math.round(result);
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  // Update calculation when amount expression changes
+  useEffect(() => {
+    const result = evaluateExpression(amountExpression);
+    setCalculatedAmount(result);
+    // Sync with old amount state for backward compatibility
+    if (result !== null) {
+      setAmount(result.toString());
+    } else {
+      setAmount(amountExpression);
+    }
+  }, [amountExpression, currency]);
 
   // Set default target pocket when prop changes
   useEffect(() => {
@@ -324,6 +384,8 @@ export function AdditionalIncomeForm({
     if (!editMode) {
       setName("");
       setAmount("");
+      setAmountExpression("");
+      setCalculatedAmount(null);
       setCurrency("IDR");
       setConversionType("manual");
       setManualRate("");
@@ -434,10 +496,26 @@ export function AdditionalIncomeForm({
             id="incomeAmount"
             type="text"
             inputMode="numeric"
-            value={formatCurrencyInput(amount)}
-            onChange={(e) => setAmount(parseCurrencyInput(e.target.value).toString())}
-            placeholder="0"
+            value={amountExpression}
+            onChange={(e) => setAmountExpression(e.target.value)}
+            placeholder={currency === "USD" ? "0 atau 1234.56 atau 100+50" : "0 atau 50000+4000-20%"}
           />
+          {/* Show calculation preview for USD */}
+          {currency === "USD" && calculatedAmount !== null && amountExpression !== calculatedAmount.toString() && (
+            <div className="p-2 bg-accent rounded-md">
+              <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
+              <p className="text-primary">
+                ${calculatedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          )}
+          {/* Show calculation preview for IDR */}
+          {currency === "IDR" && calculatedAmount !== null && amountExpression !== calculatedAmount.toString() && (
+            <div className="p-2 bg-accent rounded-md">
+              <p className="text-sm text-muted-foreground">Hasil perhitungan:</p>
+              <p className="text-primary">{formatCurrency(calculatedAmount)}</p>
+            </div>
+          )}
         </div>
 
         {currency === "USD" && (

@@ -38,6 +38,7 @@ import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { formatCurrency } from "../utils/currency";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 import { formatDateSafe, getLocalDateFromISO } from "../utils/date-helpers";
+import { ConsolidatedToolbar } from "./ConsolidatedToolbar";
 import {
   Tooltip,
   TooltipContent,
@@ -49,7 +50,7 @@ import { DialogPriority } from "../constants";
 import SimulationSandbox from "./SimulationSandbox";
 import { AdvancedFilterDrawer } from "./AdvancedFilterDrawer";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
-import { useLongPress } from "../hooks/useLongPress";
+import { ExpenseItemWrapper } from "./ExpenseItemWrapper";
 
 interface ExpenseItem {
   name: string;
@@ -136,6 +137,9 @@ interface ExpenseListProps {
   // Month/Year for CategoryBreakdown MoM calculation
   selectedMonth?: number;
   selectedYear?: number;
+  // ✨ NEW: External control for opening Category Breakdown modal
+  externalOpenCategoryBreakdown?: boolean;
+  onCategoryBreakdownClose?: () => void;
 }
 
 function ExpenseListComponent({ 
@@ -165,7 +169,10 @@ function ExpenseListComponent({
   carryOverLiabilities = 0,
   // Month/Year props
   selectedMonth,
-  selectedYear
+  selectedYear,
+  // ✨ NEW: External category breakdown control
+  externalOpenCategoryBreakdown = false,
+  onCategoryBreakdownClose
 }: ExpenseListProps) {
   const isMobile = useIsMobile();
   
@@ -276,6 +283,7 @@ function ExpenseListComponent({
     category: undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [matchedCategories, setMatchedCategories] = useState<Set<string>>(new Set());
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -372,11 +380,19 @@ function ExpenseListComponent({
     (open) => {
       if (!open) {
         setShowCategoryDrawer(false);
+        onCategoryBreakdownClose?.();
       }
     },
     DialogPriority.MEDIUM,
     'category-breakdown-drawer'
   );
+  
+  // ✨ NEW: Sync external state to internal state (for BudgetOverview shortcut)
+  useEffect(() => {
+    if (externalOpenCategoryBreakdown) {
+      setShowCategoryDrawer(true);
+    }
+  }, [externalOpenCategoryBreakdown]);
   
   // Progressive disclosure for income items
   const [expandedIncomeIds, setExpandedIncomeIds] = useState<Set<string>>(new Set());
@@ -490,7 +506,8 @@ function ExpenseListComponent({
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    setShowSuggestions(true);
+    // Show suggestions when there's text (both mobile and desktop)
+    setShowSuggestions(value.trim().length > 0);
     setSelectedSuggestionIndex(-1);
     
     // ✅ KATEGORI DETECTION: Check if query matches any category
@@ -525,6 +542,15 @@ function ExpenseListComponent({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle Ctrl/Cmd+A to select all text
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+      e.preventDefault();
+      if (searchInputRef.current) {
+        searchInputRef.current.select();
+      }
+      return;
+    }
+    
     if (!showSuggestions || suggestions.length === 0) return;
 
     switch (e.key) {
@@ -564,7 +590,13 @@ function ExpenseListComponent({
   };
 
   const toggleSortOrder = () => {
-    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    console.log('toggleSortOrder called, current sortOrder:', sortOrder);
+    setSortOrder(prev => {
+      const newOrder = prev === 'asc' ? 'desc' : 'asc';
+      console.log('New sortOrder will be:', newOrder);
+      toast.info(newOrder === 'asc' ? 'Diurutkan: Terlama ke Terbaru' : 'Diurutkan: Terbaru ke Terlama');
+      return newOrder;
+    });
   };
 
   // Handle category click from pie chart
@@ -655,6 +687,15 @@ function ExpenseListComponent({
     setSelectedExpenseIds(new Set());
     setSelectedIncomeIds(new Set());
   }, []);
+
+  // Toggle handler for ConsolidatedToolbar
+  const handleToggleBulkMode = useCallback(() => {
+    if (isBulkSelectMode) {
+      handleCancelBulkMode();
+    } else {
+      handleActivateBulkMode();
+    }
+  }, [isBulkSelectMode, handleCancelBulkMode, handleActivateBulkMode]);
 
   // Phase 2: Handler to open sandbox with smart context
   const handleOpenSandbox = () => {
@@ -783,6 +824,15 @@ function ExpenseListComponent({
       setSelectedIncomeIds(new Set());
     } else {
       setSelectedIncomeIds(new Set(incomes.map(inc => inc.id)));
+    }
+  };
+
+  // Unified handler for "Pilih semua" checkbox in toolbar
+  const handleToggleSelectAll = () => {
+    if (activeTab === 'expense') {
+      handleSelectAllExpenses();
+    } else {
+      handleSelectAllIncomes();
     }
   };
 
@@ -967,11 +1017,15 @@ function ExpenseListComponent({
   }, [expenses, categoryFilter, activeCategoryFilter, activeTab, activeFilters]);
 
   // ✅ IMPROVED: Sort and filter expenses - no date restriction, with category filter
+  // ⚠️ CRITICAL: sortOrder ONLY applies to "Hari Ini & Mendatang" section
+  // History section is ALWAYS sorted desc (newest first)
   const sortedAndFilteredExpenses = useMemo(() => {
+    if (activeTab !== 'expense') return [];
+    
     let filtered = [...categoryFilteredExpenses];
     
     // ✅ NEW: If category detected AND user is searching, show all from that category OR match search
-    if (matchedCategories.size > 0 && activeTab === 'expense' && searchQuery.trim()) {
+    if (matchedCategories.size > 0 && searchQuery.trim()) {
       filtered = filtered.filter(expense => {
         // ✅ Support item-level categories (template expenses)
         let categoryMatches = false;
@@ -996,9 +1050,13 @@ function ExpenseListComponent({
       filtered = filtered.filter((expense) => fuzzyMatchExpense(expense, searchQuery));
     }
     
-    // Sort
-    return filtered.sort((a, b) => {
-      // First sort by date
+    // ✅ NEW LOGIC: Split first, then sort separately
+    // Split into upcoming (today & future) and history (past)
+    const upcoming = filtered.filter(exp => !isPast(exp.date));
+    const history = filtered.filter(exp => isPast(exp.date));
+    
+    // Sort upcoming based on user preference (sortOrder)
+    const sortedUpcoming = upcoming.sort((a, b) => {
       const dateCompare = sortOrder === 'asc' 
         ? new Date(a.date).getTime() - new Date(b.date).getTime() 
         : new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -1016,7 +1074,34 @@ function ExpenseListComponent({
       
       return dateCompare;
     });
+    
+    // Sort history ALWAYS desc (newest first) - fixed, not affected by sortOrder
+    const sortedHistory = history.sort((a, b) => {
+      const dateCompare = new Date(b.date).getTime() - new Date(a.date).getTime();
+      
+      if (dateCompare === 0) {
+        const aHasItems = a.items && a.items.length > 0;
+        const bHasItems = b.items && b.items.length > 0;
+        
+        if (aHasItems && !bHasItems) return -1;
+        if (!aHasItems && bHasItems) return 1;
+        return 0;
+      }
+      
+      return dateCompare;
+    });
+    
+    // Combine: upcoming first, then history
+    const combined = [...sortedUpcoming, ...sortedHistory];
+    
+    // ⚠️ Return object dengan upcoming & history terpisah untuk menghindari re-filter
+    return { sortedUpcoming, sortedHistory, combined };
   }, [categoryFilteredExpenses, sortOrder, searchQuery, matchedCategories, activeTab]);
+
+  // ✅ Extract from useMemo result
+  const upcomingExpenses = sortedAndFilteredExpenses.sortedUpcoming || [];
+  const historyExpenses = sortedAndFilteredExpenses.sortedHistory || [];
+  const allSortedExpenses = sortedAndFilteredExpenses.combined || [];
 
   // ✅ NEW: Filter and sort incomes (with income source filter)
   const filteredAndSortedIncomes = useMemo(() => {
@@ -1036,10 +1121,10 @@ function ExpenseListComponent({
 
   // Check if all filtered expenses are selected
   const isAllSelected = useMemo(() => {
-    return sortedAndFilteredExpenses.length > 0 && 
-           selectedExpenseIds.size === sortedAndFilteredExpenses.length &&
-           sortedAndFilteredExpenses.every(exp => selectedExpenseIds.has(exp.id));
-  }, [selectedExpenseIds, sortedAndFilteredExpenses]);
+    return allSortedExpenses.length > 0 && 
+           selectedExpenseIds.size === allSortedExpenses.length &&
+           allSortedExpenses.every(exp => selectedExpenseIds.has(exp.id));
+  }, [selectedExpenseIds, allSortedExpenses]);
 
   // Bulk select handlers with useCallback for performance - REMOVED (using handlers defined above that support both expense and income)
 
@@ -1059,7 +1144,7 @@ function ExpenseListComponent({
     if (isAllSelected) {
       setSelectedExpenseIds(new Set());
     } else {
-      const allIds = new Set(sortedAndFilteredExpenses.map(exp => exp.id));
+      const allIds = new Set(allSortedExpenses.map(exp => exp.id));
       setSelectedExpenseIds(allIds);
     }
   }, [isAllSelected, sortedAndFilteredExpenses]);
@@ -1123,11 +1208,17 @@ function ExpenseListComponent({
     }
   }, [expenses, isBulkSelectMode, selectedExpenseIds]);
 
-  // Keyboard support: Escape to exit bulk mode
+  // Keyboard support: Escape to exit bulk mode / close search / close drawer
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isBulkSelectMode) {
         handleCancelBulkMode();
+      }
+      // ✅ NEW: Close search expanded mode dengan Escape key
+      if (e.key === 'Escape' && isSearchExpanded) {
+        setIsSearchExpanded(false);
+        setSearchQuery('');
+        setShowSuggestions(false);
       }
       // ✅ FIX: Close category drawer dengan Escape key
       if (e.key === 'Escape' && showCategoryDrawer) {
@@ -1137,7 +1228,7 @@ function ExpenseListComponent({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isBulkSelectMode, handleCancelBulkMode, showCategoryDrawer]);
+  }, [isBulkSelectMode, handleCancelBulkMode, isSearchExpanded, showCategoryDrawer]);
 
   // ✅ V9 FIX: Aggressive cleanup of stuck drawer overlays when state changes
   useEffect(() => {
@@ -1387,9 +1478,8 @@ function ExpenseListComponent({
     return incomes.filter((income) => fuzzyMatchIncome(income, searchQuery));
   }, [incomes, searchQuery, activeTab]);
 
-  // Split into upcoming and history
-  const upcomingExpenses = sortedAndFilteredExpenses.filter(exp => !isPast(exp.date));
-  const historyExpenses = sortedAndFilteredExpenses.filter(exp => isPast(exp.date));
+  // ⚠️ REMOVED duplicate split - already handled in useMemo above
+  // upcomingExpenses and historyExpenses are now extracted from sortedAndFilteredExpenses
 
   // Group by date
   const upcomingGrouped = groupExpensesByDate(upcomingExpenses);
@@ -1411,6 +1501,49 @@ function ExpenseListComponent({
       }
       return sum + expense.amount;
     }, 0);
+
+  // Auto-expand "Riwayat" if "Hari Ini & Mendatang" is empty
+  useEffect(() => {
+    if (upcomingExpenses.length === 0 && historyExpenses.length > 0) {
+      setHistoryExpanded(true);
+    }
+  }, [upcomingExpenses.length, historyExpenses.length]);
+
+  // ✨ NEW: Smart Category Suggestions - Calculate most frequently used categories
+  const topCategories = useMemo(() => {
+    // Count category usage from all expenses (TODO: extend to all-time data from backend)
+    const categoryCount = new Map<string, number>();
+    
+    expenses.forEach(expense => {
+      // Skip income items
+      if (expense.fromIncome) return;
+      
+      // Check if expense has items with individual categories
+      const expenseItems = (expense as any).items;
+      
+      if (expenseItems && Array.isArray(expenseItems) && expenseItems.length > 0) {
+        // Count item-level categories (template expenses)
+        expenseItems.forEach((item: any) => {
+          if (item.category) {
+            const count = categoryCount.get(item.category) || 0;
+            categoryCount.set(item.category, count + 1);
+          }
+        });
+      } else if (expense.category) {
+        // Count expense-level category (regular expenses)
+        const count = categoryCount.get(expense.category) || 0;
+        categoryCount.set(expense.category, count + 1);
+      }
+    });
+    
+    // Sort by frequency and get top 3
+    const sorted = Array.from(categoryCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([categoryId, count]) => ({ categoryId, count }));
+    
+    return sorted;
+  }, [expenses]);
 
   // Render grouped expenses by date or groupId
   const renderGroupedExpenseItem = (groupKey: string, expenses: Expense[]) => {
@@ -1718,24 +1851,23 @@ function ExpenseListComponent({
       );
     } else {
       // Single expense without items
-      const longPressHandlers = useLongPress({
-        onLongPress: () => {
-          if (!isBulkSelectMode) {
-            setOpenDropdownId(expense.id);
-          }
-        },
-        delay: 500,
-      });
-      
       return (
-        <div
+        <ExpenseItemWrapper
           key={expense.id}
-          className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''}`}
+          id={expense.id}
+          isMobile={isMobile}
+          isBulkSelectMode={isBulkSelectMode}
+          isSelected={selectedExpenseIds.has(expense.id)}
+          onLongPress={setOpenDropdownId}
         >
-          {/* Mobile: Compact layout with badge below + long-press */}
-          <div 
-            className="md:hidden p-2 pl-6"
-            {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+          {(longPressHandlers) => (
+            <div
+              className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''}`}
+            >
+              {/* Mobile: Compact layout with badge below + long-press */}
+              <div 
+                className="md:hidden p-2 pl-6"
+                {...longPressHandlers}
           >
             <div className="flex items-start justify-between gap-2">
               {/* Left: Checkbox, Name area */}
@@ -1952,7 +2084,9 @@ function ExpenseListComponent({
               )}
             </div>
           </div>
-        </div>
+            </div>
+          )}
+        </ExpenseItemWrapper>
       );
     }
   };
@@ -1960,22 +2094,22 @@ function ExpenseListComponent({
   // Render expense item function to avoid duplication
   const renderExpenseItem = (expense: Expense) => {
     if (expense.items && expense.items.length > 0) {
-      const longPressHandlers = useLongPress({
-        onLongPress: () => {
-          if (!isBulkSelectMode) {
-            setOpenDropdownId(expense.id);
-          }
-        },
-        delay: 500,
-      });
-      
       return (
-        <Collapsible key={expense.id} open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}>
-            <CollapsibleTrigger asChild>
-              <div 
-                className="group flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg"
-                {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+        <ExpenseItemWrapper
+          key={expense.id}
+          id={expense.id}
+          isMobile={isMobile}
+          isBulkSelectMode={isBulkSelectMode}
+          isSelected={selectedExpenseIds.has(expense.id)}
+          onLongPress={setOpenDropdownId}
+        >
+          {(longPressHandlers) => (
+            <Collapsible open={expandedItems.has(expense.id)} onOpenChange={() => toggleExpanded(expense.id)}>
+              <div className={`border rounded-lg ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}>
+                <CollapsibleTrigger asChild>
+                  <div 
+                    className="group flex items-center justify-between p-3 cursor-pointer hover:bg-accent/50 hover:scale-[1.005] transition-all rounded-lg"
+                    {...longPressHandlers}
               >
                 <div className="flex-1 flex items-center gap-2 min-w-0">
                   {isBulkSelectMode && (
@@ -2114,19 +2248,21 @@ function ExpenseListComponent({
               </div>
             </CollapsibleContent>
           </div>
-        </Collapsible>
+            </Collapsible>
+          )}
+        </ExpenseItemWrapper>
       );
     } else {
-      const longPressHandlers = useLongPress({
-        onLongPress: () => {
-          if (!isBulkSelectMode) {
-            setOpenDropdownId(expense.id);
-          }
-        },
-        delay: 500,
-      });
-      
       return (
+        <ExpenseItemWrapper
+          key={expense.id}
+          id={expense.id}
+          isMobile={isMobile}
+          isBulkSelectMode={isBulkSelectMode}
+          isSelected={selectedExpenseIds.has(expense.id)}
+          onLongPress={setOpenDropdownId}
+        >
+          {(longPressHandlers) => (
         <div
           key={expense.id}
           className={`group flex flex-col sm:flex-row sm:items-center gap-2 p-3 border rounded-lg hover:bg-accent/50 hover:scale-[1.005] transition-all ${isToday(expense.date) ? 'ring-2 ring-blue-500' : ''} ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 border-primary' : ''}`}
@@ -2245,6 +2381,8 @@ function ExpenseListComponent({
             )}
           </div>
         </div>
+          )}
+        </ExpenseItemWrapper>
       );
     }
   };
@@ -2253,153 +2391,50 @@ function ExpenseListComponent({
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex flex-col gap-2">
-          {!isBulkSelectMode ? (
-            // Normal Mode
-            <>
-              {/* Row 1: Title + Desktop Buttons + Mobile Action Buttons */}
-              <div className="flex items-center justify-between">
-                <span className="text-base sm:text-lg">Daftar Transaksi</span>
-                
-                <div className="flex items-center gap-1.5">
-                  {/* Desktop Add Transaction Button */}
-                  {onOpenAddTransaction && (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={onOpenAddTransaction}
-                      className="hidden md:flex items-center gap-1.5"
-                    >
-                      <Plus className="size-4" />
-                      Tambah Transaksi
-                    </Button>
-                  )}
-                  
-                  {/* Phase 2: Simulation Sandbox Button (Desktop) */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleOpenSandbox}
-                    className="hidden md:flex items-center gap-1.5"
-                    title="Buka Simulation Sandbox"
-                  >
-                    🧪 Simulasi
-                  </Button>
-                  
-                  {/* ✅ MOBILE: Pilih Button (only show if expenses exist) */}
-                  {expenses.length > 0 && (
-                    <button
-                      onClick={handleActivateBulkMode}
-                      className="h-11 w-11 md:hidden flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
-                      aria-label="Pilih"
-                    >
-                      <ListChecks className="h-5 w-5" />
-                    </button>
-                  )}
-                  
-                  {/* ✅ MOBILE: Simulation Sandbox Button */}
-                  <button
-                    onClick={handleOpenSandbox}
-                    className="h-11 w-11 md:hidden flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors text-neutral-50"
-                    aria-label="Simulasi"
-                    title="Buka Simulation Sandbox"
-                  >
-                    <span className="text-xl">🧪</span>
-                  </button>
-                  
-                  {/* ✅ FIXED: Category Breakdown Button (now square 1:1) */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="h-11 w-11 md:h-8 md:w-8 flex items-center justify-center bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg hover:bg-[rgba(38,38,38,0.5)] transition-colors"
-                        title="Menu Kategori"
-                      >
-                        <span className="text-xl md:text-sm">📊</span>
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem
-                        onClick={() => setShowCategoryDrawer(true)}
-                        className="cursor-pointer"
-                      >
-                        <BarChart3 className="size-4 mr-2" />
-                        <span>Lihat Breakdown</span>
-                      </DropdownMenuItem>
-                      {onOpenCategoryManager && (
-                        <DropdownMenuItem
-                          onClick={() => onOpenCategoryManager()}
-                          className="cursor-pointer"
-                        >
-                          <Settings className="size-4 mr-2" />
-                          <span>Kelola Kategori</span>
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-              
-              {/* Row 2: Total Only */}
-              <div className="flex items-center justify-end gap-2 p-[0px] mt-[8px] mr-[0px] mb-[0px] ml-[0px]">
-                <span className={`text-base font-normal whitespace-nowrap ${
-                  activeTab === 'expense' 
-                    ? (totalExpenses < 0 ? 'text-green-600' : 'text-red-600')
-                    : 'text-green-600'
-                }`}>
-                  {activeTab === 'expense' 
-                    ? `${totalExpenses < 0 ? '+' : '-'}${formatCurrency(Math.abs(totalExpenses))}`
-                    : `+${formatCurrency(totalNetIncome)}`
-                  }
-                </span>
-              </div>
-            </>
-          ) : (
-            // Bulk Select Mode
-            <>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={activeTab === 'expense' ? isAllSelected : (selectedIncomeIds.size === incomes.length && incomes.length > 0)}
-                  onCheckedChange={activeTab === 'expense' ? handleSelectAllExpenses : handleSelectAllIncomes}
-                  className="border-neutral-400 data-[state=checked]:border-primary"
-                />
-                <span className="text-sm">
-                  {activeTab === 'expense' 
-                    ? (selectedExpenseIds.size > 0 ? `${selectedExpenseIds.size} dipilih` : "Pilih semua")
-                    : (selectedIncomeIds.size > 0 ? `${selectedIncomeIds.size} dipilih` : "Pilih semua")
-                  }
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {activeTab === 'expense' && onBulkUpdateCategory && (
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={handleBulkEditCategory}
-                    disabled={selectedExpenseIds.size === 0}
-                    className="h-8 text-xs"
-                  >
-                    Edit Kategori
-                  </Button>
-                )}
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={activeTab === 'expense' ? handleBulkDelete : handleBulkDeleteIncomes}
-                  disabled={activeTab === 'expense' ? selectedExpenseIds.size === 0 : selectedIncomeIds.size === 0}
-                  className="h-8 text-xs"
-                >
-                  Hapus ({activeTab === 'expense' ? selectedExpenseIds.size : selectedIncomeIds.size})
-                </Button>
+          {/* Row 1: Title + Desktop Buttons */}
+          <div className="flex items-center justify-between">
+            <span className="text-base sm:text-lg">Daftar Transaksi</span>
+            
+            <div className="flex items-center gap-1.5">
+              {/* Mobile: Simulasi button (Icon + Label) - Pojok kanan */}
+              {isMobile && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleCancelBulkMode}
-                  className="h-8 text-xs"
+                  onClick={handleOpenSandbox}
+                  className="flex md:hidden items-center gap-1.5 h-8 px-2.5"
+                  title="Buka Simulation Sandbox"
                 >
-                  Batal
+                  🧪
+                  <span className="text-xs">Simulasi</span>
                 </Button>
-              </div>
-            </>
-          )}
+              )}
+              
+              {/* Desktop Add Transaction Button */}
+              {onOpenAddTransaction && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={onOpenAddTransaction}
+                  className="hidden md:flex items-center gap-1.5"
+                >
+                  <Plus className="size-4" />
+                  Tambah Transaksi
+                </Button>
+              )}
+              
+              {/* Phase 2: Simulation Sandbox Button (Desktop) */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenSandbox}
+                className="hidden md:flex items-center gap-1.5"
+                title="Buka Simulation Sandbox"
+              >
+                🧪 Simulasi
+              </Button>
+            </div>
+          </div>
         </CardTitle>
         
         {/* Phase 7: Category Filter Badge */}
@@ -2434,6 +2469,58 @@ function ExpenseListComponent({
           </p>
         ) : (
           <div className="space-y-4 p-[0px] mt-[-20px] mr-[0px] mb-[0px] ml-[0px]">
+            {/* ✨ Consolidated Toolbar - Always visible above tabs */}
+            <ConsolidatedToolbar
+              searchQuery={searchQuery}
+              onSearchChange={handleSearchChange}
+              isSearchExpanded={isSearchExpanded}
+              onSearchToggle={() => setIsSearchExpanded(!isSearchExpanded)}
+              searchInputRef={searchInputRef}
+              showSuggestions={showSuggestions && !isMobile}
+              suggestions={suggestions}
+              onSelectSuggestion={handleSelectSuggestion}
+              suggestionsRef={suggestionsRef}
+              onKeyDown={handleKeyDown}
+              selectedSuggestionIndex={selectedSuggestionIndex}
+              onSuggestionMouseEnter={setSelectedSuggestionIndex}
+              matchedCategories={matchedCategories}
+              onCategoryClick={(categoryId) => {
+                setActiveCategoryFilter(new Set([categoryId as any]));
+                setShowSuggestions(false);
+                setIsSearchExpanded(false);
+                toast.success(`Filter kategori: ${getCategoryEmoji(categoryId as any, settings)} ${getCategoryLabel(categoryId as any, settings)}`);
+              }}
+              getCategoryEmoji={(id) => getCategoryEmoji(id as any, settings)}
+              getCategoryLabel={(id) => getCategoryLabel(id as any, settings)}
+              isSelectionMode={isBulkSelectMode}
+              onToggleSelection={handleToggleBulkMode}
+              hasItems={activeTab === 'expense' ? expenses.length > 0 : incomes.length > 0}
+              selectedCount={activeTab === 'expense' ? selectedExpenseIds.size : selectedIncomeIds.size}
+              allSelected={
+                activeTab === 'expense'
+                  ? selectedExpenseIds.size > 0 && selectedExpenseIds.size === expenses.length
+                  : selectedIncomeIds.size > 0 && selectedIncomeIds.size === incomes.length
+              }
+              onToggleSelectAll={handleToggleSelectAll}
+              onBulkEdit={() => setShowBulkEditCategoryDialog(true)}
+              onBulkDelete={handleBulkDelete}
+              totalAmount={activeTab === 'expense' ? totalExpenses : totalNetIncome}
+              activeTab={activeTab}
+              onSort={activeTab === 'expense' ? toggleSortOrder : undefined}
+              onFilter={() => {
+                setSelectedCategoryFilters(new Set(activeFilters.categories));
+                setSelectedPocketFilters(new Set(activeFilters.pockets));
+                setSelectedIncomeSourceFilters(new Set(activeFilters.incomeSources));
+                setIsFilterDrawerOpen(true);
+              }}
+              sortOrder={sortOrder === 'asc' ? 'oldest' : 'newest'}
+              hasActiveFilters={
+                activeFilters.categories.size > 0 || 
+                activeFilters.pockets.size > 0 || 
+                activeFilters.incomeSources.size > 0
+              }
+            />
+            
             {/* Tabs for Expense/Income - Figma Design */}
             <div className="bg-neutral-800 rounded-[14px] p-[3px] flex gap-0 w-full">
               <button
@@ -2458,124 +2545,87 @@ function ExpenseListComponent({
               </button>
             </div>
             
-            <div className="flex items-center gap-2">
-              {/* ✅ FIXED: Search bar container with integrated suggestions dropdown */}
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#a1a1a1]" />
+            {/* Mobile Search Bar - Below tabs, above expandable sections (toggleable) */}
+            {isMobile && isSearchExpanded && !isBulkSelectMode && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder={activeTab === 'expense' ? "Cari nama, kategori, hari, atau tanggal..." : "Cari nama, hari, atau tanggal..."}
+                  placeholder={
+                    activeTab === 'expense'
+                      ? 'Cari nama, kategori, hari, atau tanggal...'
+                      : 'Cari nama, hari, atau tanggal...'
+                  }
                   value={searchQuery}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  ref={searchInputRef}
-                  className="pl-9 pr-9 bg-[rgba(38,38,38,0.3)] border-[0.5px] border-neutral-800 rounded-lg h-9 text-neutral-50 placeholder:text-[#a1a1a1]"
+                  className="pl-9 pr-9 h-10 w-full"
                 />
                 {searchQuery && (
                   <button
-                    onClick={handleClearSearch}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a1a1a1] hover:text-neutral-50 transition-colors"
-                    title="Hapus pencarian"
+                    onClick={() => handleSearchChange('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label="Hapus pencarian"
                   >
                     <X className="size-4" />
                   </button>
                 )}
                 
-                {/* ✅ INTEGRATED: Suggestions dropdown (now inside search container for proper alignment) */}
+                {/* ✅ Smart Suggestions - Positioned directly below search input (Mobile) */}
                 {showSuggestions && (suggestions.length > 0 || matchedCategories.size > 0) && (
                   <div
                     ref={suggestionsRef}
-                    className="absolute left-0 top-full mt-1 w-full bg-popover border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto"
+                    className="absolute top-full mt-1 left-0 right-0 bg-popover border rounded-md shadow-lg z-[100] max-h-60 overflow-y-auto"
                   >
-                    {/* ✅ Matched categories section (clickable badges) */}
-                    {matchedCategories.size > 0 && activeTab === 'expense' && (
-                      <div className="px-3 py-2 border-b border-border">
-                        <div className="text-xs text-muted-foreground mb-2">Kategori ditemukan:</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {Array.from(matchedCategories).map(categoryId => {
-                            const category = allCategories.find(c => c.id === categoryId);
-                            if (!category) return null;
-                            
-                            return (
-                              <button
-                                key={categoryId}
-                                onClick={() => {
-                                  setActiveCategoryFilter(new Set([categoryId as any]));
-                                  setShowSuggestions(false);
-                                  toast.success(`Filter kategori: ${getCategoryEmoji(categoryId as any, settings)} ${getCategoryLabel(categoryId as any, settings)}`);
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-accent/50 hover:bg-accent rounded-md text-xs transition-colors"
-                              >
-                                <span>{getCategoryEmoji(categoryId as any, settings)}</span>
-                                <span>{getCategoryLabel(categoryId as any, settings)}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                  {/* ✅ Matched categories section (clickable badges) */}
+                  {matchedCategories.size > 0 && activeTab === 'expense' && (
+                    <div className="px-3 py-2 border-b border-border">
+                      <div className="text-xs text-muted-foreground mb-2">Kategori ditemukan:</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from(matchedCategories).map(categoryId => {
+                          const category = allCategories.find(c => c.id === categoryId);
+                          if (!category) return null;
+                          
+                          return (
+                            <button
+                              key={categoryId}
+                              onClick={() => {
+                                setActiveCategoryFilter(new Set([categoryId as any]));
+                                setShowSuggestions(false);
+                                setIsSearchExpanded(false);
+                                toast.success(`Filter kategori: ${getCategoryEmoji(categoryId as any, settings)} ${getCategoryLabel(categoryId as any, settings)}`);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 bg-accent/50 hover:bg-accent rounded-md text-xs transition-colors"
+                            >
+                              <span>{getCategoryEmoji(categoryId as any, settings)}</span>
+                              <span>{getCategoryLabel(categoryId as any, settings)}</span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
-                    
-                    {/* Regular suggestions */}
-                    {suggestions.map((suggestion, index) => (
-                      <div
-                        key={suggestion}
-                        className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
-                          index === selectedSuggestionIndex 
-                            ? 'bg-accent text-accent-foreground' 
-                            : 'hover:bg-accent/50'
-                        }`}
-                        onClick={() => handleSelectSuggestion(suggestion)}
-                        onMouseEnter={() => setSelectedSuggestionIndex(index)}
-                      >
-                        {suggestion}
-                      </div>
-                    ))}
+                    </div>
+                  )}
+                  
+                  {/* Regular suggestions */}
+                  {suggestions.map((suggestion, index) => (
+                    <div
+                      key={suggestion}
+                      className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
+                        index === selectedSuggestionIndex 
+                          ? 'bg-accent text-accent-foreground' 
+                          : 'hover:bg-accent/50'
+                      }`}
+                      onClick={() => handleSelectSuggestion(suggestion)}
+                      onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                    >
+                      {suggestion}
+                    </div>
+                  ))}
                   </div>
                 )}
               </div>
-              
-              {activeTab === 'expense' && (
-                <button
-                  onClick={toggleSortOrder}
-                  className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-[rgba(38,38,38,0.3)] transition-colors flex-shrink-0"
-                  title={sortOrder === 'asc' ? 'Terlama ke Terbaru' : 'Terbaru ke Terlama'}
-                >
-                  <ArrowUpDown className="size-4" />
-                </button>
-              )}
-              
-              {/* ✅ NEW: Advanced Filter Button */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => {
-                        // Initialize selected filters from active filters when opening
-                        setSelectedCategoryFilters(new Set(activeFilters.categories));
-                        setSelectedPocketFilters(new Set(activeFilters.pockets));
-                        setSelectedIncomeSourceFilters(new Set(activeFilters.incomeSources));
-                        setIsFilterDrawerOpen(true);
-                      }}
-                      className={`h-9 w-9 flex items-center justify-center rounded-lg transition-colors flex-shrink-0 relative ${
-                        (activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0)
-                          ? 'bg-blue-500/20 text-blue-600 hover:bg-blue-500/30'
-                          : 'hover:bg-[rgba(38,38,38,0.3)]'
-                      }`}
-                      title="Filter Lanjutan"
-                    >
-                      <Filter className="size-4" />
-                      {/* Active filter badge */}
-                      {(activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0) && (
-                        <span className="absolute -top-1 -right-1 bg-blue-600 text-white rounded-full size-4 flex items-center justify-center" style={{ fontSize: '10px' }}>
-                          {activeFilters.categories.size + activeFilters.pockets.size + activeFilters.incomeSources.size}
-                        </span>
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Filter Lanjutan</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+            )}
             
             {/* ✅ NEW: Active Filter Chips */}
             {(activeFilters.categories.size > 0 || activeFilters.pockets.size > 0 || activeFilters.incomeSources.size > 0) && (
@@ -2659,12 +2709,14 @@ function ExpenseListComponent({
             {activeTab === 'expense' ? (
               <>
                 {/* ✅ NEW: Show "no results" message if search returns empty */}
-                {sortedAndFilteredExpenses.length === 0 && searchQuery.trim() ? (
+                {allSortedExpenses.length === 0 && searchQuery.trim() ? (
                   <p className="text-center text-muted-foreground py-8 text-sm">
                     Tidak ada pengeluaran yang sesuai dengan pencarian "{searchQuery}"
                   </p>
                 ) : (
                   <>
+                {/* Only show "Hari Ini & Mendatang" if there are upcoming expenses */}
+                {upcomingExpenses.length > 0 && (
                 <Collapsible open={upcomingExpanded} onOpenChange={setUpcomingExpanded}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
@@ -2684,23 +2736,24 @@ function ExpenseListComponent({
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="space-y-3 md:space-y-2 mt-3">
-                    {upcomingExpenses.length === 0 ? (
-                      <p className="text-center text-muted-foreground py-4 text-sm">
-                        Tidak ada pengeluaran mendatang
-                      </p>
-                    ) : (
-                      Array.from(upcomingGrouped.entries())
-                        .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+                      {Array.from(upcomingGrouped.entries())
+                        .sort((a, b) => {
+                          // ✅ Use sortOrder state to control sorting (not hardcoded!)
+                          return sortOrder === 'asc'
+                            ? new Date(a[0]).getTime() - new Date(b[0]).getTime()
+                            : new Date(b[0]).getTime() - new Date(a[0]).getTime();
+                        })
                         .map(([date, expenses]) => 
                           renderGroupedExpenseItem(date, expenses)
-                        )
-                    )}
+                        )}
                   </div>
                   </CollapsibleContent>
                 </Collapsible>
+                )}
                 
+                {/* Always show "Riwayat" if there are history expenses */}
                 {historyExpenses.length > 0 && (
-                  <div className="mt-2">
+                  <div className={upcomingExpenses.length > 0 ? "mt-2" : ""}>
                     <Collapsible open={historyExpanded} onOpenChange={setHistoryExpanded}>
                       <CollapsibleTrigger asChild>
                         <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
@@ -2820,24 +2873,25 @@ function ExpenseListComponent({
                         const isSelected = selectedIncomeIds.has(income.id);
                         const isExpanded = expandedIncomeIds.has(income.id);
                         const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
-                        const longPressHandlers = useLongPress({
-                          onLongPress: () => {
-                            if (!isBulkSelectMode) {
-                              setOpenDropdownId(income.id);
-                            }
-                          },
-                          delay: 500,
-                        });
                         
                         return (
-                          <Collapsible key={income.id} open={isExpanded} onOpenChange={() => toggleExpandIncome(income.id)}>
-                            <div className={`${isBulkSelectMode && isSelected ? 'bg-accent/30 rounded-lg' : ''}`}>
-                              <CollapsibleTrigger asChild>
-                                <div className="group cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
-                                  {/* Mobile: Compact layout with long-press */}
-                                  <div 
-                                    className="md:hidden p-2 pl-6"
-                                    {...(isMobile && !isBulkSelectMode ? longPressHandlers : {})}
+                          <ExpenseItemWrapper
+                            key={income.id}
+                            id={income.id}
+                            isMobile={isMobile}
+                            isBulkSelectMode={isBulkSelectMode}
+                            isSelected={isSelected}
+                            onLongPress={setOpenDropdownId}
+                          >
+                            {(longPressHandlers) => (
+                              <Collapsible open={isExpanded} onOpenChange={() => toggleExpandIncome(income.id)}>
+                                <div className={`${isBulkSelectMode && isSelected ? 'bg-accent/30 rounded-lg' : ''}`}>
+                                  <CollapsibleTrigger asChild>
+                                    <div className="group cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
+                                      {/* Mobile: Compact layout with long-press */}
+                                      <div 
+                                        className="md:hidden p-2 pl-6"
+                                        {...longPressHandlers}
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       {/* Left: Name + metadata */}
@@ -3016,6 +3070,8 @@ function ExpenseListComponent({
                               </CollapsibleContent>
                             </div>
                           </Collapsible>
+                            )}
+                          </ExpenseItemWrapper>
                         );
                       };
                       
@@ -3188,6 +3244,36 @@ function ExpenseListComponent({
             {(!editingExpense.items || editingExpense.items.length === 0) && (
               <div className="space-y-2">
                 <Label htmlFor="edit-category">Kategori (Opsional)</Label>
+                
+                {/* ✨ Smart Category Suggestions */}
+                {topCategories.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="text-xs text-muted-foreground self-center">Sering dipakai:</span>
+                    {topCategories.map(({ categoryId, count }) => {
+                      const category = allCategories.find(c => c.id === categoryId);
+                      if (!category) return null;
+                      
+                      const isSelected = editingExpense.category === categoryId;
+                      
+                      return (
+                        <button
+                          key={categoryId}
+                          type="button"
+                          onClick={() => setEditingExpense({ ...editingExpense, category: categoryId })}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                            isSelected
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted hover:bg-muted/70'
+                          }`}
+                        >
+                          <span>{category.emoji}</span>
+                          <span>{category.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                
                 <select
                   id="edit-category"
                   value={editingExpense.category || ''}
@@ -3340,6 +3426,36 @@ function ExpenseListComponent({
               {(!editingExpense.items || editingExpense.items.length === 0) && (
                 <div className="space-y-2">
                   <Label htmlFor="edit-category-desktop">Kategori (Opsional)</Label>
+                  
+                  {/* ✨ Smart Category Suggestions */}
+                  {topCategories.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs text-muted-foreground self-center">Sering dipakai:</span>
+                      {topCategories.map(({ categoryId, count }) => {
+                        const category = allCategories.find(c => c.id === categoryId);
+                        if (!category) return null;
+                        
+                        const isSelected = editingExpense.category === categoryId;
+                        
+                        return (
+                          <button
+                            key={categoryId}
+                            type="button"
+                            onClick={() => setEditingExpense({ ...editingExpense, category: categoryId })}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                              isSelected
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-muted hover:bg-muted/70'
+                            }`}
+                          >
+                            <span>{category.emoji}</span>
+                            <span>{category.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
                   <select
                     id="edit-category-desktop"
                     value={editingExpense.category || ''}

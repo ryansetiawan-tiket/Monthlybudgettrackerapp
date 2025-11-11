@@ -652,7 +652,7 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
             setApi={setCarouselApi}
             className="w-full"
           >
-            <CarouselContent className="-ml-2 md:-ml-4 [&>*]:touch-pan-x">
+            <CarouselContent className="-ml-2 md:-ml-4 [&>*]:touch-pan-x [&>*]:touch-pan-y">
               {pockets.map(pocket => {
               const balance = balances.get(pocket.id);
               if (!balance) return null;

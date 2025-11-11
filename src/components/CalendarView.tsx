@@ -7,6 +7,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { useMobileBackButton } from '../hooks/useMobileBackButton';
+import { useSwipeGesture } from '../hooks/useSwipeGesture';
 import { formatCurrency } from '../utils/currency';
 import { Badge } from './ui/badge';
 import type { Expense, AdditionalIncome, Pocket, CategorySettings } from '../types';
@@ -83,6 +84,14 @@ export function CalendarView({
     onClose,
     'calendar-view'
   );
+
+  // Swipe gesture for closing drawer (mobile only)
+  const { handleTouchStart, handleTouchMove, handleTouchEnd } = useSwipeGesture({
+    onSwipeDown: () => setIsDrawerOpen(false),
+    threshold: 100,
+    velocityThreshold: 0.5,
+    enabled: isMobile && isDrawerOpen,
+  });
 
   // Parse viewMonth string (use internal state, not prop)
   const [year, monthNum] = viewMonth.split('-').map(Number);
@@ -629,7 +638,12 @@ export function CalendarView({
 
         {/* Transaction Drawer - z-index override to stay above calendar */}
         <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
-          <DrawerContent className="z-[110] h-[80vh] flex flex-col">
+          <DrawerContent 
+            className="z-[110] h-[80vh] flex flex-col"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
             <DrawerHeader className="flex-shrink-0">
               <DrawerTitle className="sr-only">
                 Detail Transaksi {selectedDate ? formatDateDisplay(selectedDate) : ''}

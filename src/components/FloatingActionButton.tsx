@@ -85,11 +85,32 @@ export function FloatingActionButton({
   const [isDragging, setIsDragging] = useState(false);
   const [snapBackX, setSnapBackX] = useState(0);
   const isScrolling = useScrollDetection();
+  const fabRef = useRef<HTMLDivElement>(null);
   
   // Save FAB side preference to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('fab-side', fabSide);
   }, [fabSide]);
+
+  // ✅ FIX #2: Click outside detection - close FAB when user clicks outside
+  useEffect(() => {
+    if (!isExpanded) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (fabRef.current && !fabRef.current.contains(event.target as Node)) {
+        setIsExpanded(false);
+      }
+    };
+
+    // Use capture phase to ensure we catch the event before it bubbles
+    document.addEventListener('mousedown', handleClickOutside, true);
+    document.addEventListener('touchstart', handleClickOutside, true);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+      document.removeEventListener('touchstart', handleClickOutside, true);
+    };
+  }, [isExpanded]);
 
   // Determine visibility state
   const shouldHide = useMemo(() => {
@@ -283,6 +304,7 @@ export function FloatingActionButton({
         }
       }}
       style={{ touchAction: 'none' }}
+      ref={fabRef}
     >
       {/* Main FAB Container - For positioning action buttons */}
       <div className="relative">

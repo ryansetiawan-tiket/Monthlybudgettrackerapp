@@ -72,7 +72,7 @@ function CategoryFilterSection({
   return (
     <div className="space-y-3">
       <Label className="font-medium">Filter berdasarkan Kategori</Label>
-      <div className="space-y-2 max-h-[180px] overflow-y-auto border rounded-lg p-3">
+      <div className="space-y-2 max-h-[200px] overflow-y-auto border rounded-lg p-3 touch-pan-y">
         {allCategories.length === 0 ? (
           <p className="text-muted-foreground text-center py-4">
             Tidak ada kategori tersedia

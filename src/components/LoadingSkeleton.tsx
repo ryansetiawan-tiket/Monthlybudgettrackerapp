@@ -22,7 +22,16 @@ export function LoadingSkeleton() {
               transition={{ delay: 0.1 }}
               className="text-left space-y-2 pt-2 relative flex-shrink-0"
             >
-              <Skeleton className="h-10 w-64" />
+              {/* Logo skeleton - Match updated smaller size */}
+              <Skeleton className="h-[32px] w-[95px] sm:h-[40px] sm:w-[120px]" />
+              
+              {/* Mobile action buttons skeleton - Top right */}
+              <div className="absolute top-0 right-0 flex items-center gap-1 md:hidden">
+                <Skeleton className="h-9 w-9 rounded-md" />
+                <Skeleton className="h-9 w-9 rounded-md" />
+              </div>
+              
+              {/* Subtitle skeleton */}
               <Skeleton className="h-5 w-full max-w-xs md:max-w-md" />
             </motion.div>
 
@@ -140,11 +149,35 @@ export function LoadingSkeleton() {
             {/* List Content */}
             <Card>
               <CardHeader className="px-4 py-4 md:px-6 md:py-6">
-                <div className="flex items-center justify-between">
-                  <Skeleton className="h-5 w-36 md:h-6 md:w-48" />
-                  <div className="flex items-center gap-1.5 md:gap-2">
-                    <Skeleton className="size-6 md:size-7 rounded-md" />
-                    <Skeleton className="size-6 md:size-7 rounded-md" />
+                <div className="space-y-4">
+                  {/* Title + Buttons Row */}
+                  <div className="flex items-center justify-between">
+                    <Skeleton className="h-5 w-36 md:h-6 md:w-48" />
+                    <div className="flex items-center gap-1.5">
+                      {/* Mobile: Simulasi button */}
+                      <Skeleton className="h-8 w-24 rounded-md md:hidden" />
+                      {/* Desktop: Add + Simulasi buttons */}
+                      <Skeleton className="h-9 w-40 rounded-md hidden md:block" />
+                      <Skeleton className="h-9 w-28 rounded-md hidden md:block" />
+                    </div>
+                  </div>
+                  
+                  {/* Toolbar with action buttons */}
+                  <div className="flex items-center gap-2 h-10">
+                    <div className="flex items-center gap-1.5">
+                      <Skeleton className="size-10 rounded-lg" />
+                      <Skeleton className="size-10 rounded-lg" />
+                      <Skeleton className="size-10 rounded-lg" />
+                      <Skeleton className="size-10 rounded-lg md:hidden" />
+                    </div>
+                    <div className="flex-1" />
+                    <Skeleton className="h-5 w-24" />
+                  </div>
+                  
+                  {/* Tabs */}
+                  <div className="flex gap-2">
+                    <Skeleton className="h-10 flex-1 rounded-lg" />
+                    <Skeleton className="h-10 flex-1 rounded-lg" />
                   </div>
                 </div>
               </CardHeader>
