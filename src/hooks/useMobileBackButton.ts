@@ -48,13 +48,14 @@ async function closeTopDrawer() {
  * 
  * Behavior:
  * - If dialogs are open: Closes topmost dialog by priority
- * - If no dialogs: Shows exit confirmation toast
+ * - If no dialogs and not on home tab: Navigate to home tab
+ * - If on home tab: Shows exit confirmation toast
  * - If back pressed twice within 2 seconds: Exits app
  * 
  * Usage:
  * Call this hook once in App.tsx (top level)
  */
-export function useMobileBackButton() {
+export function useMobileBackButton(activeTab?: string, setActiveTab?: (tab: 'home' | 'pockets' | 'calendar') => void) {
   console.log('[useMobileBackButton] Hook called - starting initialization');
   
   console.log('[useMobileBackButton] Getting DialogStack context...');
@@ -97,7 +98,15 @@ export function useMobileBackButton() {
             return;
           }
 
-          // If no drawers or dialogs, handle app exit
+          // ✅ NEW: If not on home tab, navigate to home first
+          if (activeTab && activeTab !== 'home' && setActiveTab) {
+            console.log('[BackButton] Not on home tab, navigating to home');
+            setActiveTab('home');
+            await triggerHaptic('light').catch(() => {});
+            return;
+          }
+
+          // If no drawers or dialogs and on home tab, handle app exit
           const now = Date.now();
           if (now - lastBackPress.current < 2000) {
             console.log('[BackButton] Exiting app (double back press)');
@@ -145,5 +154,5 @@ export function useMobileBackButton() {
       }
       listenerHandleRef.current = null;
     };
-  }, [closeTopDialog]);
+  }, [closeTopDialog, activeTab, setActiveTab]);
 }

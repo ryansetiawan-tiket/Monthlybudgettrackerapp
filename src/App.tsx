@@ -137,11 +137,6 @@ interface MonthCache {
 function AppContent() {
   console.log('[App] AppContent rendering - Phase 1: Initializing hooks');
   
-  // Setup mobile back button handler (for Capacitor/Android)
-  console.log('[App] Phase 1.1: Calling useMobileBackButton');
-  useMobileBackButton();
-  console.log('[App] Phase 1.2: useMobileBackButton completed');
-  
   // Monitor online/offline status
   console.log('[App] Phase 1.3: Calling useOnlineStatus');
   useOnlineStatus();
@@ -255,6 +250,12 @@ function AppContent() {
     const saved = localStorage.getItem('mobile-active-tab');
     return (saved === 'home' || saved === 'pockets' || saved === 'calendar') ? saved : 'home';
   });
+  
+  // ✅ NEW: Setup mobile back button handler (for Capacitor/Android)
+  // Must be called after activeTab state is defined
+  console.log('[App] Phase 1.1: Calling useMobileBackButton with activeTab');
+  useMobileBackButton(activeTab, setActiveTab);
+  console.log('[App] Phase 1.2: useMobileBackButton completed');
   
   // Show/Hide Pockets state (persistent)
   const [showPockets, setShowPockets] = useState(() => {
