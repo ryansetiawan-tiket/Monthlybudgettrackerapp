@@ -147,8 +147,7 @@ export function ConsolidatedToolbar({
                 // Mobile: Compact version (icon only + counter)
                 <>
                   {/* Checkbox: Pilih semua - Icon only */}
-                  <button
-                    onClick={onToggleSelectAll}
+                  <div
                     className="h-10 w-10 flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
                     aria-label={allSelected ? "Batalkan pilih semua" : "Pilih semua"}
                     title={allSelected ? "Batalkan pilih semua" : "Pilih semua"}
@@ -157,7 +156,7 @@ export function ConsolidatedToolbar({
                       checked={allSelected}
                       onCheckedChange={onToggleSelectAll}
                     />
-                  </button>
+                  </div>
 
                   {/* Edit Kategori button - Icon only, only for Expense tab */}
                   {activeTab === 'expense' && (

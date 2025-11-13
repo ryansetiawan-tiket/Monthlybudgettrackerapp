@@ -1227,6 +1227,10 @@ export function PocketsSummary({ monthKey, onTransferClick, onAddIncomeClick, on
           onOpenChange={setShowDetailPage}
           baseUrl={baseUrl}
           publicAnonKey={publicAnonKey}
+          onRealtimeModeChange={(pocketId, isRealtime) => {
+            // ✅ Update realtime mode in parent when user toggles in detail page
+            handleToggleRealtimeMode(pocketId, !isRealtime);
+          }}
         />
       )}
 

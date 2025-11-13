@@ -297,6 +297,14 @@ function SummaryHeader({ currentBalance, totalWishlist, itemCount, quoteKey }: S
 }
 
 export function WishlistSimulation({ pocketId, pocketName, pocketColor, monthKey }: WishlistSimulationProps) {
+  // 🐛 DEBUG: Log props yang diterima
+  console.log('[WishlistSimulation] Component mounted with props:', {
+    pocketId,
+    pocketName,
+    pocketColor,
+    monthKey
+  });
+  
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const { confirm, ConfirmDialog } = useConfirm();
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);

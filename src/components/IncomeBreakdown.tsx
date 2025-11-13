@@ -363,18 +363,16 @@ export function IncomeBreakdown(props: IncomeBreakdownProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" aria-describedby={undefined}>
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col" aria-describedby={undefined}>
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <DollarSign className="size-5 text-green-600" />
             Breakdown Pemasukan
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="flex-1 px-1">
-          <div className="pr-4">
-            <IncomeBreakdownContent {...props} />
-          </div>
-        </ScrollArea>
+        <div className="overflow-y-auto flex-1 px-1 -mx-1">
+          <IncomeBreakdownContent {...props} />
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -182,8 +182,9 @@ export function AdditionalIncomeForm({
     if (defaultTargetPocket) {
       setTargetPocketId(defaultTargetPocket);
     } else if (pockets.length > 0) {
-      // Default to first pocket if no default specified
-      setTargetPocketId(pockets[0].id);
+      // ✅ FIX: Default to "Uang Dingin" (pocket_cold_money) instead of first pocket
+      const coldMoneyPocket = pockets.find(p => p.id === 'pocket_cold_money');
+      setTargetPocketId(coldMoneyPocket?.id || pockets[0].id);
     }
   }, [defaultTargetPocket, pockets]);
 
@@ -371,7 +372,7 @@ export function AdditionalIncomeForm({
       conversionType: currency === "USD" ? conversionType : "manual",
       date: finalDate,
       deduction: Number(deduction) || 0,
-      pocketId: targetPocketId || initialValues?.pocketId || 'pocket_daily',
+      pocketId: targetPocketId || initialValues?.pocketId || 'pocket_cold_money', // ✅ FIX: Default to Uang Dingin
     };
 
     if (editMode && onUpdateIncome) {
@@ -390,7 +391,9 @@ export function AdditionalIncomeForm({
       setConversionType("manual");
       setManualRate("");
       setDeduction("");
-      setTargetPocketId(defaultTargetPocket || (pockets.length > 0 ? pockets[0].id : ""));
+      // ✅ FIX: Default to Uang Dingin (pocket_cold_money) on reset
+      const coldMoneyPocket = pockets.find(p => p.id === 'pocket_cold_money');
+      setTargetPocketId(defaultTargetPocket || coldMoneyPocket?.id || (pockets.length > 0 ? pockets[0].id : ""));
     }
     
     // Call onSuccess callback if provided (for dialog)

@@ -30,6 +30,7 @@ function debounce<T extends (...args: any[]) => any>(
 // Custom hook for scroll detection
 function useScrollDetection() {
   const [isScrolling, setIsScrolling] = useState(false);
+  const [isTouching, setIsTouching] = useState(false);
   const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -43,26 +44,57 @@ function useScrollDetection() {
       }
       
       // Set idle timeout - DELAY kemunculan FAB (500ms mobile, 1200ms desktop)
+      // TAPI: Hanya set timeout jika jari sudah lepas (not touching)
       const isMobile = window.innerWidth < 768;
       const idleDelay = isMobile ? 500 : 1200;
       
       idleTimeoutRef.current = setTimeout(() => {
-        setIsScrolling(false);
+        // Hanya show FAB jika jari sudah lepas
+        if (!isTouching) {
+          setIsScrolling(false);
+        }
       }, idleDelay);
+    };
+    
+    const handleTouchStart = () => {
+      setIsTouching(true);
+    };
+    
+    const handleTouchEnd = () => {
+      setIsTouching(false);
+      
+      // Trigger recheck scroll state after touch end
+      // Jika sedang scrolling, trigger timeout untuk show FAB
+      if (isScrolling) {
+        if (idleTimeoutRef.current) {
+          clearTimeout(idleTimeoutRef.current);
+        }
+        
+        const isMobile = window.innerWidth < 768;
+        const idleDelay = isMobile ? 500 : 1200;
+        
+        idleTimeoutRef.current = setTimeout(() => {
+          setIsScrolling(false);
+        }, idleDelay);
+      }
     };
     
     // Direct scroll handler - no debounce for instant hiding!
     window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
     
     return () => {
       window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
       if (idleTimeoutRef.current) {
         clearTimeout(idleTimeoutRef.current);
       }
     };
-  }, []);
+  }, [isTouching, isScrolling]);
   
-  return isScrolling;
+  return isScrolling || isTouching;
 }
 
 export function FloatingActionButton({
@@ -186,8 +218,9 @@ export function FloatingActionButton({
     // Calculate new vertical position
     const newY = dragPosition.y + info.offset.y;
     
-    // Constrain vertical position: keep at least 100px from top, and original position at bottom
-    const constrainedY = Math.max(Math.min(newY, 0), -400);
+    // Constrain vertical position: allow drag up (-400px) and down (+80px)
+    // +80px adalah batas agar FAB tidak hilang ke bawah layar
+    const constrainedY = Math.max(Math.min(newY, 80), -400);
     
     // Update position
     setDragPosition({ x: 0, y: constrainedY });
@@ -260,12 +293,12 @@ export function FloatingActionButton({
     <motion.div
       className={cn(
         "fixed z-40",
-        "bottom-6",
+        "bottom-26",
         "md:hidden", // Hide on desktop - mobile only!
         className
       )}
       drag
-      dragConstraints={{ top: -400, bottom: 0, left: -100, right: 100 }}
+      dragConstraints={{ top: -400, bottom: 80, left: -100, right: 100 }}
       dragElastic={0.1}
       dragMomentum={false}
       onDragStart={handleDragStart}

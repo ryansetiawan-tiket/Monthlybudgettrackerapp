@@ -19,6 +19,8 @@ interface PocketBalance {
   transferInBalance: number;
   transferOutBalance: number;
   availableBalance: number;
+  realtimeBalance?: number;
+  projectedBalance?: number;
 }
 
 export function usePockets() {
@@ -38,8 +40,10 @@ export function usePockets() {
   // Fetch pockets and balances (combined in one API call)
   const fetchPockets = useCallback(async (year: number, month: number) => {
     try {
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
       const response = await fetch(
-        `${baseUrl}/pockets/${year}/${month}`,
+        `${baseUrl}/pockets/${year}/${month}?t=${timestamp}`,
         {
           headers: {
             Authorization: `Bearer ${publicAnonKey}`,
@@ -62,6 +66,12 @@ export function usePockets() {
       // Also update balances from the same response
       const balances = data.success ? (data.data.balances || []) : (data.balances || []);
       const balanceMap = new Map<string, PocketBalance>();
+      
+      // Debug: Log first balance to verify fields
+      if (balances.length > 0) {
+        console.log('[usePockets] fetchPockets - Sample balance:', balances[0]);
+      }
+      
       balances.forEach((balance: PocketBalance) => {
         balanceMap.set(balance.pocketId, balance);
       });
@@ -75,8 +85,10 @@ export function usePockets() {
   // Fetch pocket balances (combined with pockets fetch)
   const fetchBalances = useCallback(async (year: number, month: number) => {
     try {
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
       const response = await fetch(
-        `${baseUrl}/pockets/${year}/${month}`,
+        `${baseUrl}/pockets/${year}/${month}?t=${timestamp}`,
         {
           headers: {
             Authorization: `Bearer ${publicAnonKey}`,
@@ -91,6 +103,10 @@ export function usePockets() {
       const data = await response.json();
       const balances = data.success ? (data.data.balances || []) : (data.balances || []);
       const balanceMap = new Map<string, PocketBalance>();
+      
+      console.log('[usePockets] fetchBalances - Raw response:', data);
+      console.log('[usePockets] fetchBalances - Balances array:', balances);
+      console.log('[usePockets] fetchBalances - First balance sample:', balances[0]);
       
       balances.forEach((balance: PocketBalance) => {
         balanceMap.set(balance.pocketId, balance);

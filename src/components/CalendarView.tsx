@@ -25,6 +25,7 @@ interface CalendarViewProps {
   onEditIncome?: (income: AdditionalIncome) => void;
   onDeleteIncome?: (id: string) => void;
   onMonthChange?: (year: number, month: number) => void; // Callback to sync with parent App.tsx
+  embedded?: boolean; // TRUE when used in Tab 3 (no drawer wrapper, inline mode)
 }
 
 interface CalendarDay {
@@ -56,6 +57,7 @@ export function CalendarView({
   onEditIncome,
   onDeleteIncome,
   onMonthChange,
+  embedded,
 }: CalendarViewProps) {
   const isMobile = useIsMobile();
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -71,18 +73,12 @@ export function CalendarView({
     setViewMonth(month);
   }, [month]);
 
-  // Close drawer with back button (mobile)
+  // Close transaction drawer with back button (mobile)
+  // Calendar drawer close is handled by Drawer component automatically
   useMobileBackButton(
     isDrawerOpen,
     () => setIsDrawerOpen(false),
-    'calendar-drawer'
-  );
-
-  // Close calendar view with back button (mobile)
-  useMobileBackButton(
-    !isDrawerOpen,
-    onClose,
-    'calendar-view'
+    'calendar-transaction-drawer'
   );
 
   // Swipe gesture for closing drawer (mobile only)
@@ -613,33 +609,98 @@ export function CalendarView({
 
   // Mobile: Fullscreen calendar + drawer
   if (isMobile) {
-    return (
-      <>
-        <motion.div
-          initial={{ opacity: 0, x: '100%' }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: '100%' }}
-          transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-          className="fixed inset-0 z-[100] bg-background overflow-hidden flex flex-col"
-        >
-          {/* Header - Fixed */}
-          <div className="flex-shrink-0 sticky top-0 z-10 bg-background border-b px-4 py-3 flex items-center justify-between">
-            <h2 className="font-semibold">Kalender Transaksi</h2>
-            <Button variant="ghost" size="icon" onClick={onClose}>
-              <X className="size-5" />
-            </Button>
-          </div>
-
-          {/* Calendar Grid - Scrollable area */}
-          <div className="flex-1 overflow-y-auto p-4">
+    // EMBEDDED MODE (Tab 3): Render inline without Drawer wrapper
+    if (embedded) {
+      return (
+        <div className="h-full flex flex-col overflow-hidden pb-20">
+          {/* Calendar Grid - Scrollable */}
+          <div className="flex-1 overflow-y-auto pt-[32px] pr-[16px] pb-[16px] pl-[16px]">
             {renderCalendarGrid()}
           </div>
-        </motion.div>
+          
+          {/* Transaction Drawer - Overlay for selected date */}
+          <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
+            <DrawerContent 
+              className="z-[110] h-[80vh] flex flex-col"
+              aria-describedby={undefined}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <DrawerHeader className="flex-shrink-0">
+                <DrawerTitle className="sr-only">
+                  Detail Transaksi {selectedDate ? formatDateDisplay(selectedDate) : ''}
+                </DrawerTitle>
+                
+                {/* Clean visible header (no redundancy) */}
+                {selectedDate && (() => {
+                  const { expenses: dayExpenses, incomes: dayIncomes } = selectedDateTransactions;
+                  const totalExpense = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
+                  const totalIncome = dayIncomes.reduce((sum, inc) => {
+                    const netAmount = inc.deduction > 0 ? inc.amountIDR - inc.deduction : inc.amountIDR;
+                    return sum + netAmount;
+                  }, 0);
+                  
+                  return (
+                    <div className="space-y-1 pb-4">
+                      {/* Line 1: Date (bold, large) */}
+                      <h2 className="text-xl font-bold">{formatDateDisplay(selectedDate)}</h2>
+                      
+                      {/* Line 2: Summary (smaller, gray, inline) */}
+                      <p className="text-sm text-muted-foreground">
+                        {dayExpenses.length > 0 && (
+                          <>
+                            Pengeluaran: <span className="text-red-600">-{formatCurrency(totalExpense)}</span>
+                          </>
+                        )}
+                        {dayExpenses.length > 0 && dayIncomes.length > 0 && ' • '}
+                        {dayIncomes.length > 0 && (
+                          <>
+                            Pemasukan: <span className="text-green-600">+{formatCurrency(totalIncome)}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </DrawerHeader>
+              <ScrollArea className="flex-1 px-4 pb-4">
+                {renderTransactionList()}
+              </ScrollArea>
+            </DrawerContent>
+          </Drawer>
+        </div>
+      );
+    }
+    
+    // MODAL MODE (old behavior): Fullscreen Drawer
+    return (
+      <>
+        {/* Main Calendar Drawer - wraps entire calendar */}
+        <Drawer open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+          <DrawerContent className="z-[100] h-[95vh] flex flex-col p-0" aria-describedby={undefined}>
+            <DrawerTitle className="sr-only">Kalender Transaksi</DrawerTitle>
+            
+            {/* Header - Fixed */}
+            <div className="flex-shrink-0 sticky top-0 z-10 bg-background border-b px-4 py-3 flex items-center justify-between">
+              <h2 className="font-semibold">Kalender Transaksi</h2>
+              <Button variant="ghost" size="icon" onClick={onClose}>
+                <X className="size-5" />
+              </Button>
+            </div>
+
+            {/* Calendar Grid - Scrollable area */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {renderCalendarGrid()}
+            </div>
+          </DrawerContent>
+        </Drawer>
 
         {/* Transaction Drawer - z-index override to stay above calendar */}
         <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
           <DrawerContent 
             className="z-[110] h-[80vh] flex flex-col"
+            aria-describedby={undefined}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}

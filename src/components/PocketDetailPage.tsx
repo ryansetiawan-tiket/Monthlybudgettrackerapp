@@ -3,11 +3,16 @@ import { Badge } from "./ui/badge";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 import { Separator } from "./ui/separator";
-import { ChevronLeft, TrendingUp, TrendingDown, ArrowRightLeft, Plus, Wallet, Heart } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { Skeleton } from "./ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
+import { ChevronLeft, TrendingUp, TrendingDown, ArrowRightLeft, Plus, Wallet, Heart, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { toast } from "sonner@2.0.3";
+import { useIsMobile } from "./ui/use-mobile";
+import { WishlistSimulation } from "./WishlistSimulation";
 
 interface Pocket {
   id: string;
@@ -48,6 +53,7 @@ interface PocketDetailPageProps {
   onOpenChange: (open: boolean) => void;
   baseUrl: string;
   publicAnonKey: string;
+  onRealtimeModeChange?: (pocketId: string, isRealtime: boolean) => void;  // ✅ NEW: Callback untuk notify parent
 }
 
 export function PocketDetailPage({
@@ -56,14 +62,18 @@ export function PocketDetailPage({
   open,
   onOpenChange,
   baseUrl,
-  publicAnonKey
+  publicAnonKey,
+  onRealtimeModeChange
 }: PocketDetailPageProps) {
   const [balance, setBalance] = useState<PocketBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [realtimeMode, setRealtimeMode] = useState(false);
   const [timelineCache, setTimelineCache] = useState<TimelineEntry[]>([]);
   const [localWishlistEnabled, setLocalWishlistEnabled] = useState(pocket.enableWishlist || false);
-  
+  const [showWishlist, setShowWishlist] = useState(false);  // ✅ NEW: State untuk wishlist dialog
+  const [isTogglingWishlist, setIsTogglingWishlist] = useState(false);  // ✅ NEW: Loading state untuk toggle wishlist
+  const isMobile = useIsMobile();
+
   // Register this page with dialog stack for back button handling
   useDialogRegistration(
     open,
@@ -165,9 +175,13 @@ export function PocketDetailPage({
     setRealtimeMode(newValue);
     localStorage.setItem(`realtime-mode-${pocket.id}`, String(newValue));
     toast.success(newValue ? 'Mode Realtime diaktifkan' : 'Mode Proyeksi diaktifkan');
+    if (onRealtimeModeChange) {
+      onRealtimeModeChange(pocket.id, newValue);
+    }
   };
 
   const handleToggleWishlist = async () => {
+    setIsTogglingWishlist(true);
     try {
       const newValue = !localWishlistEnabled;
       const [year, month] = monthKey.split('-');
@@ -196,6 +210,8 @@ export function PocketDetailPage({
     } catch (error) {
       console.error('Error toggling wishlist:', error);
       toast.error('Gagal mengubah setting wishlist');
+    } finally {
+      setIsTogglingWishlist(false);
     }
   };
 
@@ -255,6 +271,19 @@ export function PocketDetailPage({
                 <ChevronLeft className="size-5" />
               </Button>
               <h1 className="text-xl flex-1">Info Kantong</h1>
+              
+              {/* Heart Icon - Wishlist Shortcut Button */}
+              {localWishlistEnabled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 p-0 rounded-full text-pink-500 hover:text-pink-600 hover:bg-pink-500/10"
+                  onClick={() => setShowWishlist(true)}
+                  title="Buka Wishlist"
+                >
+                  <Heart className="size-5 fill-current" />
+                </Button>
+              )}
             </div>
           </div>
 
@@ -300,26 +329,45 @@ export function PocketDetailPage({
               </div>
 
               {/* Balance Info */}
-              <div className="space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <p className="text-sm text-muted-foreground">
-                    {realtimeMode ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
-                  </p>
-                  <p className={`text-3xl ${displayBalance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatCurrency(displayBalance)}
-                  </p>
+              {loading ? (
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-9 w-40" />
+                  </div>
+                  <Skeleton className="h-3 w-32 ml-auto" />
                 </div>
-                {realtimeMode && (
-                  <p className="text-xs text-muted-foreground text-right">
-                    Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                )}
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      {realtimeMode ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
+                    </p>
+                    <p className={`text-3xl ${displayBalance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {formatCurrency(displayBalance)}
+                    </p>
+                  </div>
+                  {realtimeMode && (
+                    <p className="text-xs text-muted-foreground text-right">
+                      Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <Separator />
 
               {/* Breakdown */}
-              {balance && (
+              {loading ? (
+                <div className="space-y-3">
+                  <h3 className="text-sm text-muted-foreground">Breakdown</h3>
+                  <div className="space-y-2">
+                    <Skeleton className="h-12 w-full rounded-lg" />
+                    <Skeleton className="h-12 w-full rounded-lg" />
+                    <Skeleton className="h-12 w-full rounded-lg" />
+                  </div>
+                </div>
+              ) : balance && (
                 <div className="space-y-3">
                   <h3 className="text-sm text-muted-foreground">Breakdown</h3>
                   
@@ -378,14 +426,23 @@ export function PocketDetailPage({
                     <div className="size-7 rounded-lg bg-pink-500/10 flex items-center justify-center text-base">
                       💖
                     </div>
-                    <Label htmlFor="wishlist-mode" className="cursor-pointer">
-                      Simulasi Wishlist
-                    </Label>
+                    <div className="flex flex-col">
+                      <Label htmlFor="wishlist-mode" className="cursor-pointer">
+                        Simulasi Wishlist
+                      </Label>
+                      {isTogglingWishlist && (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <Loader2 className="size-3 animate-spin" />
+                          Menyimpan...
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <Switch
                     id="wishlist-mode"
                     checked={localWishlistEnabled}
                     onCheckedChange={handleToggleWishlist}
+                    disabled={isTogglingWishlist}
                   />
                 </div>
               </div>
@@ -407,6 +464,46 @@ export function PocketDetailPage({
             </div>
           </div>
         </motion.div>
+      )}
+      
+      {/* Wishlist Dialog - Responsive */}
+      {isMobile ? (
+        <Drawer open={showWishlist} onOpenChange={setShowWishlist} dismissible={true}>
+          <DrawerContent 
+            className="h-[90vh] flex flex-col rounded-t-2xl p-0 z-[200]"
+            aria-describedby={undefined}
+          >
+            <DrawerHeader className="px-4 pt-6 pb-4 border-b">
+              <DrawerTitle>
+                Simulasi Wishlist - {pocket.name}
+              </DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+              <WishlistSimulation
+                pocketId={pocket.id}
+                pocketName={pocket.name}
+                pocketColor={pocket.color || 'blue'}
+                monthKey={monthKey}
+              />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={showWishlist} onOpenChange={setShowWishlist}>
+          <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[90vh] overflow-y-auto z-[200]" aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle className="text-2xl">
+                Simulasi Wishlist - {pocket.name}
+              </DialogTitle>
+            </DialogHeader>
+            <WishlistSimulation
+              pocketId={pocket.id}
+              pocketName={pocket.name}
+              pocketColor={pocket.color || 'blue'}
+              monthKey={monthKey}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </AnimatePresence>
   );

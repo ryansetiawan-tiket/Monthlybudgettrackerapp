@@ -1,9 +1,9 @@
 import { Badge } from "./ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
-import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, Minus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2, DollarSign } from "lucide-react";
+import { Wallet, Sparkles, ShoppingBag, ArrowRight, ArrowLeft, TrendingUp, Info, ArrowRightLeft, Plus, Minus, ChevronLeft, TrendingDown, BarChart3, MoreVertical, Edit3, Trash2, DollarSign, Loader2, Search, X, Filter, Calendar, RotateCcw } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { format } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, isWithinInterval } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 import { ScrollArea } from "./ui/scroll-area";
 import { useIsMobile } from "./ui/use-mobile";
@@ -22,6 +22,10 @@ import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
 import { useCategorySettings } from "../hooks/useCategorySettings";
 import { getCategoryConfig } from "../utils/categoryManager";
+import { Input } from "./ui/input";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
+import { Checkbox } from "./ui/checkbox";
+import { TimelineFilterDialog } from "./TimelineFilterDialog";
 
 interface TimelineEntry {
   id: string;
@@ -62,6 +66,7 @@ interface PocketTimelineProps {
   pocketColor?: string;
   pocketType?: 'primary' | 'custom';
   enableWishlist?: boolean;
+  isTogglingWishlist?: boolean;  // ✅ NEW: Loading state untuk toggle wishlist
   balance?: PocketBalance;
   realtimeBalance?: number | null;
   onToggleRealtime?: () => void;
@@ -71,6 +76,7 @@ interface PocketTimelineProps {
   onShowDetailPage?: () => void;
   onEditPocket?: () => void;
   onDeletePocket?: () => void;
+  onSetBudget?: () => void; // ✅ Add missing prop
 }
 
 export function PocketTimeline({ 
@@ -90,6 +96,7 @@ export function PocketTimeline({
   pocketColor,
   pocketType,
   enableWishlist,
+  isTogglingWishlist,
   balance,
   realtimeBalance,
   onToggleRealtime,
@@ -103,6 +110,16 @@ export function PocketTimeline({
 }: PocketTimelineProps) {
   const [entries, setEntries] = useState<TimelineEntry[]>(prefetchedEntries || []);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(''); // ✅ NEW: Search state
+  
+  // ✅ NEW: Filter state
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | '3days' | '7days' | 'custom'>('all');
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+  const [amountMin, setAmountMin] = useState('');
+  const [amountMax, setAmountMax] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
   // Register drawer for back button handling
   useDialogRegistration(
@@ -255,10 +272,161 @@ export function PocketTimeline({
       setEntries(prefetchedEntries);
     }
   }, [prefetchedEntries]);
+  
+  // ✅ NEW: Reset search query when drawer closes
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('');
+      setFilterOpen(false);
+    }
+  }, [open]);
+  
+  // ✅ NEW: Reset filters when switching between pockets
+  useEffect(() => {
+    resetFilters();
+    setSearchQuery('');
+  }, [pocketId]);
+  
+  // ✅ NEW: Reset all filters
+  const resetFilters = () => {
+    setDateFilter('all');
+    setCustomDateStart('');
+    setCustomDateEnd('');
+    setAmountMin('');
+    setAmountMax('');
+    setSelectedCategories([]);
+  };
+  
+  // ✅ NEW: Count active filters
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (dateFilter !== 'all') count++;
+    if (amountMin || amountMax) count++;
+    if (selectedCategories.length > 0) count++;
+    return count;
+  }, [dateFilter, amountMin, amountMax, selectedCategories]);
+  
+  // ✅ NEW: Get available categories from entries
+  const availableCategories = useMemo(() => {
+    const categories = new Set<string>();
+    entries.forEach(entry => {
+      if (entry.type === 'expense' && entry.metadata?.category) {
+        categories.add(entry.metadata.category);
+      }
+    });
+    return Array.from(categories);
+  }, [entries]);
+
+  // ✅ NEW: Filter entries based on search query AND filters
+  const filteredEntries = useMemo(() => {
+    let filtered = entries;
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      
+      filtered = filtered.filter(entry => {
+        // Search in description
+        if (entry.description.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        // Search in amount (formatted)
+        const amountStr = formatCurrency(Math.abs(entry.amount)).toLowerCase();
+        if (amountStr.includes(query)) {
+          return true;
+        }
+        
+        // Search in category name
+        if (entry.metadata?.category) {
+          const categoryConfig = getCategoryConfig(entry.metadata.category, settings);
+          if (categoryConfig?.label.toLowerCase().includes(query)) {
+            return true;
+          }
+        }
+        
+        // Search in notes
+        if (entry.metadata?.note && entry.metadata.note.toLowerCase().includes(query)) {
+          return true;
+        }
+        
+        // Search in transfer metadata (from/to pocket)
+        if (entry.type === 'transfer') {
+          if (entry.metadata?.fromPocket?.toLowerCase().includes(query)) {
+            return true;
+          }
+          if (entry.metadata?.toPocket?.toLowerCase().includes(query)) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+    }
+    
+    // Apply date filter
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      let start: Date | null = null;
+      let end: Date = endOfDay(now);
+      
+      switch (dateFilter) {
+        case 'today':
+          start = startOfDay(now);
+          break;
+        case '3days':
+          start = startOfDay(subDays(now, 2));
+          break;
+        case '7days':
+          start = startOfDay(subDays(now, 6));
+          break;
+        case 'custom':
+          if (customDateStart) {
+            start = startOfDay(new Date(customDateStart));
+          }
+          if (customDateEnd) {
+            end = endOfDay(new Date(customDateEnd));
+          }
+          break;
+      }
+      
+      if (start) {
+        filtered = filtered.filter(entry => {
+          const entryDate = new Date(entry.date);
+          return isWithinInterval(entryDate, { start: start!, end });
+        });
+      }
+    }
+    
+    // Apply amount filter
+    if (amountMin || amountMax) {
+      const min = amountMin ? parseInt(amountMin) : 0;
+      const max = amountMax ? parseInt(amountMax) : Infinity;
+      
+      filtered = filtered.filter(entry => {
+        const absAmount = Math.abs(entry.amount);
+        return absAmount >= min && absAmount <= max;
+      });
+    }
+    
+    // Apply category filter
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter(entry => {
+        // Only filter expenses with categories
+        if (entry.type === 'expense' && entry.metadata?.category) {
+          return selectedCategories.includes(entry.metadata.category);
+        }
+        // Include non-expense entries
+        return entry.type !== 'expense';
+      });
+    }
+    
+    return filtered;
+  }, [entries, searchQuery, settings, dateFilter, customDateStart, customDateEnd, amountMin, amountMax, selectedCategories]);
 
   // Group entries by date using useMemo for performance
   const { groupedEntries, sortedDateKeys } = useMemo(() => {
-    const grouped = entries.reduce((groups, entry) => {
+    const grouped = filteredEntries.reduce((groups, entry) => {
       const dateKey = getDateKey(entry.date);
       if (!groups[dateKey]) {
         groups[dateKey] = [];
@@ -273,19 +441,44 @@ export function PocketTimeline({
     });
 
     return { groupedEntries: grouped, sortedDateKeys: sorted };
-  }, [entries]);
+  }, [filteredEntries]);
 
   // ✅ FIX: Saldo Proyeksi = balanceAfter dari entry TERAKHIR (paling baru/atas)
   // Ini adalah saldo yang akan dicapai jika semua transaksi di timeline terjadi
   const projectedBalance = useMemo(() => {
     if (!entries || entries.length === 0) {
-      return balance.availableBalance; // Fallback to server balance if no entries
+      return balance?.availableBalance ?? 0; // Fallback to server balance if no entries (with null check)
     }
     
     // Entries are already sorted DESC (newest first) from server
     // So entries[0] is the LATEST/NEWEST entry
     return entries[0].balanceAfter;
-  }, [entries, balance.availableBalance]);
+  }, [entries, balance?.availableBalance]);
+
+  // ✅ NEW: Calculate realtime balance (balance up to today only)
+  const calculatedRealtimeBalance = useMemo(() => {
+    if (!entries || entries.length === 0) {
+      return balance?.availableBalance ?? 0;
+    }
+    
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+    
+    // Filter entries up to today only
+    const pastEntries = entries.filter(entry => {
+      const entryDate = new Date(entry.date);
+      return entryDate <= today;
+    });
+    
+    if (pastEntries.length === 0) {
+      // No entries yet today, return original balance
+      return balance?.originalAmount ?? 0;
+    }
+    
+    // Return balance after the latest past entry
+    // Since entries are sorted DESC, pastEntries[0] is the latest one
+    return pastEntries[0].balanceAfter;
+  }, [entries, balance?.availableBalance, balance?.originalAmount]);
 
   const getIcon = (entry: TimelineEntry) => {
     const iconClass = "size-4";
@@ -305,7 +498,7 @@ export function PocketTimeline({
       case 'transfer':
         // Use direction-specific arrow for transfers
         // Transfer IN (masuk) = Arrow RIGHT (→)
-        // Transfer OUT (keluar) = Arrow LEFT (←)
+        // Transfer OUT (keluar) = Arrow LEFT ()
         if (entry.metadata?.direction === 'in') {
           return <ArrowRight className={iconClass} />;
         } else {
@@ -405,6 +598,18 @@ export function PocketTimeline({
       ) : entries.length === 0 ? (
         <div className="text-center text-muted-foreground py-8">
           Belum ada aktivitas
+        </div>
+      ) : filteredEntries.length === 0 ? (
+        <div className="text-center py-8 space-y-3">
+          <div className="flex justify-center">
+            <Search className="size-12 text-muted-foreground opacity-50" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">Tidak ada hasil</p>
+            <p className="text-sm text-muted-foreground">
+              Coba kata kunci lain atau hapus filter
+            </p>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -528,168 +733,166 @@ export function PocketTimeline({
 
   // Info content
   const infoContent = balance && (
-    <div className="space-y-6 p-4">
+    <div className="flex flex-col gap-6 pt-4 px-4 pb-6">
       {/* Pocket Header */}
       <div className="flex items-center gap-3">
-        <div className={`text-${pocketColor || 'blue'}-600`}>
-          {renderPocketIcon(pocketIcon)}
+        <div 
+          className="rounded-[14px] size-12 flex items-center justify-center"
+          style={{
+            backgroundColor: pocketColor ? `rgba(${pocketColor === 'purple' ? '139,92,246' : pocketColor === 'blue' ? '59,130,246' : pocketColor === 'green' ? '34,197,94' : '139,92,246'},0.1)` : 'rgba(59,130,246,0.1)',
+            border: `1px solid rgba(${pocketColor === 'purple' ? '139,92,246' : pocketColor === 'blue' ? '59,130,246' : pocketColor === 'green' ? '34,197,94' : '139,92,246'},0.25)`
+          }}
+        >
+          <span className="text-xl">{pocketIcon || '💰'}</span>
         </div>
-        <div>
-          <h3 className="font-semibold">{pocketName}</h3>
+        <div className="flex-1">
+          <h3 className="text-lg text-neutral-50">{pocketName}</h3>
           {pocketDescription && (
-            <p className="text-sm text-muted-foreground">{pocketDescription}</p>
+            <p className="text-sm text-[#a1a1a1] mt-0.5">{pocketDescription}</p>
           )}
         </div>
       </div>
 
-      <Separator />
+      <div className="bg-neutral-800 h-px w-full" />
 
-      {/* Realtime Toggle */}
-      {onToggleRealtime && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="realtime-toggle">Toggle Realtime</Label>
-            {isRealtimeMode && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                Hari Ini
-              </Badge>
-            )}
+      {/* Realtime Toggle - ALWAYS SHOW */}
+      <div className="bg-[rgba(38,38,38,0.5)] rounded-[10px] h-[52px] flex items-center justify-between px-3">
+        <div className="flex items-center gap-2">
+          <div className="bg-[rgba(240,177,0,0.1)] rounded-[10px] size-7 flex items-center justify-center">
+            <span className="text-base">✨</span>
           </div>
-          <Switch
-            id="realtime-toggle"
-            checked={isRealtimeMode}
-            onCheckedChange={onToggleRealtime}
-          />
+          <Label htmlFor="realtime-toggle" className="text-sm font-medium text-neutral-50 cursor-pointer">
+            Mode Real-time
+          </Label>
         </div>
-      )}
+        <Switch
+          id="realtime-toggle"
+          checked={isRealtimeMode}
+          onCheckedChange={onToggleRealtime}
+        />
+      </div>
 
       {/* Balance Info */}
-      <div className="space-y-4">
-        {/* Current Balance */}
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">
-              {isRealtimeMode ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
-            </p>
-            <p className={`text-2xl font-semibold ${
-              (isRealtimeMode && realtimeBalance !== null ? realtimeBalance : projectedBalance) >= 0 
-                ? 'text-[#00c950]' 
-                : 'text-red-500'
-            }`}>
-              {formatCurrency(isRealtimeMode && realtimeBalance !== null ? realtimeBalance : projectedBalance)}
-            </p>
-            {isRealtimeMode && (
-              <p className="text-xs text-muted-foreground">
-                Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-              </p>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-[#a1a1a1]">
+          {isRealtimeMode ? 'Saldo Hari Ini' : 'Saldo Proyeksi'}
+        </p>
+        <p className={`text-[30px] leading-9 ${
+          (isRealtimeMode ? calculatedRealtimeBalance : projectedBalance) >= 0 
+            ? 'text-[#05df72]' 
+            : 'text-[#ff6467]'
+        }`}>
+          {formatCurrency(isRealtimeMode ? calculatedRealtimeBalance : projectedBalance)}
+        </p>
+        {isRealtimeMode && (
+          <p className="text-xs text-[#a1a1a1]">
+            Sampai {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </p>
+        )}
+      </div>
+
+      <div className="bg-neutral-800 h-px w-full" />
+
+      {/* Breakdown */}
+      <div className="flex flex-col gap-2">
+        {/* Saldo Asli */}
+        <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] h-11 flex items-center justify-between px-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="size-4 text-[#a1a1a1]" />
+            <span className="text-sm text-[#a1a1a1]">Saldo Asli</span>
+          </div>
+          <span className="text-sm text-neutral-50">{formatCurrency(balance.originalAmount)}</span>
+        </div>
+
+        {/* Pengeluaran */}
+        <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] h-11 flex items-center justify-between px-3">
+          <div className="flex items-center gap-2">
+            <TrendingDown className="size-4 text-[#ff6467]" />
+            <span className="text-sm text-[#ff6467]">Pengeluaran</span>
+          </div>
+          <span className="text-sm text-[#ff6467]">{formatCurrency(balance.expenses)}</span>
+        </div>
+
+        {/* Pemasukan */}
+        {balance.income > 0 && (
+          <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] h-11 flex items-center justify-between px-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="size-4 text-[#05df72]" />
+              <span className="text-sm text-[#05df72]">Pemasukan</span>
+            </div>
+            <span className="text-sm text-[#05df72]">+{formatCurrency(balance.income)}</span>
+          </div>
+        )}
+
+        {/* Transfer Keluar */}
+        {balance.transferOut > 0 && (
+          <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] h-11 flex items-center justify-between px-3">
+            <div className="flex items-center gap-2">
+              <ArrowLeft className="size-4 text-[#ff6467]" />
+              <span className="text-sm text-[#ff6467]">Transfer Keluar</span>
+            </div>
+            <span className="text-sm text-[#ff6467]">-{formatCurrency(balance.transferOut)}</span>
+          </div>
+        )}
+
+        {/* Transfer Masuk */}
+        {balance.transferIn > 0 && (
+          <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] h-11 flex items-center justify-between px-3">
+            <div className="flex items-center gap-2">
+              <ArrowRight className="size-4 text-[#05df72]" />
+              <span className="text-sm text-[#05df72]">Transfer Masuk</span>
+            </div>
+            <span className="text-sm text-[#05df72]">+{formatCurrency(balance.transferIn)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-neutral-800 h-px w-full" />
+
+      {/* Wishlist Toggle - ALWAYS SHOW */}
+      <div className="bg-[rgba(38,38,38,0.5)] rounded-[10px] min-h-[52px] flex items-center justify-between px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="bg-[rgba(246,51,154,0.1)] rounded-[10px] size-7 flex items-center justify-center flex-shrink-0">
+            <span className="text-base">💖</span>
+          </div>
+          <div className="flex flex-col">
+            <Label htmlFor="wishlist-toggle" className="text-sm font-medium text-neutral-50 cursor-pointer">
+              Simulasi Wishlist
+            </Label>
+            {isTogglingWishlist && (
+              <span className="text-xs text-[#a1a1a1] flex items-center gap-1 mt-0.5">
+                <Loader2 className="size-3 animate-spin" />
+                Menyimpan...
+              </span>
             )}
           </div>
         </div>
+        <Switch
+          id="wishlist-toggle"
+          checked={enableWishlist || false}
+          onCheckedChange={onToggleWishlist}
+          disabled={isTogglingWishlist}
+        />
+      </div>
 
-        <Separator />
+      <div className="bg-neutral-800 h-px w-full" />
 
-        {/* Breakdown */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="size-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Saldo Asli</span>
-            </div>
-            <span className="font-medium">{formatCurrency(balance.originalAmount)}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingDown className="size-4 text-red-600" />
-              <span className="text-sm text-muted-foreground">Pengeluaran</span>
-            </div>
-            <span className="font-medium text-red-600">{formatCurrency(balance.expenses)}</span>
-          </div>
-
-          {balance.income > 0 && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="size-4 text-green-600" />
-                <span className="text-sm text-muted-foreground">Pemasukan</span>
-              </div>
-              <span className="font-medium text-green-600">+{formatCurrency(balance.income)}</span>
-            </div>
-          )}
-
-          {balance.transferIn > 0 && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="size-4 text-green-600" />
-                <span className="text-sm text-muted-foreground">Transfer Masuk</span>
-              </div>
-              <span className="font-medium text-green-600">+{formatCurrency(balance.transferIn)}</span>
-            </div>
-          )}
-
-          {balance.transferOut > 0 && (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingDown className="size-4 text-orange-600" />
-                <span className="text-sm text-muted-foreground">Transfer Keluar</span>
-              </div>
-              <span className="font-medium text-orange-600">-{formatCurrency(balance.transferOut)}</span>
-            </div>
-          )}
+      {/* Deskripsi - sesuai Figma */}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm text-[#a1a1a1]">Deskripsi</h3>
+        <div className="bg-[rgba(38,38,38,0.3)] rounded-[10px] min-h-[44px] flex items-center px-3 py-3">
+          <p className="text-sm text-neutral-50">
+            {pocketDescription || 'Tidak ada deskripsi'}
+          </p>
         </div>
       </div>
 
-      <Separator />
+      <div className="bg-neutral-800 h-px w-full" />
 
-      {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-3">
-        {onTransfer && (
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => {
-              onTransfer();
-              onOpenChange(false);
-            }}
-          >
-            <ArrowRightLeft className="size-4 mr-2" />
-            Transfer
-          </Button>
-        )}
-        {onAddFunds && (
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => {
-              onAddFunds();
-              onOpenChange(false);
-            }}
-          >
-            <Plus className="size-4 mr-2" />
-            Tambah Dana
-          </Button>
-        )}
-      </div>
-
-      {/* Wishlist Toggle */}
-      {onToggleWishlist && (
-        <>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <Label htmlFor="wishlist-toggle">Simulasi Wishlist</Label>
-            <Switch
-              id="wishlist-toggle"
-              checked={enableWishlist || false}
-              onCheckedChange={onToggleWishlist}
-            />
-          </div>
-        </>
-      )}
-
-      {/* Pocket Type Info */}
-      <Separator />
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Tipe Kantong</span>
-        <Badge variant="secondary">
+      {/* Tipe Kantong */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-[#a1a1a1]">Tipe Kantong</span>
+        <Badge variant="secondary" className="bg-neutral-800 text-neutral-50 border-0">
           {pocketType === 'primary' ? 'Kantong Utama' : 'Kantong Custom'}
         </Badge>
       </div>
@@ -699,214 +902,305 @@ export function PocketTimeline({
   // Mobile: Bottom Sheet
   if (isMobile) {
     return (
-      <Drawer 
-        open={open} 
-        onOpenChange={(isOpen) => {
-          if (!isOpen) {
-            // Reset view mode when closing
-            setViewMode('timeline');
-          }
-          onOpenChange(isOpen);
-        }} 
-        dismissible={true}
-      >
-        <DrawerContent 
-          className="h-[90vh] flex flex-col rounded-t-2xl p-0 z-[101]" 
-          aria-describedby={undefined}
+      <>
+        <Drawer 
+          open={open} 
+          onOpenChange={(isOpen) => {
+            if (!isOpen) {
+              // Reset view mode when closing
+              setViewMode('timeline');
+            }
+            onOpenChange(isOpen);
+          }} 
+          dismissible={true}
         >
-          <DrawerHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">
-            <DrawerTitle className="flex items-center justify-between">
-              {viewMode === 'info' ? (
+          <DrawerContent 
+            className="h-[90vh] flex flex-col rounded-t-2xl p-0 z-[101]" 
+            aria-describedby={undefined}
+          >
+            <DrawerHeader className="px-4 pt-6 pb-4 border-b flex-shrink-0">
+              <DrawerTitle className="flex items-center justify-between">
+                {viewMode === 'info' ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 rounded-full"
+                      onClick={() => setViewMode('timeline')}
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <span>Info Kantong</span>
+                  </div>
+                ) : (
+                  <span>Timeline {pocketName}</span>
+                )}
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 rounded-full"
-                    onClick={() => setViewMode('timeline')}
-                  >
-                    <ChevronLeft className="size-4" />
-                  </Button>
-                  <span>Info Kantong</span>
-                </div>
-              ) : (
-                <span>Timeline {pocketName}</span>
-              )}
-              <div className="flex items-center gap-2">
-                {viewMode === 'timeline' && (
-                  <>
-                    <Badge variant="secondary" className="hidden sm:inline-flex">{entries.length} aktivitas</Badge>
-                    {onTransfer && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={isMobile ? "h-8 w-8 p-0 rounded-full" : "h-8 px-3"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onTransfer();
-                          onOpenChange(false);
-                        }}
-                        title="Transfer"
-                      >
-                        <ArrowRightLeft className="size-4 sm:mr-1" />
-                        <span className="hidden sm:inline">Transfer</span>
-                      </Button>
-                    )}
-                    {onAddFunds && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={isMobile ? "h-8 w-8 p-0 rounded-full" : "h-8 px-3"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAddFunds();
-                          onOpenChange(false);
-                        }}
-                        title="Tambah Dana"
-                      >
-                        <Plus className="size-4 sm:mr-1" />
-                        <span className="hidden sm:inline">Tambah</span>
-                      </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                  {viewMode === 'timeline' && (
+                    <>
+                      <Badge variant="secondary" className="hidden sm:inline-flex">
+                        {searchQuery ? `${filteredEntries.length} dari ${entries.length}` : `${entries.length} aktivitas`}
+                      </Badge>
+                      {onTransfer && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 rounded-full"
-                          onClick={(e) => e.stopPropagation()}
-                          title="Menu Kantong"
-                        >
-                          <MoreVertical className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 z-[102]">
-                        <DropdownMenuItem
+                          className={isMobile ? "h-8 w-8 p-0 rounded-full" : "h-8 px-3"}
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (isMobile && onShowDetailPage) {
-                              onShowDetailPage();
-                            } else {
-                              setViewMode('info');
-                            }
+                            onTransfer();
+                            onOpenChange(false);
                           }}
+                          title="Transfer"
                         >
-                          <Info className="size-4 mr-2" />
-                          Info Kantong
-                        </DropdownMenuItem>
-                        
-                        {onEditPocket && (
+                          <ArrowRightLeft className="size-4 sm:mr-1" />
+                          <span className="hidden sm:inline">Transfer</span>
+                        </Button>
+                      )}
+                      {onAddFunds && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={isMobile ? "h-8 w-8 p-0 rounded-full" : "h-8 px-3"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddFunds();
+                            onOpenChange(false);
+                          }}
+                          title="Tambah Dana"
+                        >
+                          <Plus className="size-4 sm:mr-1" />
+                          <span className="hidden sm:inline">Tambah</span>
+                        </Button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 rounded-full"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Menu Kantong"
+                          >
+                            <MoreVertical className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48 z-[102]">
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              onEditPocket();
-                              onOpenChange(false);
+                              if (isMobile && onShowDetailPage) {
+                                onShowDetailPage();
+                              } else {
+                                setViewMode('info');
+                              }
                             }}
                           >
-                            <Edit3 className="size-4 mr-2" />
-                            Edit Kantong
+                            <Info className="size-4 mr-2" />
+                            Info Kantong
                           </DropdownMenuItem>
-                        )}
-                        {pocketType === 'custom' && onDeletePocket && (
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeletePocket();
-                              onOpenChange(false);
-                            }}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="size-4 mr-2" />
-                            Hapus Kantong
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </>
-                )}
-              </div>
-            </DrawerTitle>
-          </DrawerHeader>
-          <div className="flex-1 overflow-hidden">
-            {viewMode === 'timeline' ? (
-              <div className="h-full px-4 py-4">
-                {timelineContent}
-              </div>
-            ) : (
-              <ScrollArea className="h-full">
-                {infoContent}
-              </ScrollArea>
-            )}
-          </div>
-        </DrawerContent>
-      </Drawer>
+                          
+                          {onEditPocket && (
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditPocket();
+                                onOpenChange(false);
+                              }}
+                            >
+                              <Edit3 className="size-4 mr-2" />
+                              Edit Kantong
+                            </DropdownMenuItem>
+                          )}
+                          {pocketType === 'custom' && onDeletePocket && (
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeletePocket();
+                                onOpenChange(false);
+                              }}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="size-4 mr-2" />
+                              Hapus Kantong
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  )}
+                </div>
+              </DrawerTitle>
+              
+              {/* ✅ NEW: Search Bar - Only show in timeline mode */}
+              {viewMode === 'timeline' && (
+                <div className="relative mt-3">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Cari transaksi..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Support Cmd/Ctrl+A for select all
+                      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+                        e.preventDefault();
+                        e.currentTarget.select();
+                      }
+                    }}
+                    className="pl-9 pr-16 h-9"
+                  />
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {searchQuery && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 rounded-full"
+                        onClick={() => setSearchQuery('')}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 rounded-full relative"
+                      onClick={() => setFilterOpen(true)}
+                    >
+                      <Filter className="size-3.5" />
+                      {activeFiltersCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 size-3.5 text-[10px] font-semibold bg-primary text-primary-foreground rounded-full flex items-center justify-center">
+                          {activeFiltersCount}
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </DrawerHeader>
+            <div className="flex-1 overflow-hidden">
+              {viewMode === 'timeline' ? (
+                <div className="h-full px-4 py-4">
+                  {timelineContent}
+                </div>
+              ) : (
+                <ScrollArea className="h-full">
+                  {infoContent}
+                </ScrollArea>
+              )}
+            </div>
+          </DrawerContent>
+        </Drawer>
+        
+        {/* ✅ NEW: Filter Dialog/Drawer */}
+        <TimelineFilterDialog
+          open={filterOpen}
+          onOpenChange={setFilterOpen}
+          isMobile={isMobile}
+          dateFilter={dateFilter}
+          onDateFilterChange={setDateFilter}
+          customDateStart={customDateStart}
+          onCustomDateStartChange={setCustomDateStart}
+          customDateEnd={customDateEnd}
+          onCustomDateEndChange={setCustomDateEnd}
+          amountMin={amountMin}
+          onAmountMinChange={setAmountMin}
+          amountMax={amountMax}
+          onAmountMaxChange={setAmountMax}
+          selectedCategories={selectedCategories}
+          onSelectedCategoriesChange={setSelectedCategories}
+          onReset={resetFilters}
+          availableCategories={availableCategories}
+        />
+      </>
     );
   }
 
   // Desktop: Dialog
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh]" aria-describedby={undefined}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>Timeline {pocketName}</span>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{entries.length} aktivitas</Badge>
-              {isMobile && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-3xl max-h-[85vh]" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span>Timeline {pocketName}</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">
+                    {searchQuery ? `${filteredEntries.length} dari ${entries.length}` : `${entries.length} aktivitas`}
+                  </Badge>
+                </div>
+              </div>
+              
+              {/* ✅ NEW: Search Bar for Desktop */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Cari transaksi..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Support Cmd/Ctrl+A for select all
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+                      e.preventDefault();
+                      e.currentTarget.select();
+                    }
+                  }}
+                  className="pl-9 pr-16 h-9"
+                />
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {searchQuery && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 w-8 p-0 rounded-full"
-                      onClick={(e) => e.stopPropagation()}
-                      title="Menu Kantong"
+                      className="h-7 w-7 p-0 rounded-full"
+                      onClick={() => setSearchQuery('')}
                     >
-                      <MoreVertical className="size-4" />
+                      <X className="size-3.5" />
                     </Button>
-                  </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48 z-[102]">
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setViewMode('info');
-                    }}
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 rounded-full relative"
+                    onClick={() => setFilterOpen(true)}
                   >
-                    <Info className="size-4 mr-2" />
-                    Info Kantong
-                  </DropdownMenuItem>
-                  {onEditPocket && (
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditPocket();
-                        onOpenChange(false);
-                      }}
-                    >
-                      <Edit3 className="size-4 mr-2" />
-                      Edit Kantong
-                    </DropdownMenuItem>
-                  )}
-                  {pocketType === 'custom' && onDeletePocket && (
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeletePocket();
-                        onOpenChange(false);
-                      }}
-                      className="text-red-600 focus:text-red-600"
-                    >
-                      <Trash2 className="size-4 mr-2" />
-                      Hapus Kantong
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              )}
-            </div>
-          </DialogTitle>
-        </DialogHeader>
-        {timelineContent}
-      </DialogContent>
-    </Dialog>
+                    <Filter className="size-3.5" />
+                    {activeFiltersCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 size-3.5 text-[10px] font-semibold bg-primary text-primary-foreground rounded-full flex items-center justify-center">
+                        {activeFiltersCount}
+                      </span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          {timelineContent}
+        </DialogContent>
+      </Dialog>
+      
+      {/* ✅ NEW: Filter Dialog/Drawer */}
+      <TimelineFilterDialog
+        open={filterOpen}
+        onOpenChange={setFilterOpen}
+        isMobile={isMobile}
+        dateFilter={dateFilter}
+        onDateFilterChange={setDateFilter}
+        customDateStart={customDateStart}
+        onCustomDateStartChange={setCustomDateStart}
+        customDateEnd={customDateEnd}
+        onCustomDateEndChange={setCustomDateEnd}
+        amountMin={amountMin}
+        onAmountMinChange={setAmountMin}
+        amountMax={amountMax}
+        onAmountMaxChange={setAmountMax}
+        selectedCategories={selectedCategories}
+        onSelectedCategoriesChange={setSelectedCategories}
+        onReset={resetFilters}
+        availableCategories={availableCategories}
+      />
+    </>
   );
 }

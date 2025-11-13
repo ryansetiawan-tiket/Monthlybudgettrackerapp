@@ -890,11 +890,13 @@ export function CategoryBreakdown({
   // Desktop: Dialog
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto" aria-describedby={undefined}>
-        <DialogHeader>
+      <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col" aria-describedby={undefined}>
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>Breakdown Kategori</DialogTitle>
         </DialogHeader>
-        {mainContent}
+        <div className="overflow-y-auto flex-1 px-1 -mx-1">
+          {mainContent}
+        </div>
       </DialogContent>
     </Dialog>
   );

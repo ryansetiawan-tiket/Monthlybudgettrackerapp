@@ -9,6 +9,10 @@ import { PocketsSummary } from "./components/PocketsSummary";
 import { FloatingActionButton } from "./components/FloatingActionButton";
 import { CategoryBreakdown } from "./components/CategoryBreakdown";
 import { IncomeBreakdown } from "./components/IncomeBreakdown";
+import { BottomNavigationBar } from "./components/BottomNavigationBar";
+import { PocketsTabView } from "./components/PocketsTabView";
+import { PocketTimeline } from "./components/PocketTimeline";
+import { WishlistSimulation } from "./components/WishlistSimulation";
 import RemLogo from "./imports/Rem-369-259";
 
 // Lazy load heavy dialogs for better initial bundle size (200-300KB reduction)
@@ -41,6 +45,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Plus, DollarSign, Settings, Sliders, Calendar, FileText } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./components/ui/drawer";
 import { funnyQuotes } from "./data/funny-quotes";
 import { motion, AnimatePresence } from "motion/react";
 import { getBaseUrl, createAuthHeaders } from "./utils/api";
@@ -245,6 +250,12 @@ function AppContent() {
   // ✨ NEW: Smart shortcut - Income Breakdown state
   const [openIncomeBreakdownFromCard, setOpenIncomeBreakdownFromCard] = useState(false);
   
+  // ✨ NEW: Mobile Bottom Nav - Active Tab
+  const [activeTab, setActiveTab] = useState<'home' | 'pockets' | 'calendar'>(() => {
+    const saved = localStorage.getItem('mobile-active-tab');
+    return (saved === 'home' || saved === 'pockets' || saved === 'calendar') ? saved : 'home';
+  });
+  
   // Show/Hide Pockets state (persistent)
   const [showPockets, setShowPockets] = useState(() => {
     const saved = localStorage.getItem('showPockets');
@@ -259,9 +270,16 @@ function AppContent() {
   
   // Template Manager State (Desktop)
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
-  
-  // Calendar View State
-  const [showCalendarView, setShowCalendarView] = useState(false);
+
+  // Pocket Timeline State (for Tab 2 - Pockets view)
+  const [showTimelineDrawer, setShowTimelineDrawer] = useState(false);
+  const [timelineDrawerPocket, setTimelineDrawerPocket] = useState<{ id: string; name: string } | null>(null);
+  const [isTimelineRealtimeMode, setIsTimelineRealtimeMode] = useState(false);
+  const [isTogglingWishlist, setIsTogglingWishlist] = useState(false);  // ✅ NEW: Loading state untuk toggle wishlist
+
+  // ✨ NEW: Wishlist Dialog State (for Tab 2 - Pockets view)
+  const [showWishlistDialog, setShowWishlistDialog] = useState(false);
+  const [wishlistPocket, setWishlistPocket] = useState<Pocket | null>(null);
 
   // Category Settings Hook
   const { settings: categorySettings } = useCategorySettings();
@@ -1291,6 +1309,11 @@ function AppContent() {
     });
   }, []);
 
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem('mobile-active-tab', activeTab);
+  }, [activeTab]);
+
   // FAB Action Handlers
   const handleFABAddExpense = useCallback(() => {
     startTransition(() => setIsExpenseDialogOpen(true));
@@ -1431,17 +1454,16 @@ function AppContent() {
   }
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={`${selectedYear}-${selectedMonth}`}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -20 }}
-        transition={{ duration: 0.3, ease: "easeInOut" }}
-        className={`min-h-screen bg-background pb-4 pt-0 px-4 md:p-6 lg:p-8 ${
-          showCalendarView && isMobile ? 'hidden' : ''
-        }`}
-      >
+    <>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={`${selectedYear}-${selectedMonth}-${activeTab}`}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+          className={`min-h-screen bg-background pb-20 md:pb-4 pt-0 px-4 md:p-6 lg:p-8`}
+        >
         {/* Pull to Refresh Indicator (Mobile Only) */}
         {isMobile && (
           <PullToRefreshIndicator
@@ -1454,6 +1476,9 @@ function AppContent() {
         )}
 
         <div className="max-w-5xl mx-auto space-y-8">
+          {/* TAB 1: HOME/DASHBOARD - Desktop always shown, Mobile only when activeTab === 'home' */}
+          {(!isMobile || activeTab === 'home') && (
+            <>
           {/* Sticky Header for Mobile with Native App Space */}
           <div className="md:static sticky top-0 z-50 bg-background md:pt-0 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 space-y-4 md:space-y-8 md:shadow-none shadow-sm border-b md:border-b-0 pt-[44px] pr-[16px] pb-[16px] pl-[16px]">
             {/* Desktop: Split layout (Title left | Controls right) | Mobile: Stacked */}
@@ -1466,21 +1491,12 @@ function AppContent() {
                 className="text-left space-y-2 pt-2 relative flex-shrink-0"
               >
                 {/* Logo REM */}
-                <div className="w-[95px] h-[32px] sm:w-[120px] sm:h-[40px]">
+                <div className="w-[86px] h-[29px] sm:w-[108px] sm:h-[36px]">
                   <RemLogo />
                 </div>
                 {/* Action buttons - Mobile only, positioned at top right */}
                 {isMobile && (
                   <div className="absolute top-0 right-0 flex items-center gap-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => setShowCalendarView(true)}
-                      title="Tampilan Kalender"
-                    >
-                      <Calendar className="size-4" />
-                    </Button>
                     <Button 
                       variant="ghost" 
                       size="icon"
@@ -1507,7 +1523,6 @@ function AppContent() {
                   selectedYear={selectedYear}
                   onMonthChange={handleMonthChange}
                   onSettingsClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
-                  onCalendarClick={() => setShowCalendarView(true)}
                 />
               </motion.div>
             </div>
@@ -1580,114 +1595,6 @@ function AppContent() {
             </motion.div>
           )}
 
-          <Suspense fallback={<DialogSkeleton />}>
-            {isTransferDialogOpen && (
-              <TransferDialog
-                open={isTransferDialogOpen}
-                onOpenChange={(open) => {
-                  setIsTransferDialogOpen(open);
-                  if (!open) {
-                    // Reset defaults when closing
-                    setDefaultFromPocket(undefined);
-                    setDefaultToPocket(undefined);
-                  }
-                }}
-                pockets={pockets}
-                balances={balances}
-                onTransfer={(transfer) => transferBetweenPockets(selectedYear, selectedMonth, transfer)}
-                defaultFromPocket={defaultFromPocket}
-                defaultToPocket={defaultToPocket}
-              />
-            )}
-          </Suspense>
-
-          <Suspense fallback={<DialogSkeleton />}>
-            {isManagePocketsDialogOpen && (
-              <ManagePocketsDialog
-                open={isManagePocketsDialogOpen}
-                onOpenChange={(open) => {
-                  setIsManagePocketsDialogOpen(open);
-                  if (!open) setEditingPocket(null);
-                }}
-                pockets={pockets}
-                balances={balances}
-                onCreatePocket={handleCreatePocket}
-                onEditPocket={handleEditPocket}
-                onArchivePocket={handleArchivePocket}
-                onUnarchivePocket={handleUnarchivePocket}
-                archivedPockets={archivedPockets}
-                editPocket={editingPocket}
-                initialMode={managePocketsInitialMode}
-              />
-            )}
-          </Suspense>
-
-          <BudgetForm
-            open={isBudgetDialogOpen}
-            onOpenChange={setIsBudgetDialogOpen}
-            initialBudget={budget.initialBudget}
-            notes={budget.notes}
-            onBudgetChange={handleBudgetChange}
-            onSave={handleSaveBudget}
-            isSaving={isSaving}
-          />
-
-          <Suspense fallback={<DialogSkeleton />}>
-            {isExpenseDialogOpen && (
-              <AddExpenseDialog 
-                open={isExpenseDialogOpen}
-                onOpenChange={setIsExpenseDialogOpen}
-                onAddExpense={handleAddExpense} 
-                isAdding={isAdding} 
-                templates={templates}
-                onAddTemplate={handleAddTemplate}
-                onUpdateTemplate={handleUpdateTemplate}
-                onDeleteTemplate={handleDeleteTemplate}
-                pockets={pockets}
-                balances={balances}
-                currentExpenses={expenses}
-                expenses={expenses}
-              />
-            )}
-          </Suspense>
-
-          <Suspense fallback={<DialogSkeleton />}>
-            {isIncomeDialogOpen && (
-              <AddAdditionalIncomeDialog 
-                open={isIncomeDialogOpen}
-                onOpenChange={(open) => {
-                  setIsIncomeDialogOpen(open);
-                  if (!open) setDefaultTargetPocket(undefined);
-                }}
-                onAddIncome={handleAddIncome}
-                isAdding={isAddingIncome}
-                defaultTargetPocket={defaultTargetPocket}
-                pockets={pockets}
-                balances={balances}
-              />
-            )}
-          </Suspense>
-
-          <Suspense fallback={<DialogSkeleton />}>
-            {isTransferDialogOpen && (
-              <TransferDialog
-                open={isTransferDialogOpen}
-                onOpenChange={(open) => {
-                  setIsTransferDialogOpen(open);
-                  if (!open) {
-                    setDefaultFromPocket(undefined);
-                    setDefaultToPocket(undefined);
-                  }
-                }}
-                pockets={pockets}
-                balances={balances}
-                onTransfer={handlePocketTransfer}
-                defaultFromPocket={defaultFromPocket}
-                defaultToPocket={defaultToPocket}
-              />
-            )}
-          </Suspense>
-
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1729,16 +1636,167 @@ function AppContent() {
               onCategoryBreakdownClose={() => setOpenCategoryBreakdownFromCard(false)}
             />
           </motion.div>
+            </>
+          )}
+          
+          {/* TAB 2: POCKETS - Mobile only when activeTab === 'pockets' */}
+          {isMobile && activeTab === 'pockets' && (
+            <PocketsTabView
+              pockets={pockets}
+              balances={balances}
+              onPocketClick={(pocketId) => {
+                const pocket = pockets.find(p => p.id === pocketId);
+                if (pocket) {
+                  setTimelineDrawerPocket({ id: pocket.id, name: pocket.name });
+                  setShowTimelineDrawer(true);
+                }
+              }}
+              onWishlistClick={(pocketId) => {
+                const pocket = pockets.find(p => p.id === pocketId);
+                if (pocket) {
+                  // 🐛 DEBUG: Log pocket data yang akan dibuka
+                  console.log('[App] Opening Wishlist Dialog for pocket:', {
+                    pocketId: pocket.id,
+                    pocketName: pocket.name,
+                    enableWishlist: pocket.enableWishlist
+                  });
+                  // Open WishlistSimulation dialog
+                  setWishlistPocket(pocket);
+                  setShowWishlistDialog(true);
+                }
+              }}
+              selectedYear={selectedYear}
+              selectedMonth={selectedMonth}
+              isRealtimeMode={isTimelineRealtimeMode}
+            />
+          )}
+          
+          {/* TAB 3: CALENDAR - Mobile only when activeTab === 'calendar' */}
+          {isMobile && activeTab === 'calendar' && (
+            <Suspense fallback={<DialogSkeleton />}>
+              <CalendarView
+                month={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+                expenses={expenses}
+                incomes={additionalIncomes}
+                pockets={pockets}
+                settings={categorySettings}
+                onClose={() => {}} // No close button needed in tab mode
+                onEditExpense={handleEditExpense}
+                onDeleteExpense={handleDeleteExpense}
+                onEditIncome={handleUpdateIncome}
+                onDeleteIncome={handleDeleteIncome}
+                onMonthChange={(year, month) => {
+                  setSelectedYear(year);
+                  setSelectedMonth(month);
+                }}
+                embedded={true} // ✅ EMBEDDED MODE: Inline calendar, no fullscreen drawer
+              />
+            </Suspense>
+          )}
         </div>
         
-        {/* Floating Action Button - Hide when calendar is open */}
-        {!(showCalendarView && isMobile) && (
+        {/* Floating Action Button - Show on Home, Pockets, and Calendar tabs */}
+        {(!isMobile || (activeTab === 'home' || activeTab === 'pockets' || activeTab === 'calendar')) && (
           <FloatingActionButton
             onAddExpense={handleFABAddExpense}
             onAddIncome={handleFABAddIncome}
             onTransfer={handleFABTransfer}
           />
         )}
+        
+        {/* ========== GLOBAL DIALOGS - Accessible from all tabs ========== */}
+        
+        {/* Transfer Dialog */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isTransferDialogOpen && (
+            <TransferDialog
+              open={isTransferDialogOpen}
+              onOpenChange={(open) => {
+                setIsTransferDialogOpen(open);
+                if (!open) {
+                  setDefaultFromPocket(undefined);
+                  setDefaultToPocket(undefined);
+                }
+              }}
+              pockets={pockets}
+              balances={balances}
+              onTransfer={handlePocketTransfer}
+              defaultFromPocket={defaultFromPocket}
+              defaultToPocket={defaultToPocket}
+            />
+          )}
+        </Suspense>
+
+        {/* Manage Pockets Dialog */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isManagePocketsDialogOpen && (
+            <ManagePocketsDialog
+              open={isManagePocketsDialogOpen}
+              onOpenChange={(open) => {
+                setIsManagePocketsDialogOpen(open);
+                if (!open) setEditingPocket(null);
+              }}
+              pockets={pockets}
+              balances={balances}
+              onCreatePocket={handleCreatePocket}
+              onEditPocket={handleEditPocket}
+              onArchivePocket={handleArchivePocket}
+              onUnarchivePocket={handleUnarchivePocket}
+              archivedPockets={archivedPockets}
+              editPocket={editingPocket}
+              initialMode={managePocketsInitialMode}
+            />
+          )}
+        </Suspense>
+
+        {/* Budget Form (Initial Budget) */}
+        <BudgetForm
+          open={isBudgetDialogOpen}
+          onOpenChange={setIsBudgetDialogOpen}
+          initialBudget={budget.initialBudget}
+          notes={budget.notes}
+          onBudgetChange={handleBudgetChange}
+          onSave={handleSaveBudget}
+          isSaving={isSaving}
+        />
+
+        {/* Add Expense Dialog (Mobile) */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isExpenseDialogOpen && (
+            <AddExpenseDialog 
+              open={isExpenseDialogOpen}
+              onOpenChange={setIsExpenseDialogOpen}
+              onAddExpense={handleAddExpense} 
+              isAdding={isAdding} 
+              templates={templates}
+              onAddTemplate={handleAddTemplate}
+              onUpdateTemplate={handleUpdateTemplate}
+              onDeleteTemplate={handleDeleteTemplate}
+              pockets={pockets}
+              balances={balances}
+              currentExpenses={expenses}
+              expenses={expenses}
+            />
+          )}
+        </Suspense>
+
+        {/* Add Income Dialog (Mobile) */}
+        <Suspense fallback={<DialogSkeleton />}>
+          {isIncomeDialogOpen && (
+            <AddAdditionalIncomeDialog 
+              open={isIncomeDialogOpen}
+              onOpenChange={(open) => {
+                setIsIncomeDialogOpen(open);
+                if (!open) setDefaultTargetPocket(undefined);
+              }}
+              onAddIncome={handleAddIncome}
+              isAdding={isAddingIncome}
+              defaultTargetPocket={defaultTargetPocket}
+              pockets={pockets}
+              balances={balances}
+            />
+          )}
+        </Suspense>
         
         {/* Phase 8: Category Manager Dialog */}
         <Suspense fallback={<DialogSkeleton />}>
@@ -1810,31 +1868,136 @@ function AppContent() {
         
         <Toaster />
       </motion.div>
-      
-      {/* Calendar View - MOVED OUTSIDE parent motion.div for TRUE fullscreen! */}
-      <AnimatePresence>
-        {showCalendarView && (
-          <Suspense fallback={<DialogSkeleton />}>
-            <CalendarView
-              month={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
-              expenses={expenses}
-              incomes={additionalIncomes}
-              pockets={pockets}
-              settings={categorySettings}
-              onClose={() => setShowCalendarView(false)}
-              onEditExpense={handleEditExpense}
-              onDeleteExpense={handleDeleteExpense}
-              onEditIncome={handleUpdateIncome}
-              onDeleteIncome={handleDeleteIncome}
-              onMonthChange={(year, month) => {
-                setSelectedYear(year);
-                setSelectedMonth(month);
-              }}
-            />
-          </Suspense>
-        )}
-      </AnimatePresence>
     </AnimatePresence>
+    
+    {/* Bottom Navigation Bar - Mobile Only - OUTSIDE AnimatePresence to prevent flicker */}
+    {isMobile && (
+      <BottomNavigationBar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
+    )}
+    
+    {/* Pocket Timeline Drawer - For Tab 2 Pockets - OUTSIDE AnimatePresence */}
+    {timelineDrawerPocket && (() => {
+      const pocket = pockets.find(p => p.id === timelineDrawerPocket.id);
+      if (!pocket) return null;
+      
+      return (
+        <PocketTimeline
+          pocketId={pocket.id}
+          pocketName={pocket.name}
+          pocketDescription={pocket.description}
+          pocketIcon={pocket.icon}
+          pocketColor={pocket.color}
+          pocketType={pocket.type}
+          monthKey={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+          baseUrl={baseUrl}
+          publicAnonKey={publicAnonKey}
+          open={showTimelineDrawer}
+          onOpenChange={setShowTimelineDrawer}
+          isRealtimeMode={isTimelineRealtimeMode}
+          drawerClassName="z-[101]"
+          balance={balances.get(pocket.id)}
+          realtimeBalance={null}
+          enableWishlist={pocket.enableWishlist}
+          isTogglingWishlist={isTogglingWishlist}
+          onToggleRealtime={() => {
+            console.log('[App] Toggle realtime mode:', !isTimelineRealtimeMode);
+            setIsTimelineRealtimeMode(!isTimelineRealtimeMode);
+          }}
+          onToggleWishlist={async () => {
+            setIsTogglingWishlist(true);
+            try {
+              await updatePocket(selectedYear, selectedMonth, pocket.id, {
+                enableWishlist: !pocket.enableWishlist
+              });
+              toast.success(!pocket.enableWishlist ? 'Wishlist diaktifkan' : 'Wishlist dinonaktifkan');
+            } catch (error) {
+              console.error('Failed to toggle wishlist:', error);
+              toast.error('Gagal mengubah simulasi wishlist');
+            } finally {
+              setIsTogglingWishlist(false);
+            }
+          }}
+          onTransfer={() => {
+            setShowTimelineDrawer(false);
+            startTransition(() => {
+              setDefaultFromPocket(pocket.id);
+              setDefaultToPocket(undefined);
+              setIsTransferDialogOpen(true);
+            });
+          }}
+          onAddFunds={() => {
+            setShowTimelineDrawer(false);
+            // Open transfer dialog with this pocket as target (for income)
+            handleOpenTransferDialog(pocket.id);
+          }}
+          onEditPocket={() => {
+            setShowTimelineDrawer(false);
+            startTransition(() => {
+              setEditingPocket(pocket);
+              setManagePocketsInitialMode('edit');
+              setIsManagePocketsDialogOpen(true);
+            });
+          }}
+          onDeletePocket={() => {
+            setShowTimelineDrawer(false);
+            // Open manage pockets in delete mode
+            startTransition(() => {
+              setEditingPocket(pocket);
+              setManagePocketsInitialMode('delete');
+              setIsManagePocketsDialogOpen(true);
+            });
+          }}
+          onSetBudget={() => {
+            setShowTimelineDrawer(false);
+            startTransition(() => {
+              setIsBudgetDialogOpen(true);
+            });
+          }}
+        />
+      );
+    })()}
+    
+    {/* Wishlist Dialog - For Tab 2 Pockets - OUTSIDE AnimatePresence */}
+    {wishlistPocket && (() => {
+      // Use wishlistPocket directly - no need to lookup again
+      const pocket = wishlistPocket;
+      
+      return isMobile ? (
+        <Drawer open={showWishlistDialog} onOpenChange={setShowWishlistDialog}>
+          <DrawerContent className="max-h-[90vh]">
+            <DrawerHeader>
+              <DrawerTitle>Simulasi Wishlist - {pocket.name}</DrawerTitle>
+            </DrawerHeader>
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+              <WishlistSimulation
+                pocketId={pocket.id}
+                pocketName={pocket.name}
+                pocketColor={pocket.color || '#3b82f6'}
+                monthKey={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+              />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={showWishlistDialog} onOpenChange={setShowWishlistDialog}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle>Simulasi Wishlist - {pocket.name}</DialogTitle>
+            </DialogHeader>
+            <WishlistSimulation
+              pocketId={pocket.id}
+              pocketName={pocket.name}
+              pocketColor={pocket.color || '#3b82f6'}
+              monthKey={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+            />
+          </DialogContent>
+        </Dialog>
+      );
+    })()}
+  </>
   );
 }
 

@@ -393,13 +393,30 @@ async function calculatePocketBalance(
   const excludedIncomeIds = new Set(excludeState.excludedIncomeIds || []);
   
   // ✅ TUGAS 1: Date filtering for realtime vs projected
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const cutoffDate = asOfDate ? new Date(asOfDate) : today;
-  cutoffDate.setHours(0, 0, 0, 0);
-  const cutoffTime = cutoffDate.getTime();
+  // When asOfDate is provided: filter transactions up to that date (REALTIME)
+  // When asOfDate is NOT provided: include ALL transactions (PROJECTED)
+  const cutoffDate = asOfDate ? new Date(asOfDate) : null;
+  if (cutoffDate) {
+    cutoffDate.setHours(23, 59, 59, 999); // End of day
+  }
+  const cutoffTime = cutoffDate ? cutoffDate.getTime() : null;
+  
+  // 🔍 DEBUG: List all expenses for this pocket to see if there are future transactions
+  const pocketExpenses = expensesData.filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id));
+  
+  console.log(`[BALANCE] 🔍 Date Filter for ${pocketId}:`, {
+    asOfDate,
+    cutoffDate: cutoffDate ? cutoffDate.toISOString() : 'NO_CUTOFF (projected mode)',
+    mode: cutoffDate ? 'REALTIME' : 'PROJECTED',
+    totalExpensesForPocket: pocketExpenses.length,
+    expenseDates: pocketExpenses.map((e: any) => e.date).sort()
+  });
   
   const isOnOrBefore = (dateStr: string): boolean => {
+    // If no cutoff (projected mode), include all transactions
+    if (!cutoffTime) return true;
+    
+    // Otherwise, check if date is on or before cutoff
     const date = new Date(dateStr);
     date.setHours(0, 0, 0, 0);
     return date.getTime() <= cutoffTime;
@@ -470,9 +487,16 @@ async function calculatePocketBalance(
     .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
   
   // Calculate expenses for this pocket (REALTIME - up to cutoff date)
-  const expensesTotalRealtime = expensesData
-    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id) && isOnOrBefore(e.date))
+  const realtimeExpenses = expensesData
+    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id) && isOnOrBefore(e.date));
+  const expensesTotalRealtime = realtimeExpenses
     .reduce((sum: number, e: any) => sum + e.amount, 0);
+  
+  console.log(`[BALANCE] 💸 Realtime Expenses for ${pocketId}:`, {
+    count: realtimeExpenses.length,
+    total: expensesTotalRealtime,
+    dates: realtimeExpenses.map((e: any) => e.date).slice(0, 3)
+  });
   
   // ✅ FASE 2: Add income for Uang Dingin and Custom Pockets (REALTIME - up to cutoff date)
   let incomeTotalRealtime = 0;
@@ -509,9 +533,16 @@ async function calculatePocketBalance(
     .reduce((sum: number, t: TransferTransaction) => sum + t.amount, 0);
   
   // Calculate expenses for this pocket (PROJECTED - all transactions)
-  const expensesTotalProjected = expensesData
-    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id))
+  const projectedExpenses = expensesData
+    .filter((e: any) => e.pocketId === pocketId && !excludedExpenseIds.has(e.id));
+  const expensesTotalProjected = projectedExpenses
     .reduce((sum: number, e: any) => sum + e.amount, 0);
+  
+  console.log(`[BALANCE] 💸 Projected Expenses for ${pocketId}:`, {
+    count: projectedExpenses.length,
+    total: expensesTotalProjected,
+    dates: projectedExpenses.map((e: any) => e.date).slice(0, 3)
+  });
   
   // ✅ FASE 2: Add income for Uang Dingin and Custom Pockets (PROJECTED - all transactions)
   let incomeTotalProjected = 0;
@@ -551,7 +582,7 @@ async function calculatePocketBalance(
   console.log(`[BALANCE] 📊 ${pocketId} ${monthKey}:`, {
     realtime: realtimeBalance,
     projected: projectedBalance,
-    cutoffDate: cutoffDate.toISOString().split('T')[0],
+    cutoffDate: cutoffDate ? cutoffDate.toISOString().split('T')[0] : 'NO_CUTOFF (all transactions)',
     breakdown: {
       originalAmount,
       incomeRealtime: incomeTotalRealtime,
@@ -564,6 +595,16 @@ async function calculatePocketBalance(
       expensesProjected: expensesTotalProjected
     }
   });
+  
+  // 🚨 WARNING: If realtime === projected, there might be no future transactions
+  if (realtimeBalance === projectedBalance && cutoffDate) {
+    console.log(`[BALANCE] ⚠️ WARNING: Realtime and Projected are SAME for ${pocketId}!`, {
+      reason: 'Likely no future transactions exist',
+      realtimeExpensesCount: realtimeExpenses.length,
+      projectedExpensesCount: projectedExpenses.length,
+      difference: projectedExpenses.length - realtimeExpenses.length
+    });
+  }
   
   // ✅ TUGAS 1: Return both realtime and projected balances
   return {
@@ -2598,7 +2639,28 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
     
     // Calculate balances for all pockets using shared data
     const balances = await Promise.all(
-      pockets.map(pocket => calculatePocketBalance(pocket.id, monthKey, sharedData))
+      pockets.map(async pocket => {
+        // Calculate projected balance (all transactions)
+        const projected = await calculatePocketBalance(pocket.id, monthKey, sharedData);
+        
+        // Calculate realtime balance (transactions up to today)
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+        const realtime = await calculatePocketBalance(pocket.id, monthKey, sharedData, today.toISOString());
+        
+        console.log(`[POCKETS] 🎯 Final Balance for ${pocket.name}:`, {
+          projected: projected.projectedBalance,
+          realtime: realtime.realtimeBalance,
+          difference: projected.projectedBalance - realtime.realtimeBalance,
+          hasFutureTransactions: projected.projectedBalance !== realtime.realtimeBalance
+        });
+        
+        return {
+          ...projected,
+          projectedBalance: projected.projectedBalance,  // ✅ Use projected field (not availableBalance!)
+          realtimeBalance: realtime.realtimeBalance      // ✅ Use realtime field (FIXED! was using availableBalance)
+        };
+      })
     );
     
     return c.json({
@@ -2612,6 +2674,85 @@ app.get("/make-server-3adbeaf1/pockets/:year/:month", async (c) => {
     console.error('[POCKETS] Error in GET /pockets:', error);
     console.error('[POCKETS] Error stack:', error.stack);
     return c.json({ error: `Failed to fetch pockets: ${error.message}` }, 500);
+  }
+});
+
+// ============================================
+// 🔍 DEBUG ENDPOINT - DEEP DIVE TRANSACTIONS
+// ============================================
+app.get('/make-server-3adbeaf1/debug-transactions/:year/:month', async (c) => {
+  try {
+    const year = parseInt(c.req.param('year'));
+    const month = parseInt(c.req.param('month'));
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    
+    // Get all data
+    const expensesData = await kv.getByPrefix(`expense:${monthKey}:`).catch(() => []);
+    const additionalIncome = await kv.getByPrefix(`income:${monthKey}:`).catch(() => []);
+    const transfers = await kv.getByPrefix(`transfer:${monthKey}:`).catch(() => []);
+    
+    // Get today's date for comparison
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // Analyze expenses by pocket
+    const expensesByPocket: Record<string, any> = {};
+    
+    for (const expense of expensesData) {
+      const pocketId = expense.pocketId;
+      if (!expensesByPocket[pocketId]) {
+        expensesByPocket[pocketId] = {
+          pocketId,
+          total: 0,
+          count: 0,
+          past: { count: 0, total: 0, dates: [] },
+          future: { count: 0, total: 0, dates: [] },
+          all: []
+        };
+      }
+      
+      const expenseDate = new Date(expense.date);
+      expenseDate.setHours(0, 0, 0, 0);
+      const isPast = expenseDate.getTime() <= today.getTime();
+      
+      expensesByPocket[pocketId].total += expense.amount;
+      expensesByPocket[pocketId].count++;
+      expensesByPocket[pocketId].all.push({
+        date: expense.date,
+        amount: expense.amount,
+        description: expense.description,
+        isPast
+      });
+      
+      if (isPast) {
+        expensesByPocket[pocketId].past.count++;
+        expensesByPocket[pocketId].past.total += expense.amount;
+        expensesByPocket[pocketId].past.dates.push(expense.date);
+      } else {
+        expensesByPocket[pocketId].future.count++;
+        expensesByPocket[pocketId].future.total += expense.amount;
+        expensesByPocket[pocketId].future.dates.push(expense.date);
+      }
+    }
+    
+    return c.json({
+      success: true,
+      data: {
+        monthKey,
+        today: todayStr,
+        summary: {
+          totalExpenses: expensesData.length,
+          totalIncome: additionalIncome.length,
+          totalTransfers: transfers.length
+        },
+        expensesByPocket,
+        debugNote: 'If future.count is 0 for all pockets, then realtime === projected is expected!'
+      }
+    });
+  } catch (error: any) {
+    console.error('[DEBUG] Error in debug-transactions:', error);
+    return c.json({ error: error.message }, 500);
   }
 });
 
