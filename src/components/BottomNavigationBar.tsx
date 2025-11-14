@@ -28,18 +28,21 @@ export function BottomNavigationBar({ activeTab, onTabChange }: BottomNavigation
   return (
     <nav
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-30",
+        "fixed bottom-0 left-0 right-0 z-50", // Increase z-index to 50 (above FAB z-40)
         "bg-card border-t border-border",
         "h-16",
         "md:hidden", // Mobile only
         "safe-area-pb" // iOS safe area
       )}
       style={{
-        transform: 'translateZ(0)', // Hardware acceleration
-        willChange: 'auto', // Optimize rendering
+        // Force hardware acceleration untuk prevent janky movement
+        transform: 'translateZ(0)',
+        willChange: 'auto',
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
       }}
     >
-      <div className="h-full flex items-center justify-around px-2" style={{ contain: 'layout' }}>
+      <div className="h-full flex items-center justify-around px-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -55,9 +58,6 @@ export function BottomNavigationBar({ activeTab, onTabChange }: BottomNavigation
                 "active:scale-95",
                 "min-w-0" // Prevent overflow
               )}
-              style={{
-                transform: 'translateZ(0)', // Individual hardware acceleration
-              }}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
             >

@@ -1482,11 +1482,11 @@ function AppContent() {
     <>
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${selectedYear}-${selectedMonth}`}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15, ease: "easeInOut" }}
+          key={`${selectedYear}-${selectedMonth}-${activeTab}`}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
           className={`min-h-screen bg-background pb-20 md:pb-4 pt-0 px-4 md:p-6 lg:p-8`}
         >
         {/* Pull to Refresh Indicator (Mobile Only) */}
@@ -1722,15 +1722,8 @@ function AppContent() {
           )}
         </div>
         
-        {/* Floating Action Button - Show on Home, Pockets, and Calendar tabs */}
-        {(!isMobile || (activeTab === 'home' || activeTab === 'pockets' || activeTab === 'calendar')) && (
-          <FloatingActionButton
-            activeTab={activeTab}
-            onAddExpense={handleFABAddExpense}
-            onAddIncome={handleFABAddIncome}
-            onTransfer={handleFABTransfer}
-          />
-        )}
+        {/* Floating Action Button - Show on Home, Pockets, and Calendar tabs
+            NOTE: moved OUTSIDE AnimatePresence (see below) to avoid flicker */}
         
         {/* ========== GLOBAL DIALOGS - Accessible from all tabs ========== */}
         
@@ -1898,6 +1891,15 @@ function AppContent() {
       </motion.div>
     </AnimatePresence>
     
+    {/* Floating Action Button - Mobile only - OUTSIDE AnimatePresence to prevent flicker */}
+    {(!isMobile || (activeTab === 'home' || activeTab === 'pockets' || activeTab === 'calendar')) && (
+      <FloatingActionButton
+        onAddExpense={handleFABAddExpense}
+        onAddIncome={handleFABAddIncome}
+        onTransfer={handleFABTransfer}
+      />
+    )}
+
     {/* Bottom Navigation Bar - Mobile Only - OUTSIDE AnimatePresence to prevent flicker */}
     {isMobile && (
       <BottomNavigationBar
