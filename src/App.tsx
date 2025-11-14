@@ -1722,8 +1722,14 @@ function AppContent() {
           )}
         </div>
         
-        {/* Floating Action Button - Show on Home, Pockets, and Calendar tabs
-            NOTE: moved OUTSIDE AnimatePresence (see below) to avoid flicker */}
+        {/* Floating Action Button - Show on Home, Pockets, and Calendar tabs */}
+        {(!isMobile || (activeTab === 'home' || activeTab === 'pockets' || activeTab === 'calendar')) && (
+          <FloatingActionButton
+            onAddExpense={handleFABAddExpense}
+            onAddIncome={handleFABAddIncome}
+            onTransfer={handleFABTransfer}
+          />
+        )}
         
         {/* ========== GLOBAL DIALOGS - Accessible from all tabs ========== */}
         
@@ -1891,15 +1897,6 @@ function AppContent() {
       </motion.div>
     </AnimatePresence>
     
-    {/* Floating Action Button - Mobile only - OUTSIDE AnimatePresence to prevent flicker */}
-    {(!isMobile || (activeTab === 'home' || activeTab === 'pockets' || activeTab === 'calendar')) && (
-      <FloatingActionButton
-        onAddExpense={handleFABAddExpense}
-        onAddIncome={handleFABAddIncome}
-        onTransfer={handleFABTransfer}
-      />
-    )}
-
     {/* Bottom Navigation Bar - Mobile Only - OUTSIDE AnimatePresence to prevent flicker */}
     {isMobile && (
       <BottomNavigationBar

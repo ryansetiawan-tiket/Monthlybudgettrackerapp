@@ -28,19 +28,12 @@ export function BottomNavigationBar({ activeTab, onTabChange }: BottomNavigation
   return (
     <nav
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-50", // Increase z-index to 50 (above FAB z-40)
+        "fixed bottom-0 left-0 right-0 z-30",
         "bg-card border-t border-border",
         "h-16",
         "md:hidden", // Mobile only
         "safe-area-pb" // iOS safe area
       )}
-      style={{
-        // Force hardware acceleration untuk prevent janky movement
-        transform: 'translateZ(0)',
-        willChange: 'auto',
-        backfaceVisibility: 'hidden',
-        WebkitBackfaceVisibility: 'hidden',
-      }}
     >
       <div className="h-full flex items-center justify-around px-2">
         {tabs.map((tab) => {
