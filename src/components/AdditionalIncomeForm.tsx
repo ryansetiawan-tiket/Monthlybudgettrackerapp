@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -317,7 +318,7 @@ export function AdditionalIncomeForm({
     return rate ? (Number(amount) || 0) * rate : 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !amount) {
       toast.error("Nama dan nominal harus diisi");
       return;
@@ -374,30 +375,36 @@ export function AdditionalIncomeForm({
       pocketId: targetPocketId || initialValues?.pocketId || 'pocket_cold_money', // ✅ FIX: Default to Uang Dingin
     };
 
-    if (editMode && onUpdateIncome) {
-      onUpdateIncome(incomeData);
-    } else if (onAddIncome) {
-      onAddIncome(incomeData);
-    }
+    try {
+      // 🔥 AWAIT the async operation before proceeding
+      if (editMode && onUpdateIncome) {
+        await onUpdateIncome(incomeData);
+      } else if (onAddIncome) {
+        await onAddIncome(incomeData);
+      }
 
-    // Reset form only in add mode
-    if (!editMode) {
-      setName("");
-      setAmount("");
-      setAmountExpression("");
-      setCalculatedAmount(null);
-      setCurrency("IDR");
-      setConversionType("manual");
-      setManualRate("");
-      setDeduction("");
-      // ✅ FIX: Default to Uang Dingin (pocket_cold_money) on reset
-      const coldMoneyPocket = pockets.find(p => p.id === 'pocket_cold_money');
-      setTargetPocketId(defaultTargetPocket || coldMoneyPocket?.id || (pockets.length > 0 ? pockets[0].id : ""));
-    }
-    
-    // Call onSuccess callback if provided (for dialog)
-    if (onSuccess) {
-      onSuccess();
+      // Reset form only in add mode (after successful save)
+      if (!editMode) {
+        setName("");
+        setAmount("");
+        setAmountExpression("");
+        setCalculatedAmount(null);
+        setCurrency("IDR");
+        setConversionType("manual");
+        setManualRate("");
+        setDeduction("");
+        // ✅ FIX: Default to Uang Dingin (pocket_cold_money) on reset
+        const coldMoneyPocket = pockets.find(p => p.id === 'pocket_cold_money');
+        setTargetPocketId(defaultTargetPocket || coldMoneyPocket?.id || (pockets.length > 0 ? pockets[0].id : ""));
+      }
+      
+      // Call onSuccess callback ONLY after successful save
+      if (onSuccess) {
+        onSuccess();
+      }
+    } catch (error) {
+      // Error already handled by parent (toast shown)
+      console.error('Income submit error:', error);
     }
   };
 

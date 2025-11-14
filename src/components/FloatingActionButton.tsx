@@ -7,6 +7,7 @@ interface FloatingActionButtonProps {
   onAddExpense: () => void;
   onAddIncome: () => void;
   onTransfer: () => void;
+  activeTab?: string; // Track active tab to reset FAB state
   className?: string;
 }
 
@@ -28,13 +29,38 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 // Custom hook for scroll detection
-function useScrollDetection() {
+function useScrollDetection(activeTab?: string) {
   const [isScrolling, setIsScrolling] = useState(false);
   const [isTouching, setIsTouching] = useState(false);
+  const lastScrollY = useRef(0);
+  const scrollThreshold = 10; // Minimum pixels to trigger hide
   const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Reset scroll state when tab changes
+  useEffect(() => {
+    setIsScrolling(false);
+    setIsTouching(false);
+    lastScrollY.current = window.scrollY;
+    
+    // Clear any pending timeouts
+    if (idleTimeoutRef.current) {
+      clearTimeout(idleTimeoutRef.current);
+      idleTimeoutRef.current = null;
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDelta = Math.abs(currentScrollY - lastScrollY.current);
+      
+      // Only trigger if scroll delta is significant (ignore programmatic/small scrolls)
+      if (scrollDelta < scrollThreshold) {
+        return;
+      }
+      
+      lastScrollY.current = currentScrollY;
+      
       // INSTANT hide saat scroll - no delay!
       setIsScrolling(true);
       
@@ -101,6 +127,7 @@ export function FloatingActionButton({
   onAddExpense,
   onAddIncome,
   onTransfer,
+  activeTab,
   className
 }: FloatingActionButtonProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -116,7 +143,7 @@ export function FloatingActionButton({
   });
   const [isDragging, setIsDragging] = useState(false);
   const [snapBackX, setSnapBackX] = useState(0);
-  const isScrolling = useScrollDetection();
+  const isScrolling = useScrollDetection(activeTab);
   const fabRef = useRef<HTMLDivElement>(null);
   
   // Save FAB side preference to localStorage whenever it changes

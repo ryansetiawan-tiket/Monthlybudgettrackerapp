@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, ArrowRight, ArrowLeft, DollarSign, Minus, BarChart3, Settings, MoreVertical, ListChecks, Info, Filter, FileText } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, ArrowUpDown, Pencil, Plus, X, Search, ArrowRight, ArrowLeft, DollarSign, Minus, BarChart3, Settings, MoreVertical, ListChecks, Info, Filter, FileText, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -374,6 +374,10 @@ function ExpenseListComponent({
   
   // Income editing states
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
+  
+  // Loading states for edit operations
+  const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
+  const [isUpdatingIncome, setIsUpdatingIncome] = useState(false);
   
   // 📱 Mobile Bottom Sheet Action states
   const [actionSheetOpen, setActionSheetOpen] = useState(false);
@@ -1417,7 +1421,7 @@ function ExpenseListComponent({
     }
   }, [actionSheetItem, expenses, onMoveToIncome]);
 
-  const handleSaveEditExpense = () => {
+  const handleSaveEditExpense = async () => {
     if (editingExpenseId) {
       // Recalculate amount if items exist
       let finalAmount = editingExpense.amount;
@@ -1432,34 +1436,42 @@ function ExpenseListComponent({
       
       console.log('[ExpenseList] Saving edit - Category:', editingExpense.category);
       
-      // 🔧 FIX: Include category and emoji in update
-      onEditExpense(editingExpenseId, { 
-        ...editingExpense, 
-        amount: finalAmount,
-        date: finalDate,
-        category: editingExpense.category, // ← CRITICAL: Include category
-        emoji: editingExpense.emoji // ← CRITICAL: Preserve template emoji
-      });
-      
-      // 🔧 FIX: Close dialog immediately to prevent UI freeze
-      setEditingExpenseId(null);
-      setEditingExpense({ 
-        name: '', 
-        amount: 0, 
-        date: '', 
-        items: [], 
-        color: '', 
-        fromIncome: undefined,
-        currency: undefined,
-        originalAmount: undefined,
-        exchangeRate: undefined,
-        conversionType: undefined,
-        deduction: undefined,
-        pocketId: undefined,
-        groupId: undefined,
-        category: undefined, // ← Add category to reset state
-        emoji: undefined // ← Add emoji to reset state
-      });
+      setIsUpdatingExpense(true);
+      try {
+        // 🔧 FIX: Include category and emoji in update
+        await onEditExpense(editingExpenseId, { 
+          ...editingExpense, 
+          amount: finalAmount,
+          date: finalDate,
+          category: editingExpense.category, // ← CRITICAL: Include category
+          emoji: editingExpense.emoji // ← CRITICAL: Preserve template emoji
+        });
+        
+        // 🔧 FIX: Close dialog ONLY after successful update
+        setEditingExpenseId(null);
+        setEditingExpense({ 
+          name: '', 
+          amount: 0, 
+          date: '', 
+          items: [], 
+          color: '', 
+          fromIncome: undefined,
+          currency: undefined,
+          originalAmount: undefined,
+          exchangeRate: undefined,
+          conversionType: undefined,
+          deduction: undefined,
+          pocketId: undefined,
+          groupId: undefined,
+          category: undefined, // ← Add category to reset state
+          emoji: undefined // ← Add emoji to reset state
+        });
+      } catch (error) {
+        console.error('Error updating expense:', error);
+        // Error toast already shown by parent handler
+      } finally {
+        setIsUpdatingExpense(false);
+      }
     }
   };
 
@@ -3209,7 +3221,15 @@ function ExpenseListComponent({
       
       {/* Edit Dialog/Drawer - Responsive */}
       {isMobile ? (
-        <Drawer open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()} dismissible={true}>
+        <Drawer 
+          open={editingExpenseId !== null} 
+          onOpenChange={(open) => {
+            if (!open && !isUpdatingExpense) {
+              handleCloseEditDialog();
+            }
+          }} 
+          dismissible={!isUpdatingExpense}
+        >
           {editingExpenseId !== null && (
             <DrawerContent className="h-[90vh] flex flex-col">
             <DrawerHeader className="text-left border-b">
@@ -3378,22 +3398,47 @@ function ExpenseListComponent({
               <Button
                 variant="outline"
                 onClick={handleCloseEditDialog}
+                disabled={isUpdatingExpense}
               >
                 Batal
               </Button>
               <Button
                 onClick={handleSaveEditExpense}
+                disabled={isUpdatingExpense}
               >
-                Simpan
+                {isUpdatingExpense ? (
+                  <>
+                    <Loader2 className="size-4 mr-2 animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  'Simpan'
+                )}
               </Button>
             </div>
           </DrawerContent>
           )}
         </Drawer>
       ) : (
-        <Dialog open={editingExpenseId !== null} onOpenChange={(open) => !open && handleCloseEditDialog()}>
+        <Dialog 
+          open={editingExpenseId !== null} 
+          onOpenChange={(open) => {
+            if (!open && !isUpdatingExpense) {
+              handleCloseEditDialog();
+            }
+          }}
+        >
           {editingExpenseId !== null && (
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+            <DialogContent 
+              className="max-w-3xl max-h-[90vh] overflow-y-auto" 
+              aria-describedby={undefined}
+              onPointerDownOutside={(e) => {
+                if (isUpdatingExpense) e.preventDefault();
+              }}
+              onEscapeKeyDown={(e) => {
+                if (isUpdatingExpense) e.preventDefault();
+              }}
+            >
             <DialogHeader>
               <DialogTitle>Edit Pengeluaran</DialogTitle>
             </DialogHeader>
@@ -3560,13 +3605,22 @@ function ExpenseListComponent({
               <Button
                 variant="outline"
                 onClick={handleCloseEditDialog}
+                disabled={isUpdatingExpense}
               >
                 Batal
               </Button>
               <Button
                 onClick={handleSaveEditExpense}
+                disabled={isUpdatingExpense}
               >
-                Simpan
+                {isUpdatingExpense ? (
+                  <>
+                    <Loader2 className="size-4 mr-2 animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  'Simpan'
+                )}
               </Button>
             </div>
           </DialogContent>
@@ -3678,11 +3732,15 @@ function ExpenseListComponent({
       
       {/* Edit Income Dialog/Drawer - Using AdditionalIncomeForm */}
       {isMobile ? (
-        <Drawer open={!!editingIncomeId && !!editingIncome} onOpenChange={(open) => {
-          if (!open) {
-            setEditingIncomeId(null);
-          }
-        }}>
+        <Drawer 
+          open={!!editingIncomeId && !!editingIncome} 
+          onOpenChange={(open) => {
+            if (!open && !isUpdatingIncome) {
+              setEditingIncomeId(null);
+            }
+          }}
+          dismissible={!isUpdatingIncome}
+        >
           {editingIncomeId && editingIncome && onUpdateIncome && (
             <DrawerContent className="h-[90vh] flex flex-col">
               <DrawerHeader className="text-left border-b">
@@ -3702,12 +3760,18 @@ function ExpenseListComponent({
                     pocketId: editingIncome.pocketId || 'pocket_daily',
                     amountIDR: editingIncome.amountIDR || editingIncome.amount,
                   }}
-                  onUpdateIncome={(incomeData) => {
-                    onUpdateIncome(editingIncomeId, incomeData);
-                    setEditingIncomeId(null);
-                    // ✅ REMOVED: Duplicate toast - already shown in App.tsx after API success
+                  onUpdateIncome={async (incomeData) => {
+                    setIsUpdatingIncome(true);
+                    try {
+                      await onUpdateIncome(editingIncomeId, incomeData);
+                      setEditingIncomeId(null);
+                    } catch (error) {
+                      console.error('Error updating income:', error);
+                    } finally {
+                      setIsUpdatingIncome(false);
+                    }
                   }}
-                  onSuccess={() => setEditingIncomeId(null)}
+                  isAdding={isUpdatingIncome}
                   inDialog={true}
                   pockets={pockets}
                   balances={balancesMap}
@@ -3720,6 +3784,7 @@ function ExpenseListComponent({
                   variant="outline"
                   className="flex-1"
                   onClick={() => setEditingIncomeId(null)}
+                  disabled={isUpdatingIncome}
                 >
                   Batal
                 </Button>
@@ -3729,12 +3794,21 @@ function ExpenseListComponent({
         </Drawer>
       ) : (
         <Dialog open={!!editingIncomeId && !!editingIncome} onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !isUpdatingIncome) {
             setEditingIncomeId(null);
           }
         }}>
           {editingIncomeId && editingIncome && onUpdateIncome && (
-            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+            <DialogContent 
+              className="max-w-xl max-h-[90vh] overflow-y-auto" 
+              aria-describedby={undefined}
+              onPointerDownOutside={(e) => {
+                if (isUpdatingIncome) e.preventDefault();
+              }}
+              onEscapeKeyDown={(e) => {
+                if (isUpdatingIncome) e.preventDefault();
+              }}
+            >
               <DialogHeader>
                 <DialogTitle>Edit Pemasukan</DialogTitle>
               </DialogHeader>
@@ -3751,12 +3825,18 @@ function ExpenseListComponent({
                   pocketId: editingIncome.pocketId || 'pocket_daily',
                   amountIDR: editingIncome.amountIDR || editingIncome.amount,
                 }}
-                onUpdateIncome={(incomeData) => {
-                  onUpdateIncome(editingIncomeId, incomeData);
-                  setEditingIncomeId(null);
-                  // ✅ REMOVED: Duplicate toast - already shown in App.tsx after API success
+                onUpdateIncome={async (incomeData) => {
+                  setIsUpdatingIncome(true);
+                  try {
+                    await onUpdateIncome(editingIncomeId, incomeData);
+                    setEditingIncomeId(null);
+                  } catch (error) {
+                    console.error('Error updating income:', error);
+                  } finally {
+                    setIsUpdatingIncome(false);
+                  }
                 }}
-                onSuccess={() => setEditingIncomeId(null)}
+                isAdding={isUpdatingIncome}
                 inDialog={true}
                 pockets={pockets}
                 hideTargetPocket={false}
@@ -3766,6 +3846,7 @@ function ExpenseListComponent({
                 <Button
                   variant="outline"
                   onClick={() => setEditingIncomeId(null)}
+                  disabled={isUpdatingIncome}
                 >
                   Batal
                 </Button>

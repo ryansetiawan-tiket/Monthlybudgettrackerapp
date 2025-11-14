@@ -124,8 +124,33 @@ export function UnifiedTransactionDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+    <Dialog 
+      open={open} 
+      onOpenChange={(newOpen) => {
+        // 🔥 PREVENT close if currently adding/processing
+        if (!newOpen && (isAddingExpense || isAddingIncome)) {
+          // Don't allow closing while processing
+          return;
+        }
+        onOpenChange(newOpen);
+      }}
+    >
+      <DialogContent 
+        className="max-w-2xl max-h-[90vh] overflow-y-auto" 
+        aria-describedby={undefined}
+        onInteractOutside={(e) => {
+          // 🔒 Prevent outside click close during submission
+          if (isAddingExpense || isAddingIncome) {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // 🔒 Prevent ESC key close during submission
+          if (isAddingExpense || isAddingIncome) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Tambah Transaksi</DialogTitle>
         </DialogHeader>
