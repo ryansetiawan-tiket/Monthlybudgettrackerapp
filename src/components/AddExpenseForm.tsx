@@ -1,9 +1,8 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Trash2, ChevronDown, ChevronUp, Plus, PencilLine, FileText, Settings } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, Plus, PencilLine, FileText, Settings, Loader2 } from "lucide-react";
 import { cn } from "./ui/utils";
 import { Separator } from "./ui/separator";
 import { Card } from "./ui/card";
@@ -985,11 +984,20 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
         {/* Submit Multiple Entries */}
         <Button 
           onClick={handleSubmitMultiple} 
-          disabled={!hasValidEntries || isAdding || insufficientBalances.size > 0}
+          disabled={!hasValidEntries || isAdding || isProcessing || insufficientBalances.size > 0}
           className="w-full"
         >
-          <Plus className="size-4 mr-2" />
-          {isAdding ? "Menambahkan..." : `Tambah ${entries.length} Pengeluaran`}
+          {(isAdding || isProcessing) ? (
+            <>
+              <Loader2 className="size-4 mr-2 animate-spin" />
+              Menyimpan...
+            </>
+          ) : (
+            <>
+              <Plus className="size-4 mr-2" />
+              Tambah {entries.length} Pengeluaran
+            </>
+          )}
         </Button>
       </div>
 
@@ -1074,11 +1082,20 @@ export function AddExpenseForm({ onAddExpense, isAdding, templates, onSuccess, p
           </div>
           <Button 
             onClick={handleSubmitFromTemplate} 
-            disabled={isAdding}
+            disabled={isAdding || isProcessing}
             className="w-full"
           >
-            <Plus className="size-4 mr-2" />
-            {isAdding ? "Menambahkan..." : "Tambah Pengeluaran dari Template"}
+            {(isAdding || isProcessing) ? (
+              <>
+                <Loader2 className="size-4 mr-2 animate-spin" />
+                Menyimpan...
+              </>
+            ) : (
+              <>
+                <Plus className="size-4 mr-2" />
+                Tambah Pengeluaran dari Template
+              </>
+            )}
           </Button>
         </div>
       )}

@@ -190,6 +190,11 @@ html {
   font-size: var(--font-size);
 }
 
+/* Prevent pull-to-refresh when drawer is open (mobile optimization) */
+body.drawer-open {
+  overscroll-behavior-y: contain;
+}
+
 /* Mobile Touch Optimization */
 @media (max-width: 768px) {
   button:not([role="switch"]),

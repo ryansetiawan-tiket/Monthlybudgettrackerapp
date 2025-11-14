@@ -3,6 +3,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
 import { useIsMobile } from "./ui/use-mobile";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { DialogPriority } from "../constants";
 
 interface Pocket {
@@ -51,6 +52,9 @@ export function AddAdditionalIncomeDialog({
     'add-income-dialog'
   );
   
+  // Prevent pull-to-refresh on mobile
+  usePreventPullToRefresh(open);
+  
   const handleIncomeSuccess = () => {
     onOpenChange(false);
   };
@@ -69,7 +73,17 @@ export function AddAdditionalIncomeDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange} dismissible={true}>
+      <Drawer 
+        open={open} 
+        onOpenChange={(isOpen) => {
+          // 🔒 Prevent closing during submission
+          if (!isOpen && isAdding) {
+            return; // Block close attempt
+          }
+          onOpenChange(isOpen);
+        }}
+        dismissible={!isAdding} // 🔒 Disable swipe-to-dismiss during submission
+      >
         <DrawerContent className="h-[90vh] flex flex-col rounded-t-2xl p-0">
           <DrawerHeader className="px-4 pt-6 pb-4 border-b">
             <DrawerTitle>Tambah Pemasukan Tambahan</DrawerTitle>
@@ -83,8 +97,32 @@ export function AddAdditionalIncomeDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+    <Dialog 
+      open={open} 
+      onOpenChange={(isOpen) => {
+        // 🔒 Prevent closing during submission
+        if (!isOpen && isAdding) {
+          return; // Block close attempt
+        }
+        onOpenChange(isOpen);
+      }}
+    >
+      <DialogContent 
+        className="max-w-3xl max-h-[90vh] overflow-y-auto" 
+        aria-describedby={undefined}
+        onInteractOutside={(e) => {
+          // 🔒 Prevent outside click close during submission
+          if (isAdding) {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // 🔒 Prevent ESC key close during submission
+          if (isAdding) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Tambah Pemasukan Tambahan</DialogTitle>
         </DialogHeader>

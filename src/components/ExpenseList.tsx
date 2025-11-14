@@ -28,7 +28,7 @@ import { Checkbox } from "./ui/checkbox";
 import { toast } from "sonner@2.0.3";
 import { useIsMobile } from "./ui/use-mobile";
 import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
-import { EXPENSE_CATEGORIES } from "../constants";
+import { EXPENSE_CATEGORIES, LEGACY_CATEGORY_ID_MAP } from "../constants";
 import { BulkEditCategoryDialog } from "./BulkEditCategoryDialog";
 import { CategoryFilterBadge } from "./CategoryFilterBadge";
 import { CategoryBreakdown } from "./CategoryBreakdown";
@@ -46,12 +46,37 @@ import {
   TooltipTrigger,
 } from "./ui/tooltip";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { DialogPriority } from "../constants";
 import SimulationSandbox from "./SimulationSandbox";
 import { AdvancedFilterDrawer } from "./AdvancedFilterDrawer";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { ExpenseItemWrapper } from "./ExpenseItemWrapper";
 import { ItemActionSheet } from "./ItemActionSheet";
+
+/**
+ * 🔧 BACKWARD COMPATIBILITY HELPER
+ * Normalizes legacy category IDs (0, 1, 2, etc.) to new string keys (food, transport, etc.)
+ * 
+ * @param categoryId - The category ID (can be old numeric or new string)
+ * @returns Normalized category key
+ * 
+ * @example
+ * normalizeCategoryId('1') → 'transport'
+ * normalizeCategoryId('transport') → 'transport'
+ * normalizeCategoryId('custom_abc123') → 'custom_abc123'
+ */
+function normalizeCategoryId(categoryId: string | undefined): string {
+  if (!categoryId) return 'other';
+  
+  // Check if it's a legacy numeric ID
+  if (categoryId in LEGACY_CATEGORY_ID_MAP) {
+    return LEGACY_CATEGORY_ID_MAP[categoryId];
+  }
+  
+  // Already normalized or custom category
+  return categoryId;
+}
 
 interface ExpenseItem {
   name: string;
@@ -111,6 +136,7 @@ interface ExpenseListProps {
   balances?: PocketBalance[];
   categoryFilter?: Set<import('../types').ExpenseCategory>; // Phase 7
   onClearFilter?: () => void; // Phase 7
+  onCategoryClick?: (category: import('../types').ExpenseCategory) => void; // 📜 Scroll to filtered results
   // Income-related props
   incomes?: AdditionalIncome[];
   onDeleteIncome?: (id: string) => void;
@@ -154,6 +180,7 @@ function ExpenseListComponent({
   balances = [],
   categoryFilter = new Set(), 
   onClearFilter,
+  onCategoryClick,
   // Income props
   incomes = [],
   onDeleteIncome,
@@ -409,6 +436,9 @@ function ExpenseListComponent({
     'category-breakdown-drawer'
   );
   
+  // 📱 Prevent pull-to-refresh on mobile when drawers are open
+  usePreventPullToRefresh(editingExpenseId !== null || !!editingIncomeId || actionSheetOpen || showCategoryDrawer || isFilterDrawerOpen);
+  
   // ✨ NEW: Sync external state to internal state (for BudgetOverview shortcut)
   useEffect(() => {
     // ✅ FIX: Sync both opening AND closing to prevent stuck state
@@ -622,8 +652,6 @@ function ExpenseListComponent({
 
   // Handle category click from pie chart
   const handleCategoryClick = (category: import('../types').ExpenseCategory) => {
-    console.log('handleCategoryClick called for category:', category);
-    
     setActiveCategoryFilter(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
@@ -636,6 +664,11 @@ function ExpenseListComponent({
       }
       return newSet;
     });
+    
+    // 📜 NEW: Notify parent to trigger auto-scroll (if opened from external card)
+    if (onCategoryClick) {
+      onCategoryClick(category);
+    }
     
     // ✅ V4 FIX: Simply close the drawer - Vaul will handle cleanup properly
     setShowCategoryDrawer(false);
@@ -996,13 +1029,15 @@ function ExpenseListComponent({
         if (expense.items && expense.items.length > 0) {
           // Check if ANY item matches the filter
           return expense.items.some(item => {
-            const itemCategory = ((item as any).category || 'other') as string;
-            return activeFilters.categories.has(itemCategory);
+            const rawCategory = ((item as any).category || 'other') as string;
+            const normalizedCategory = normalizeCategoryId(rawCategory); // 🔧 Normalize!
+            return activeFilters.categories.has(normalizedCategory);
           });
         } else {
           // Check expense-level category (regular expenses)
-          const expCategory = (expense.category || 'other') as string;
-          return activeFilters.categories.has(expCategory);
+          const rawCategory = (expense.category || 'other') as string;
+          const normalizedCategory = normalizeCategoryId(rawCategory); // 🔧 Normalize!
+          return activeFilters.categories.has(normalizedCategory);
         }
       });
     }
@@ -1016,13 +1051,15 @@ function ExpenseListComponent({
           if (expense.items && expense.items.length > 0) {
             // Check if ANY item matches the filter
             return expense.items.some(item => {
-              const itemCategory = ((item as any).category || 'other') as import('../types').ExpenseCategory;
-              return combinedFilter.has(itemCategory);
+              const rawCategory = ((item as any).category || 'other');
+              const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
+              return combinedFilter.has(normalizedCategory);
             });
           } else {
             // Check expense-level category (regular expenses)
-            const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
-            return combinedFilter.has(expCategory);
+            const rawCategory = (expense.category || 'other');
+            const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
+            return combinedFilter.has(normalizedCategory);
           }
         });
       }
@@ -1055,13 +1092,15 @@ function ExpenseListComponent({
         if (expense.items && expense.items.length > 0) {
           // Check if ANY item's category matches
           categoryMatches = expense.items.some(item => {
-            const itemCategory = ((item as any).category || 'other') as import('../types').ExpenseCategory;
-            return matchedCategories.has(itemCategory);
+            const rawCategory = ((item as any).category || 'other');
+            const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
+            return matchedCategories.has(normalizedCategory);
           });
         } else {
           // Check expense-level category
-          const expCategory = (expense.category || 'other') as import('../types').ExpenseCategory;
-          categoryMatches = matchedCategories.has(expCategory);
+          const rawCategory = (expense.category || 'other');
+          const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
+          categoryMatches = matchedCategories.has(normalizedCategory);
         }
         
         // Show if category matches OR if search text matches

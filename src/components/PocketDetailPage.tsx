@@ -1,14 +1,5 @@
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Switch } from "./ui/switch";
-import { Label } from "./ui/label";
-import { Separator } from "./ui/separator";
-import { Skeleton } from "./ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
-import { ChevronLeft, TrendingUp, TrendingDown, ArrowRightLeft, Plus, Wallet, Heart, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { toast } from "sonner@2.0.3";
 import { useIsMobile } from "./ui/use-mobile";
@@ -81,6 +72,9 @@ export function PocketDetailPage({
     150, // Higher priority than drawers so it closes first
     `pocket-detail-${pocket.id}`
   );
+
+  // 📱 Prevent pull-to-refresh on mobile when wishlist drawer is open
+  usePreventPullToRefresh(showWishlist);
 
   // Prevent background scroll when detail page is open
   useEffect(() => {

@@ -110,131 +110,28 @@ export const calculateCarryOverLiabilities = (
 };
 
 /**
- * Calculate pocket balance from transactions
- */
-export const calculatePocketBalance = (
-  transactions: Array<{
-    type: 'initial' | 'income' | 'expense' | 'transfer_in' | 'transfer_out';
-    amount: number;
-  }>
-): number => {
-  return transactions.reduce((balance, transaction) => {
-    switch (transaction.type) {
-      case 'initial':
-      case 'income':
-      case 'transfer_in':
-        return balance + transaction.amount;
-      case 'expense':
-      case 'transfer_out':
-        return balance - transaction.amount;
-      default:
-        return balance;
-    }
-  }, 0);
-};
-
-/**
- * Calculate percentage of budget used
- */
-export const calculateBudgetPercentage = (spent: number, total: number): number => {
-  if (total === 0) return 0;
-  return (spent / total) * 100;
-};
-
-/**
- * Determine budget health status
- */
-export const getBudgetHealth = (percentUsed: number): 'healthy' | 'warning' | 'danger' => {
-  if (percentUsed < 50) return 'healthy';
-  if (percentUsed < 80) return 'warning';
-  return 'danger';
-};
-
-/**
- * Calculate days remaining in month
- */
-export const getDaysRemainingInMonth = (year: number, month: number): number => {
-  const now = new Date();
-  const lastDay = new Date(year, month, 0).getDate();
-  const currentDay = now.getDate();
-  
-  if (now.getFullYear() !== year || now.getMonth() + 1 !== month) {
-    return 0;
-  }
-  
-  return lastDay - currentDay;
-};
-
-/**
- * Calculate daily budget based on remaining amount and days
- */
-export const calculateDailyBudget = (remainingAmount: number, daysRemaining: number): number => {
-  if (daysRemaining <= 0) return 0;
-  return Math.floor(remainingAmount / daysRemaining);
-};
-
-/**
- * Evaluate math expression safely (for transfer dialog)
- */
-export const evaluateMathExpression = (expression: string): number | null => {
-  try {
-    // Remove any non-numeric characters except operators and decimal point
-    const sanitized = expression.replace(/[^0-9+\-*/().]/g, '');
-    
-    // Prevent dangerous expressions
-    if (/[a-zA-Z]/.test(sanitized)) return null;
-    
-    // Use Function constructor as safe alternative to eval
-    const result = new Function(`return ${sanitized}`)();
-    
-    if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-      return Math.round(result);
-    }
-    
-    return null;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Calculate savings rate
- */
-export const calculateSavingsRate = (saved: number, income: number): number => {
-  if (income === 0) return 0;
-  return (saved / income) * 100;
-};
-
-/**
- * Project future balance based on average spending
- */
-export const projectFutureBalance = (
-  currentBalance: number,
-  averageDailySpending: number,
-  days: number
-): number => {
-  return currentBalance - (averageDailySpending * days);
-};
-
-/**
- * Get category emoji with fallback
+ * Get category label with fallback
  * Phase 8: Now supports custom categories via settings parameter
  */
-export const getCategoryEmoji = (category?: string, settings?: any): string => {
-  if (!category) return '📦';
+export const getCategoryLabel = (category?: string, settings?: any): string => {
+  if (!category) return 'Lainnya';
+  
+  // 🐛 DEBUG: Log category lookup
+  console.log('[getCategoryLabel] Looking up category:', category, {
+    hasSettings: !!settings,
+    hasCustom: !!settings?.custom?.[category],
+    hasOverride: !!settings?.overrides?.[category],
+    override: settings?.overrides?.[category]
+  });
   
   // Phase 8: Check custom categories first
   if (settings?.custom?.[category]) {
-    return settings.custom[category].emoji;
+    console.log('[getCategoryLabel] Found in custom:', settings.custom[category].label);
+    return settings.custom[category].label;
   }
   
-  // Phase 8: Check overrides for default categories
-  if (settings?.overrides?.[category]?.emoji) {
-    return settings.overrides[category].emoji;
-  }
-  
-  // 🔥 BACKWARD COMPATIBILITY: Map old numeric index to category name
-  const indexToCategoryMap: Record<string, string> = {
+  // 🔧 BACKWARD COMPATIBILITY: Create reverse lookup map for legacy numeric IDs
+  const LEGACY_CATEGORY_ID_MAP: Record<string, string> = {
     '0': 'food',
     '1': 'transport',
     '2': 'savings',
@@ -248,40 +145,24 @@ export const getCategoryEmoji = (category?: string, settings?: any): string => {
     '10': 'other'
   };
   
-  const categoryName = indexToCategoryMap[category] || category.toLowerCase();
-  
-  const categoryMap: Record<string, string> = {
-    food: '🍔',
-    transport: '🚗',
-    savings: '💰',
-    bills: '📄',
-    health: '🏥',
-    loan: '💳',
-    family: '👨‍👩‍👧‍👦',
-    entertainment: '🎬',
-    installment: '💸',
-    shopping: '🛒',
-    other: '📦'
-  };
-  
-  return categoryMap[categoryName] || '📦';
-};
-
-/**
- * Get category label with fallback
- * Phase 8: Now supports custom categories via settings parameter
- */
-export const getCategoryLabel = (category?: string, settings?: any): string => {
-  if (!category) return 'Lainnya';
-  
-  // Phase 8: Check custom categories first
-  if (settings?.custom?.[category]) {
-    return settings.custom[category].label;
-  }
+  // Create reverse map: 'entertainment' → '7'
+  const categoryToLegacyId: Record<string, string> = {};
+  Object.entries(LEGACY_CATEGORY_ID_MAP).forEach(([numId, catName]) => {
+    categoryToLegacyId[catName] = numId;
+  });
   
   // Phase 8: Check overrides for default categories
+  // ✅ NEW: Try both string ID and legacy numeric ID
   if (settings?.overrides?.[category]?.label) {
+    console.log('[getCategoryLabel] Found override (string key):', settings.overrides[category].label);
     return settings.overrides[category].label;
+  }
+  
+  // 🔧 NEW: Try legacy numeric ID if string lookup failed
+  const legacyId = categoryToLegacyId[category];
+  if (legacyId && settings?.overrides?.[legacyId]?.label) {
+    console.log('[getCategoryLabel] Found override (legacy numeric key):', legacyId, '→', settings.overrides[legacyId].label);
+    return settings.overrides[legacyId].label;
   }
   
   // 🔥 BACKWARD COMPATIBILITY: Map old numeric index to category name
@@ -315,66 +196,138 @@ export const getCategoryLabel = (category?: string, settings?: any): string => {
     other: 'Lainnya'
   };
   
-  return labelMap[categoryName] || 'Lainnya';
+  const result = labelMap[categoryName] || 'Lainnya';
+  console.log('[getCategoryLabel] Default label returned:', result);
+  return result;
 };
 
 /**
- * CATEGORY BREAKDOWN REFACTOR - Budget Status Helpers
- * Phase 8: Budget limit status calculations
+ * Get category emoji with fallback
+ * Phase 8: Now supports custom categories via settings parameter
+ * 🔧 BACKWARD COMPATIBILITY: Supports both string and legacy numeric category IDs
  */
-
-export type BudgetStatus = 'safe' | 'warning' | 'danger' | 'exceeded';
+export const getCategoryEmoji = (category?: string, settings?: any): string => {
+  if (!category) return '📦';
+  
+  // 🐛 DEBUG: Log category lookup
+  console.log('[getCategoryEmoji] Looking up category:', category, {
+    hasSettings: !!settings,
+    hasCustom: !!settings?.custom?.[category],
+    hasOverride: !!settings?.overrides?.[category],
+    override: settings?.overrides?.[category]
+  });
+  
+  // Phase 8: Check custom categories first
+  if (settings?.custom?.[category]) {
+    console.log('[getCategoryEmoji] Found in custom:', settings.custom[category].emoji);
+    return settings.custom[category].emoji;
+  }
+  
+  // 🔧 BACKWARD COMPATIBILITY: Create reverse lookup map for legacy numeric IDs
+  const LEGACY_CATEGORY_ID_MAP: Record<string, string> = {
+    '0': 'food',
+    '1': 'transport',
+    '2': 'savings',
+    '3': 'bills',
+    '4': 'health',
+    '5': 'loan',
+    '6': 'family',
+    '7': 'entertainment',
+    '8': 'installment',
+    '9': 'shopping',
+    '10': 'other'
+  };
+  
+  // Create reverse map: 'entertainment' → '7'
+  const categoryToLegacyId: Record<string, string> = {};
+  Object.entries(LEGACY_CATEGORY_ID_MAP).forEach(([numId, catName]) => {
+    categoryToLegacyId[catName] = numId;
+  });
+  
+  // Phase 8: Check overrides for default categories
+  // ✅ NEW: Try both string ID and legacy numeric ID
+  if (settings?.overrides?.[category]?.emoji) {
+    console.log('[getCategoryEmoji] Found override (string key):', settings.overrides[category].emoji);
+    return settings.overrides[category].emoji;
+  }
+  
+  // 🔧 NEW: Try legacy numeric ID if string lookup failed
+  const legacyId = categoryToLegacyId[category];
+  if (legacyId && settings?.overrides?.[legacyId]?.emoji) {
+    console.log('[getCategoryEmoji] Found override (legacy numeric key):', legacyId, '→', settings.overrides[legacyId].emoji);
+    return settings.overrides[legacyId].emoji;
+  }
+  
+  // 🔥 BACKWARD COMPATIBILITY: Map old numeric index to category name
+  const indexToCategoryMap: Record<string, string> = {
+    '0': 'food',
+    '1': 'transport',
+    '2': 'savings',
+    '3': 'bills',
+    '4': 'health',
+    '5': 'loan',
+    '6': 'family',
+    '7': 'entertainment',
+    '8': 'installment',
+    '9': 'shopping',
+    '10': 'other'
+  };
+  
+  const categoryName = indexToCategoryMap[category] || category.toLowerCase();
+  
+  const emojiMap: Record<string, string> = {
+    food: '🍔',
+    transport: '🚗',
+    savings: '💰',
+    bills: '📄',
+    health: '🏥',
+    loan: '💳',
+    family: '👨‍👩‍👧‍👦',
+    entertainment: '🎬',
+    installment: '💸',
+    shopping: '🛒',
+    other: '📦'
+  };
+  
+  const result = emojiMap[categoryName] || '📦';
+  console.log('[getCategoryEmoji] Default emoji returned:', result);
+  return result;
+};
 
 /**
- * Calculate budget status based on spending percentage
- * Matches the logic from BudgetLimitEditor Status Indicators
+ * Calculate budget percentage for a category
  */
-export function getBudgetStatus(
-  spent: number,
-  limit: number,
-  warningAt: number = 80
-): BudgetStatus {
-  if (limit === 0) return 'safe';
-  
-  const percentage = (spent / limit) * 100;
+export const getBudgetPercentage = (spent: number, limit: number): number => {
+  if (!limit || limit === 0) return 0;
+  return (spent / limit) * 100;
+};
+
+/**
+ * Get budget status for a category
+ */
+export const getBudgetStatus = (
+  spent: number, 
+  limit: number, 
+  warningAt: number = 75
+): 'safe' | 'warning' | 'danger' | 'exceeded' => {
+  const percentage = getBudgetPercentage(spent, limit);
   
   if (percentage >= 100) return 'exceeded';
   if (percentage >= 90) return 'danger';
   if (percentage >= warningAt) return 'warning';
   return 'safe';
-}
+};
 
 /**
  * Get color for budget status
- * Colors match BudgetLimitEditor indicators
  */
-export function getBudgetStatusColor(status: BudgetStatus): string {
-  const colors: Record<BudgetStatus, string> = {
+export const getBudgetStatusColor = (status: 'safe' | 'warning' | 'danger' | 'exceeded'): string => {
+  const colorMap = {
     safe: '#10B981',      // green-500
     warning: '#F59E0B',   // amber-500
-    danger: '#F97316',    // orange-500
-    exceeded: '#EF4444'   // red-500
+    danger: '#EF4444',    // red-500
+    exceeded: '#DC2626'   // red-600
   };
-  return colors[status];
-}
-
-/**
- * Get label for budget status
- */
-export function getBudgetStatusLabel(status: BudgetStatus, warningAt: number = 80): string {
-  const labels: Record<BudgetStatus, string> = {
-    safe: `Safe (below ${warningAt}%)`,
-    warning: `Warning (${warningAt}% - 89%)`,
-    danger: 'Danger (90% - 99%)',
-    exceeded: 'Exceeded (100%+)'
-  };
-  return labels[status];
-}
-
-/**
- * Calculate budget percentage
- */
-export function getBudgetPercentage(spent: number, limit: number): number {
-  if (limit === 0) return 0;
-  return (spent / limit) * 100;
-}
+  
+  return colorMap[status];
+};

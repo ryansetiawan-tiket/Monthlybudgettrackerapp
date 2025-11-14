@@ -7,6 +7,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } f
 import { useIsMobile } from "./ui/use-mobile";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { DialogPriority } from "../constants";
 
 interface BudgetFormProps {
@@ -37,6 +38,9 @@ export function BudgetForm({
     DialogPriority.MEDIUM,
     'budget-form'
   );
+  
+  // Prevent pull to refresh on mobile
+  usePreventPullToRefresh(open);
   
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {

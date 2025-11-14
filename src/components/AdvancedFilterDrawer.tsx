@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { useIsMobile } from "./ui/use-mobile";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
 import type { CategorySettings } from "../types";
 import { Filter } from "lucide-react";
@@ -219,6 +220,7 @@ export function AdvancedFilterDrawer({
   settings
 }: AdvancedFilterDrawerProps) {
   const isMobile = useIsMobile();
+  usePreventPullToRefresh(open);
   
   if (isMobile) {
     return (

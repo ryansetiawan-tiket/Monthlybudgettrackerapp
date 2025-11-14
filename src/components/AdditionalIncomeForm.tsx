@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Button } from "./ui/button";
-import { Plus, RefreshCw, CalendarIcon } from "lucide-react";
+import { Plus, RefreshCw, CalendarIcon, Loader2 } from "lucide-react";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { toast } from "sonner@2.0.3";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -651,8 +650,17 @@ export function AdditionalIncomeForm({
           disabled={!name.trim() || !amount || isAdding || isInsufficientBalance}
           className="w-full"
         >
-          {!editMode && <Plus className="size-4 mr-2" />}
-          {submitButtonText || (isAdding ? "Menambahkan..." : editMode ? "Simpan" : "Tambah Pemasukan")}
+          {isAdding ? (
+            <>
+              <Loader2 className="size-4 mr-2 animate-spin" />
+              Menyimpan...
+            </>
+          ) : (
+            <>
+              {!editMode && <Plus className="size-4 mr-2" />}
+              {submitButtonText || (editMode ? "Simpan" : "Tambah Pemasukan")}
+            </>
+          )}
         </Button>
       </div>
   );

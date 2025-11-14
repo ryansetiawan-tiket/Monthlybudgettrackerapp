@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense, startTransition } from "react";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense, startTransition, useRef } from "react";
 import { MonthSelector } from "./components/MonthSelector";
 import { BudgetOverview } from "./components/BudgetOverview";
 import { BudgetForm } from "./components/BudgetForm";
@@ -57,6 +57,7 @@ import { useCategorySettings } from "./hooks/useCategorySettings";
 import { DialogStackProvider } from "./contexts/DialogStackContext";
 import { useMobileBackButton } from "./hooks/useMobileBackButton";
 import { usePullToRefresh } from "./hooks/usePullToRefresh";
+import { usePreventPullToRefresh } from "./hooks/usePreventPullToRefresh";
 import { PullToRefreshIndicator } from "./components/PullToRefreshIndicator";
 import { useIsMobile } from "./components/ui/use-mobile";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -245,6 +246,9 @@ function AppContent() {
   // ✨ NEW: Smart shortcut - Income Breakdown state
   const [openIncomeBreakdownFromCard, setOpenIncomeBreakdownFromCard] = useState(false);
   
+  // 📜 NEW: Ref for scrolling to ExpenseList after category filter
+  const expenseListRef = useRef<HTMLDivElement>(null);
+  
   // ✨ NEW: Mobile Bottom Nav - Active Tab
   const [activeTab, setActiveTab] = useState<'home' | 'pockets' | 'calendar'>(() => {
     const saved = localStorage.getItem('mobile-active-tab');
@@ -287,6 +291,9 @@ function AppContent() {
 
   const baseUrl = getBaseUrl(projectId);
   const isMobile = useIsMobile();
+  
+  // 📱 Prevent pull-to-refresh on mobile when wishlist drawer is open
+  usePreventPullToRefresh(showWishlistDialog);
 
   // Pull to Refresh handler - refresh all data
   const handlePullToRefresh = useCallback(async () => {
@@ -1330,7 +1337,24 @@ function AppContent() {
 
   // Phase 7: Category Filter Handlers
   const handleCategoryClick = useCallback((category: import('./types').ExpenseCategory) => {
-    setCategoryFilter(new Set([category]));
+    // 📜 NOTE: Don't set parent's categoryFilter here - ExpenseList already handles
+    // filtering via activeCategoryFilter. We only need to scroll to results.
+    // Setting categoryFilter here causes duplicate filter badges.
+    
+    // 📜 Scroll to ExpenseList after category filter applied
+    // Use setTimeout to wait for modal close animation
+    setTimeout(() => {
+      if (expenseListRef.current) {
+        const elementPosition = expenseListRef.current.getBoundingClientRect().top + window.scrollY;
+        // Add offset for sticky header (mobile has sticky header with ~100px height including statusbar)
+        const offset = 80; // Adjust based on your sticky header height
+        
+        window.scrollTo({
+          top: elementPosition - offset,
+          behavior: 'smooth'
+        });
+      }
+    }, 300); // Match modal close animation duration
   }, []);
 
   const handleClearFilter = useCallback(() => {
@@ -1597,6 +1621,7 @@ function AppContent() {
           )}
 
           <motion.div
+            ref={expenseListRef}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 }}
@@ -1612,6 +1637,7 @@ function AppContent() {
               balances={balances}
               categoryFilter={categoryFilter}
               onClearFilter={handleClearFilter}
+              onCategoryClick={handleCategoryClick}
               // Income props
               incomes={additionalIncomes}
               onDeleteIncome={handleDeleteIncome}

@@ -6,6 +6,7 @@ import { AddExpenseForm } from "./AddExpenseForm";
 import { FixedExpenseTemplates, FixedExpenseTemplate, FixedExpenseItem } from "./FixedExpenseTemplates";
 import { useIsMobile } from "./ui/use-mobile";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
+import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { DialogPriority } from "../constants";
 import type { ExpenseCategory } from "../types";
 import { motion, AnimatePresence } from "motion/react";
@@ -55,6 +56,9 @@ export function AddExpenseDialog({
     DialogPriority.MEDIUM,
     'add-expense-dialog'
   );
+
+  // Prevent pull-to-refresh on mobile
+  usePreventPullToRefresh(open);
 
   const handleManualExpenseSuccess = () => {
     onOpenChange(false);
@@ -106,15 +110,24 @@ export function AddExpenseDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          // Reset states when closing
-          setDrawerView('list');
-          setEditingTemplate(null);
-          setActiveTab('manual');
-        }
-        onOpenChange(isOpen);
-      }} dismissible={true}>
+      <Drawer 
+        open={open} 
+        onOpenChange={(isOpen) => {
+          // 🔒 Prevent closing during submission
+          if (!isOpen && isAdding) {
+            return; // Block close attempt
+          }
+          
+          if (!isOpen) {
+            // Reset states when closing
+            setDrawerView('list');
+            setEditingTemplate(null);
+            setActiveTab('manual');
+          }
+          onOpenChange(isOpen);
+        }} 
+        dismissible={!isAdding} // 🔒 Disable swipe-to-dismiss during submission
+      >
         <DrawerContent className="h-[90vh] flex flex-col rounded-t-2xl p-0">
           <DrawerHeader className="px-4 pt-6 pb-4 border-b flex items-center gap-3">
             {/* Back button when in form view */}
@@ -182,8 +195,29 @@ export function AddExpenseDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      // 🔒 Prevent closing during submission
+      if (!isOpen && isAdding) {
+        return; // Block close attempt
+      }
+      onOpenChange(isOpen);
+    }}>
+      <DialogContent 
+        className="max-w-3xl max-h-[90vh] overflow-y-auto" 
+        aria-describedby={undefined}
+        onInteractOutside={(e) => {
+          // 🔒 Prevent outside click close during submission
+          if (isAdding) {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // 🔒 Prevent ESC key close during submission
+          if (isAdding) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Tambah Pengeluaran</DialogTitle>
         </DialogHeader>

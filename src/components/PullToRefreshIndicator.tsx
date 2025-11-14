@@ -48,7 +48,7 @@ export function PullToRefreshIndicator({
         }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="fixed top-0 left-0 right-0 z-40 h-48 pointer-events-none"
+        className="fixed top-0 left-0 right-0 z-[60] h-48 pointer-events-none"
         style={{
           background: 'linear-gradient(to bottom, hsl(var(--primary) / 0.08), transparent)',
         }}
@@ -68,9 +68,9 @@ export function PullToRefreshIndicator({
           stiffness: 300,
           damping: 30,
         }}
-        className="fixed top-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none"
+        className="fixed top-0 left-0 right-0 z-[60] flex flex-col items-center pointer-events-none"
         style={{
-          paddingTop: '70px', // Account for sticky header
+          paddingTop: '120px', // Account for sticky header (44px status bar + 76px content)
         }}
       >
         {/* Icon container with enhanced styling */}

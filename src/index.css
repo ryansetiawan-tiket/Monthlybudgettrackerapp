@@ -6572,6 +6572,10 @@ html {
   font-size: var(--font-size);
 }
 
+body.drawer-open {
+  overscroll-behavior-y: contain;
+}
+
 @media (width <= 768px) {
   button:not([role="switch"]), [role="button"], a:not([role="switch"]) {
     min-height: 44px;

@@ -23,6 +23,8 @@ import { useCategorySettings } from "../hooks/useCategorySettings";
 import { TrendingUp, TrendingDown, BarChart3, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { INSIGHTS_POOL, getRandomInsights } from './category-insights-pool';
+import { Button } from "./ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 
 interface Expense {
   id: string;
@@ -356,8 +358,9 @@ export function CategoryBreakdown({
     });
 
     data.sort((a, b) => b.amount - a.amount);
+    
     return data;
-  }, [expenses, settings, calculateMoM]);
+  }, [expenses, settings, calculateMoM]); // ✅ Added settings dependency
 
   const totalExpenses = useMemo(() => {
     return categoryData.reduce((sum, item) => sum + item.amount, 0);
@@ -894,6 +897,7 @@ export function CategoryBreakdown({
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Breakdown Kategori</DialogTitle>
         </DialogHeader>
+        
         <div className="overflow-y-auto flex-1 px-1 -mx-1">
           {mainContent}
         </div>
