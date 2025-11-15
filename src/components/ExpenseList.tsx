@@ -35,8 +35,9 @@ import { useCategorySettings } from "../hooks/useCategorySettings";
 import { getAllCategories } from "../utils/categoryManager";
 import { formatCurrencyInput, parseCurrencyInput } from "../utils/currency";
 import { formatCurrency } from "../utils/currency";
+import { formatUSD } from "../utils/currencyFormatting";
 import { AdditionalIncomeForm } from "./AdditionalIncomeForm";
-import { formatDateSafe, getLocalDateFromISO } from "../utils/date-helpers";
+import { formatDateSafe, getLocalDateFromISO, getDayName, getDateNumber, isPast } from "../utils/date-helpers";
 import { ConsolidatedToolbar } from "./ConsolidatedToolbar";
 import {
   Tooltip,
@@ -48,6 +49,9 @@ import { useDialogRegistration } from "../hooks/useDialogRegistration";
 import { DialogPriority } from "../constants";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { ExpenseItemWrapper } from "./ExpenseItemWrapper";
+import { ExpenseListItem } from "./expense-list/ExpenseListItem";
+import { IncomeListItem } from "./expense-list/IncomeListItem";
+import { ExpenseListTabs } from "./expense-list/ExpenseListTabs";
 import type { ExpenseItem, Expense, AdditionalIncome, PocketBalance, ExpenseListProps } from "../types/expense";
 import { normalizeCategoryId } from "../utils/expenseHelpers";
 import { useExpenseFiltering } from "../hooks/useExpenseFiltering";
@@ -357,32 +361,11 @@ function ExpenseListComponent({
   };
 
   // Helper function to get day name
-  const getDayName = (dateString: string): string => {
-    const date = new Date(dateString);
-    const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    return days[date.getDay()];
-  };
-
-  // Helper function to get pocket name
+  // Helper function to get pocket name (component-specific, kept inline)
   const getPocketName = (pocketId?: string): string => {
     if (!pocketId) return '';
     const pocket = pockets.find(p => p.id === pocketId);
     return pocket?.name || '';
-  };
-
-  // Helper function to get date number
-  const getDateNumber = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.getDate().toString();
-  };
-
-  // Helper function to check if date is in the past
-  const isPast = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    date.setHours(0, 0, 0, 0);
-    return date < today;
   };
 
   // Extract all unique names, day names, dates, and categories (CONTEXTUAL to active tab)
@@ -579,7 +562,7 @@ function ExpenseListComponent({
   };
 
   // Handle category click from pie chart
-  const handleCategoryClick = (category: import('../types').ExpenseCategory) => {
+  const handleCategoryClick = useCallback((category: import('../types').ExpenseCategory) => {
     setActiveCategoryFilter(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
@@ -600,7 +583,7 @@ function ExpenseListComponent({
     
     // ✅ V4 FIX: Simply close the drawer - Vaul will handle cleanup properly
     setShowCategoryDrawer(false);
-  };
+  }, [settings, onCategoryClick]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -649,18 +632,18 @@ function ExpenseListComponent({
   
 
   // Phase 2: Handler to open sandbox with smart context
-  const handleOpenSandbox = () => {
+  const handleOpenSandbox = useCallback(() => {
     // Map activeTab to sandbox context ('expense' or 'income' → same, otherwise 'all')
     const context = activeTab === 'expense' || activeTab === 'income' ? activeTab : 'all';
     setSandboxContext(context);
     setShowSandbox(true);
-  };
+  }, [activeTab]);
 
  
 
   
 
-  const handleBulkDeleteIncomes = async () => {
+  const handleBulkDeleteIncomes = useCallback(async () => {
     if (selectedIncomeIds.size === 0 || !onDeleteIncome) return;
 
     const confirmed = window.confirm(
@@ -675,7 +658,7 @@ function ExpenseListComponent({
       setIsBulkSelectMode(false);
       setSelectedIncomeIds(new Set());
     }
-  };
+  }, [selectedIncomeIds, onDeleteIncome]);
 
   // Calculate totals
   // Items from income (fromIncome: true) subtract from expenses
@@ -1078,436 +1061,60 @@ function ExpenseListComponent({
     );
   };
 
-  // Render individual expense within a group
+  // 🚀 Phase 4A: Component-based rendering for ExpenseListItem
+  // Extracted individual expense rendering to component for better modularity
   const renderIndividualExpenseInGroup = (expense: Expense) => {
-    if (expense.items && expense.items.length > 0) {
-      // Template expense with items
-      const isItemExpanded = expandedItems.has(expense.id);
-      return (
-        <ExpenseItemWrapper
-          key={expense.id}
-          id={expense.id}
-          isMobile={isMobile}
-          isBulkSelectMode={isBulkSelectMode}
-          isSelected={selectedExpenseIds.has(expense.id)}
-          onLongPress={(id) => handleLongPressItem(id, 'expense')}
-        >
-          {(longPressHandlers) => (
-        <Collapsible key={expense.id} open={isItemExpanded} onOpenChange={() => toggleExpanded(expense.id)}>
-          <div className={`${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30 rounded-lg' : ''}`}>
-            <CollapsibleTrigger asChild>
-              <div className="cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
-                {/* Mobile: Compact layout with badge below + long-press */}
-                <div className="md:hidden p-2 pl-6" {...longPressHandlers}>
-                  <div className="flex items-start justify-between gap-2">
-                    {/* Left: Checkbox, Name area, Chevron */}
-                    <div className="flex items-start gap-2 min-w-0 flex-1">
-                      {isBulkSelectMode && (
-                        <Checkbox
-                          checked={selectedExpenseIds.has(expense.id)}
-                          onCheckedChange={() => handleToggleSelectExpense(expense.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-0.5"
-                        />
-                      )}
-                      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                        <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
-                          {/* ✨ Template Emoji (priority: template > expense) */}
-                          {(() => {
-                            const templateEmoji = getDisplayEmoji(expense);
-                            if (templateEmoji) {
-                              return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
-                            }
-                            return null;
-                          })()}
-                          {/* Category display: Check both expense.category and expense.items[].category */}
-                          {/* ⚠️ SKIP category emoji if expense has template emoji to avoid double emoji */}
-                          {(() => {
-                            const templateEmoji = getDisplayEmoji(expense);
-                            if (templateEmoji) return null; // Skip if has template emoji
-                            
-                            // Single expense with category
-                            if (expense.category) {
-                              return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
-                            }
-                            // Template expense: check if items have categories
-                            if (expense.items && expense.items.length > 0) {
-                              const itemsWithCategories = expense.items.filter((item: any) => item.category);
-                              if (itemsWithCategories.length > 0) {
-                                // Show first item's category emoji (template uses first item's category as representative)
-                                const firstCategory = itemsWithCategories[0].category;
-                                return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
-                              }
-                            }
-                            // No category found
-                            return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
-                          })()}
-                          {expense.name}
-                        </p>
-                        {expense.pocketId && getPocketName(expense.pocketId) && (
-                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 py-0 w-fit">
-                            {getPocketName(expense.pocketId)}
-                          </Badge>
-                        )}
-                      </div>
-                      {isItemExpanded ? (
-                        <ChevronUp className="size-3 text-muted-foreground shrink-0 mt-1" />
-                      ) : (
-                        <ChevronDown className="size-3 text-muted-foreground shrink-0 mt-1" />
-                      )}
-                    </div>
+    return (
+      <ExpenseListItem
+        key={expense.id}
+        expense={expense}
+        isBulkSelectMode={isBulkSelectMode}
+        isSelected={selectedExpenseIds.has(expense.id)}
+        isExpanded={expandedItems.has(expense.id)}
+        categorySettings={settings}
+        isMobile={isMobile}
+        onToggleExpand={toggleExpanded}
+        onToggleSelect={handleToggleSelectExpense}
+        onEdit={handleEditExpense}
+        onDelete={(data) => {
+          // Trigger delete confirmation dialog (same as old function)
+          setExpenseToDelete(data);
+          setDeleteConfirmOpen(true);
+        }}
+        onLongPress={handleLongPressItem}
+        onMoveToIncome={onMoveToIncome}
+        getDisplayEmoji={getDisplayEmoji}
+        getPocketName={getPocketName}
+        formatUSD={formatUSD}
+      />
+    );
+  };
 
-                    {/* Right: Amount and action buttons (forced right-aligned) */}
-                    <div className="flex items-center shrink-0 ml-auto">
-                      <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
-                        {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-                      </p>
-
-                    </div>
-                  </div>
-                </div>
-
-                {/* Desktop: Keep original single-line layout with hover behavior */}
-                <div className="hidden md:flex items-center justify-between p-2 pl-6 group">
-                  <div className="flex-1 flex items-center gap-2 min-w-0">
-                    {isBulkSelectMode && (
-                      <Checkbox
-                        checked={selectedExpenseIds.has(expense.id)}
-                        onCheckedChange={() => handleToggleSelectExpense(expense.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    )}
-                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : 'text-muted-foreground'}`}>
-                      {/* ✨ Template Emoji (priority: template > expense) */}
-                      {(() => {
-                        const templateEmoji = getDisplayEmoji(expense);
-                        if (templateEmoji) {
-                          return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
-                        }
-                        return null;
-                      })()}
-                      {/* Category display: Check both expense.category and expense.items[].category */}
-                      {/* ⚠️ SKIP category emoji if expense has template emoji to avoid double emoji */}
-                      {(() => {
-                        const templateEmoji = getDisplayEmoji(expense);
-                        if (templateEmoji) return null; // Skip if has template emoji
-                        
-                        // Single expense with category
-                        if (expense.category) {
-                          return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
-                        }
-                        // Template expense: check if items have categories
-                        if (expense.items && expense.items.length > 0) {
-                          const itemsWithCategories = expense.items.filter((item: any) => item.category);
-                          if (itemsWithCategories.length > 0) {
-                            // Show first item's category emoji (template uses first item's category as representative)
-                            const firstCategory = itemsWithCategories[0].category;
-                            return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
-                          }
-                        }
-                        // No category found
-                        return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
-                      })()}
-                      {expense.name}
-                    </p>
-                    {expense.pocketId && getPocketName(expense.pocketId) && (
-                      <Badge variant="secondary" className="text-xs">
-                        {getPocketName(expense.pocketId)}
-                      </Badge>
-                    )}
-                    {isItemExpanded ? (
-                      <ChevronUp className="size-3" />
-                    ) : (
-                      <ChevronDown className="size-3" />
-                    )}
-                  </div>
-                  <div className="flex items-center shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
-                    <p className={`text-sm text-right transition-all ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
-                      {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-                    </p>
-                    {!isBulkSelectMode && (
-                      /* 🔧 Desktop: Uncontrolled dropdown (separate from mobile state) */
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-0 group-hover:w-6 opacity-0 group-hover:opacity-100 transition-all overflow-hidden"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreVertical className="size-3 text-muted-foreground" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {expense.fromIncome && onMoveToIncome && (
-                              <DropdownMenuItem onClick={() => onMoveToIncome(expense)}>
-                                <ArrowRight className="size-3.5 mr-2 text-green-600" />
-                                Kembalikan ke Pemasukan
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
-                              <Pencil className="size-3 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => {
-                                setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                                setDeleteConfirmOpen(true);
-                              }}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="size-3 mr-2" />
-                              Hapus
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="px-3 pb-3 space-y-2 border-t pt-3 mt-2 md:px-2 md:pb-2 md:space-y-1 md:pt-1 md:mt-1">
-                {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className="flex items-center gap-2 text-xs text-green-600 pl-8 md:pl-6 mb-1">
-                    <DollarSign className="size-3" />
-                    <span>
-                      {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
-                      <span className="ml-1 text-xs">
-                        ({expense.conversionType === "auto" ? "realtime" : "manual"})
-                      </span>
-                    </span>
-                  </div>
-                )}
-                {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className="text-xs text-muted-foreground pl-8 md:pl-6 mb-1">
-                    <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
-                  </div>
-                )}
-                {expense.items.map((item, index) => {
-                  const itemCategory = (item as any).category; // Get category from item
-                  const categoryEmoji = itemCategory ? getCategoryEmoji(itemCategory, settings) : '';
-                  
-                  return (
-                    <div key={index} className="flex justify-between items-center text-sm md:text-xs pl-8 md:pl-6 py-1.5 md:py-0 rounded-lg md:rounded-none hover:bg-accent/30 md:hover:bg-transparent transition-colors">
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                        {categoryEmoji && <span className="text-base">{categoryEmoji}</span>}
-                        <span>{item.name}</span>
-                      </span>
-                      <span className={expense.fromIncome ? 'text-green-600' : 'text-red-600'}>
-                        {expense.fromIncome ? '+' : '-'}{formatCurrency(item.amount)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
-          )}
-        </ExpenseItemWrapper>
-      );
-    } else {
-      // Single expense without items
-      return (
-        <ExpenseItemWrapper
-          key={expense.id}
-          id={expense.id}
-          isMobile={isMobile}
-          isBulkSelectMode={isBulkSelectMode}
-          isSelected={selectedExpenseIds.has(expense.id)}
-          onLongPress={(id) => handleLongPressItem(id, 'expense')}
-        >
-          {(longPressHandlers) => (
-            <div
-              className={`rounded-lg hover:bg-accent/30 transition-colors ${isBulkSelectMode && selectedExpenseIds.has(expense.id) ? 'bg-accent/30' : ''}`}
-            >
-              {/* Mobile: Compact layout with badge below + long-press */}
-              <div 
-                className="md:hidden p-2 pl-6"
-                {...longPressHandlers}
-          >
-            <div className="flex items-start justify-between gap-2">
-              {/* Left: Checkbox, Name area */}
-              <div className="flex items-start gap-2 min-w-0 flex-1">
-                {isBulkSelectMode && (
-                  <Checkbox
-                    checked={selectedExpenseIds.has(expense.id)}
-                    onCheckedChange={() => handleToggleSelectExpense(expense.id)}
-                    className="mt-0.5"
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-col gap-0.5">
-                    <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
-                      {/* ✨ Template Emoji (priority: template > expense) */}
-                      {(() => {
-                        const templateEmoji = getDisplayEmoji(expense);
-                        if (templateEmoji) {
-                          return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
-                        }
-                        return null;
-                      })()}
-                      {/* Category display: Check both expense.category and expense.items[].category */}
-                      {/* ⚠️ SKIP category emoji if expense has template emoji to avoid double emoji */}
-                      {(() => {
-                        const templateEmoji = getDisplayEmoji(expense);
-                        if (templateEmoji) return null; // Skip if has template emoji
-                        
-                        // Single expense with category
-                        if (expense.category) {
-                          return <span className="mr-1.5" title={`cat="${expense.category}"`}>{getCategoryEmoji(expense.category, settings)}</span>;
-                        }
-                        // Template expense: check if items have categories
-                        if (expense.items && expense.items.length > 0) {
-                          const itemsWithCategories = expense.items.filter((item: any) => item.category);
-                          if (itemsWithCategories.length > 0) {
-                            // Show first item's category emoji (template uses first item's category as representative)
-                            const firstCategory = itemsWithCategories[0].category;
-                            return <span className="mr-1.5" title={`multi-cat (${itemsWithCategories.length} items)`}>{getCategoryEmoji(firstCategory, settings)}</span>;
-                          }
-                        }
-                        // No category found
-                        return <span className="mr-1.5 text-yellow-500" title="No category">⚠️</span>;
-                      })()}
-                      {expense.name}
-                    </p>
-                    {expense.pocketId && getPocketName(expense.pocketId) && (
-                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5 py-0 w-fit">
-                        {getPocketName(expense.pocketId)}
-                      </Badge>
-                    )}
-                  </div>
-                  {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                    <div className="flex items-center gap-1 text-xs text-green-600 mt-0.5">
-                      <DollarSign className="size-3" />
-                      <span className="truncate">
-                        {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
-                        <span className="ml-1">
-                          ({expense.conversionType === "auto" ? "realtime" : "manual"})
-                        </span>
-                      </span>
-                    </div>
-                  )}
-                  {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                      <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right: Amount and action buttons (forced right-aligned) */}
-              <div className="flex items-center shrink-0 ml-auto">
-                <p className={`text-sm text-right ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
-                  {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-                </p>
-
-              </div>
-            </div>
-          </div>
-
-          {/* Desktop: Keep original single-line layout with hover behavior */}
-          <div className="hidden md:flex items-center justify-between p-2 pl-6 group">
-            <div className="flex-1 flex items-center gap-2 min-w-0">
-              {isBulkSelectMode && (
-                <Checkbox
-                  checked={selectedExpenseIds.has(expense.id)}
-                  onCheckedChange={() => handleToggleSelectExpense(expense.id)}
-                />
-              )}
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className={`text-sm ${expense.fromIncome ? 'text-green-600' : ''}`}>
-                    {(() => {
-                      const templateEmoji = getDisplayEmoji(expense);
-                      if (templateEmoji) {
-                        return <span className="mr-1.5" title="From template">{templateEmoji}</span>;
-                      }
-                      return null;
-                    })()}
-                    {/* Only show category emoji if no template emoji */}
-                    {!getDisplayEmoji(expense) && expense.category && <span className="mr-1.5">{getCategoryEmoji(expense.category, settings)}</span>}
-                    {expense.name}
-                  </p>
-                  {expense.pocketId && getPocketName(expense.pocketId) && (
-                    <Badge variant="secondary" className="text-xs">
-                      {getPocketName(expense.pocketId)}
-                    </Badge>
-                  )}
-                </div>
-                {expense.fromIncome && expense.currency === "USD" && expense.originalAmount !== undefined && expense.exchangeRate !== undefined && (
-                  <div className="flex items-center gap-2 text-xs text-green-600">
-                    <DollarSign className="size-3" />
-                    <span>
-                      {formatUSD(expense.originalAmount)} × {formatCurrency(expense.exchangeRate)}
-                      <span className="ml-1 text-xs">
-                        ({expense.conversionType === "auto" ? "realtime" : "manual"})
-                      </span>
-                    </span>
-                  </div>
-                )}
-                {expense.fromIncome && expense.deduction && expense.deduction > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    <Minus className="size-3 inline" /> Potongan: {formatCurrency(expense.deduction)} (Kotor: {formatCurrency(expense.amount + expense.deduction)})
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center shrink-0 ml-auto">
-              <p className={`text-sm text-right transition-all ${expense.fromIncome ? 'text-green-600' : 'text-red-600'}`}>
-                {expense.fromIncome ? '+' : '-'}{formatCurrency(expense.amount)}
-              </p>
-              {!isBulkSelectMode && (
-                <>
-                  {expense.fromIncome && onMoveToIncome && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-0 group-hover:w-6 opacity-0 group-hover:opacity-100 transition-all overflow-hidden"
-                      onClick={() => onMoveToIncome(expense)}
-                      title="Kembalikan ke pemasukan tambahan"
-                    >
-                      <ArrowRight className="size-3 text-green-600" />
-                    </Button>
-                  )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-0 group-hover:w-6 opacity-0 group-hover:opacity-100 transition-all overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical className="size-3 text-muted-foreground" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleEditExpense(expense.id)}>
-                        <Pencil className="size-3 mr-2" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => {
-                          setExpenseToDelete({ id: expense.id, name: expense.name, amount: expense.amount });
-                          setDeleteConfirmOpen(true);
-                        }}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="size-3 mr-2" />
-                        Hapus
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
-            </div>
-          </div>
-            </div>
-          )}
-        </ExpenseItemWrapper>
-      );
-    }
+  // 🚀 Phase 4B: Component-based rendering for IncomeListItem
+  // Extracted individual income rendering to component for better modularity
+  const renderIndividualIncomeInGroup = (income: AdditionalIncome) => {
+    return (
+      <IncomeListItem
+        key={income.id}
+        income={income}
+        isBulkSelectMode={isBulkSelectMode}
+        isSelected={selectedIncomeIds.has(income.id)}
+        isExpanded={expandedIncomeIds.has(income.id)}
+        isMobile={isMobile}
+        onToggleExpand={toggleExpandIncome}
+        onToggleSelect={handleToggleSelectIncome}
+        onEdit={(id, inc, datePart) => {
+          setEditingIncomeId(id);
+          setEditingIncome({
+            ...inc,
+            date: datePart
+          });
+        }}
+        onDelete={onDeleteIncome}
+        onLongPress={handleLongPressItem}
+        getLocalDateFromISO={getLocalDateFromISO}
+      />
+    );
   };
 
   // Render expense item function to avoid duplication
@@ -1940,29 +1547,11 @@ function ExpenseListComponent({
               }
             />
             
-            {/* Tabs for Expense/Income - Figma Design */}
-            <div className="bg-neutral-800 rounded-[14px] p-[3px] flex gap-0 w-full">
-              <button
-                onClick={() => setActiveTab('expense')}
-                className={`flex-1 px-3 py-[6.5px] rounded-[10px] text-sm text-center transition-all ${
-                  activeTab === 'expense'
-                    ? 'bg-[rgba(255,76,76,0.1)] border border-[#ff4c4c] text-neutral-50'
-                    : 'bg-transparent border border-transparent text-[#a1a1a1]'
-                }`}
-              >
-                Pengeluaran
-              </button>
-              <button
-                onClick={() => setActiveTab('income')}
-                className={`flex-1 px-3 py-[6.5px] rounded-[10px] text-sm text-center transition-all ${
-                  activeTab === 'income'
-                    ? 'bg-[rgba(34,197,94,0.1)] border border-green-500 text-neutral-50'
-                    : 'bg-transparent border border-transparent text-[#a1a1a1]'
-                }`}
-              >
-                Pemasukan
-              </button>
-            </div>
+            {/* Tabs for Expense/Income - Component-based (Phase 4C) */}
+            <ExpenseListTabs
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+            />
             
             {/* Mobile Search Bar - Below tabs, above expandable sections (toggleable) */}
             {isMobile && isSearchExpanded && !isBulkSelectMode && (
@@ -2288,172 +1877,7 @@ function ExpenseListComponent({
                       };
                       
                       // Render individual income within a group
-                      const renderIndividualIncomeInGroup = (income: AdditionalIncome) => {
-                        const isSelected = selectedIncomeIds.has(income.id);
-                        const isExpanded = expandedIncomeIds.has(income.id);
-                        const netAmount = income.deduction > 0 ? income.amountIDR - income.deduction : income.amountIDR;
-                        
-                        return (
-                          <ExpenseItemWrapper
-                            key={income.id}
-                            id={income.id}
-                            isMobile={isMobile}
-                            isBulkSelectMode={isBulkSelectMode}
-                            isSelected={isSelected}
-                            onLongPress={(id) => handleLongPressItem(id, 'income')}
-                          >
-                            {(longPressHandlers) => (
-                              <Collapsible open={isExpanded} onOpenChange={() => toggleExpandIncome(income.id)}>
-                                <div className={`${isBulkSelectMode && isSelected ? 'bg-accent/30 rounded-lg' : ''}`}>
-                                  <CollapsibleTrigger asChild>
-                                    <div className="group cursor-pointer rounded-lg hover:bg-accent/30 transition-colors">
-                                      {/* Mobile: Compact layout with long-press */}
-                                      <div 
-                                        className="md:hidden p-2 pl-6"
-                                        {...longPressHandlers}
-                                  >
-                                    <div className="flex items-start justify-between gap-2">
-                                      {/* Left: Name + metadata */}
-                                      <div className="flex items-start gap-2 min-w-0 flex-1">
-                                        {isBulkSelectMode && (
-                                          <Checkbox
-                                            checked={isSelected}
-                                            onCheckedChange={() => handleToggleSelectIncome(income.id)}
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="mt-0.5"
-                                          />
-                                        )}
-                                        
-                                        <div className="min-w-0 flex-1">
-                                          <p className="text-sm truncate text-green-600">{income.name}</p>
-                                          <span className="text-xs text-muted-foreground">
-                                            {formatDateSafe(income.date)}
-                                            {income.conversionType === "auto" && " • (Auto)"}
-                                            {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
-                                          </span>
-                                        </div>
-                                        
-                                        {!isBulkSelectMode && (
-                                          isExpanded ? (
-                                            <ChevronUp className="size-3 text-muted-foreground shrink-0 mt-1" />
-                                          ) : (
-                                            <ChevronDown className="size-3 text-muted-foreground shrink-0 mt-1" />
-                                          )
-                                        )}
-                                      </div>
-                                      
-                                      {/* Right: Amount + actions (forced right-aligned) */}
-                                      <div className="flex items-center shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
-                                        <p className="text-sm text-right text-green-600">
-                                          +{formatCurrency(netAmount)}
-                                        </p>
-                                        
-
-                                      </div>
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Desktop: Single-line layout */}
-                                  <div className="hidden md:flex items-center justify-between p-2 pl-6">
-                                    <div className="flex-1 flex items-center gap-2 min-w-0">
-                                      {isBulkSelectMode && (
-                                        <Checkbox
-                                          checked={isSelected}
-                                          onCheckedChange={() => handleToggleSelectIncome(income.id)}
-                                          onClick={(e) => e.stopPropagation()}
-                                        />
-                                      )}
-                                      
-                                      <div className="min-w-0 flex-1">
-                                        <p className="text-sm text-green-600">{income.name}</p>
-                                        <span className="text-xs text-muted-foreground">
-                                          {formatDateSafe(income.date)}
-                                          {income.conversionType === "auto" && " • (Auto)"}
-                                          {income.currency === "USD" && income.amount && ` • ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)}`}
-                                        </span>
-                                      </div>
-                                      
-                                      {!isBulkSelectMode && (
-                                        isExpanded ? (
-                                          <ChevronUp className="size-3" />
-                                        ) : (
-                                          <ChevronDown className="size-3" />
-                                        )
-                                      )}
-                                    </div>
-                                    
-                                    <div className="flex items-center shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
-                                      <p className="text-sm text-right text-green-600 transition-all">
-                                        +{formatCurrency(netAmount)}
-                                      </p>
-                                      
-                                      {!isBulkSelectMode && (
-                                        <DropdownMenu>
-                                          <DropdownMenuTrigger asChild>
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-6 w-0 group-hover:w-6 opacity-0 group-hover:opacity-100 transition-all overflow-hidden"
-                                              onClick={(e) => e.stopPropagation()}
-                                            >
-                                              <MoreVertical className="size-3 text-muted-foreground" />
-                                            </Button>
-                                          </DropdownMenuTrigger>
-                                          <DropdownMenuContent align="end">
-                                            <DropdownMenuItem
-                                              onClick={() => {
-                                                setEditingIncomeId(income.id);
-                                                const datePart = getLocalDateFromISO(income.date);
-                                                setEditingIncome({
-                                                  ...income,
-                                                  date: datePart
-                                                });
-                                              }}
-                                            >
-                                              <Pencil className="size-3 mr-2" />
-                                              Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={() => onDeleteIncome?.(income.id)}
-                                              className="text-destructive focus:text-destructive"
-                                            >
-                                              <Trash2 className="size-3 mr-2" />
-                                              Hapus
-                                            </DropdownMenuItem>
-                                          </DropdownMenuContent>
-                                        </DropdownMenu>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </CollapsibleTrigger>
-                              
-                              <CollapsibleContent>
-                                {/* Expandable details */}
-                                <div className="px-3 pb-3 space-y-2 border-t pt-3 mt-2 md:px-2 md:pb-2 md:space-y-1 md:pt-1 md:mt-1">
-                                  {income.currency === "USD" && (
-                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
-                                      <span className="font-medium">Kotor:</span> {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(income.amount)} × {formatCurrency(income.exchangeRate || 0)} = {formatCurrency(income.amountIDR)}
-                                    </div>
-                                  )}
-                                  {income.deduction > 0 && (
-                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
-                                      <span className="font-medium">Potongan:</span> -{formatCurrency(income.deduction)}
-                                    </div>
-                                  )}
-                                  {(!income.currency || income.currency === "IDR") && (
-                                    <div className="text-xs text-muted-foreground pl-8 md:pl-6">
-                                      <span className="font-medium">Jumlah:</span> {formatCurrency(income.amountIDR)}
-                                    </div>
-                                  )}
-                                </div>
-                              </CollapsibleContent>
-                            </div>
-                          </Collapsible>
-                            )}
-                          </ExpenseItemWrapper>
-                        );
-                      };
+                      // ✅ Phase 4B: Moved to IncomeListItem.tsx component - Old implementation removed
                       
                       // Return the grouped and sorted render
                       const groupedEntries = Array.from(groupedIncomes.entries())
@@ -3264,16 +2688,6 @@ function ExpenseListComponent({
     </Card>
   );
 }
-
-// Helper function for USD formatting
-const formatUSD = (amount: number): string => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
 
 // Export memoized component for performance
 export const ExpenseList = memo(ExpenseListComponent);

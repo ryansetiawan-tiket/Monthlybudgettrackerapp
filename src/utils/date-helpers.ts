@@ -148,3 +148,37 @@ export function formatDateSafe(
   
   return new Intl.DateTimeFormat('id-ID', options).format(date);
 }
+
+/**
+ * Get day name from date string (e.g., "Minggu", "Senin")
+ * @param dateString - Format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
+ * @returns Day name in Indonesian (Minggu, Senin, Selasa, etc.)
+ */
+export function getDayName(dateString: string): string {
+  const date = new Date(dateString);
+  const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  return days[date.getDay()];
+}
+
+/**
+ * Get date number (day of month) from date string
+ * @param dateString - Format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
+ * @returns Day of month as string (e.g., "15")
+ */
+export function getDateNumber(dateString: string): string {
+  const date = new Date(dateString);
+  return date.getDate().toString();
+}
+
+/**
+ * Check if date is in the past (before today)
+ * @param dateString - Format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
+ * @returns true if date is before today, false otherwise
+ */
+export function isPast(dateString: string): boolean {
+  const date = new Date(dateString);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return date < today;
+}

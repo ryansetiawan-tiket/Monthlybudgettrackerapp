@@ -461,8 +461,15 @@ export function useExpenseFiltering({
 
   const applyFilters = useCallback(() => {
     // Copy temporary selections to active filters
+    // Normalize category ids to ensure they match normalized values used when
+    // filtering expenses (handles legacy numeric ids vs string keys).
+    const normalizedCategories = new Set<string>();
+    selectedCategoryFilters.forEach(catId => {
+      normalizedCategories.add(normalizeCategoryId(catId));
+    });
+
     setActiveFilters({
-      categories: new Set(selectedCategoryFilters),
+      categories: normalizedCategories,
       pockets: new Set(selectedPocketFilters),
       incomeSources: new Set(selectedIncomeSourceFilters),
     });

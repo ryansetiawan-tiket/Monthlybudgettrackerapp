@@ -3,7 +3,7 @@ import { Search, X, ArrowUpDown, Filter, Edit2, Trash2, ListChecks } from 'lucid
 import { Input } from './ui/input';
 import { Checkbox } from './ui/checkbox';
 import { formatCurrency } from '../utils/currency';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, memo } from 'react';
 import { useIsMobile } from './ui/use-mobile';
 
 interface ConsolidatedToolbarProps {
@@ -52,7 +52,7 @@ interface ConsolidatedToolbarProps {
   hasActiveFilters?: boolean;
 }
 
-export function ConsolidatedToolbar({
+const ConsolidatedToolbarComponent = memo(function ConsolidatedToolbar({
   searchQuery,
   onSearchChange,
   isSearchExpanded,
@@ -416,4 +416,7 @@ export function ConsolidatedToolbar({
       </div>
     </div>
   );
-}
+});
+
+ConsolidatedToolbarComponent.displayName = 'ConsolidatedToolbar';
+export { ConsolidatedToolbarComponent as ConsolidatedToolbar };

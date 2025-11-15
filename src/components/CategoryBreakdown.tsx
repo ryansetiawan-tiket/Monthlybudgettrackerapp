@@ -6,7 +6,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Progress } from "./ui/progress";
 import { Badge } from "./ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
 import { 
   getCategoryEmoji, 
@@ -114,7 +114,154 @@ function normalizeCategoryId(categoryId: string | undefined): string {
   return categoryId;
 }
 
-export function CategoryBreakdown({ 
+// Desktop: Smart Card Component
+function CategorySmartCard({ 
+  data, 
+  onClick,
+  index 
+}: { 
+  data: CategoryDataItem; 
+  onClick: () => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.05 }}
+    >
+      <Card 
+        className="p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+        onClick={onClick}
+      >
+        {/* Row 1: Icon + Name + Count */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{data.emoji}</span>
+            <span className="font-medium">{data.label}</span>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {data.count} trans
+          </span>
+        </div>
+        
+        {/* Row 2: Amount + MoM Badge */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-semibold">{formatCurrency(data.amount)}</span>
+          {data.mom && (
+            <Badge 
+              variant={data.mom.trend === 'up' ? 'destructive' : 'default'}
+              className="text-xs"
+            >
+              {data.mom.trend === 'up' ? <TrendingUp className="size-3 mr-1" /> : <TrendingDown className="size-3 mr-1" />}
+              {formatCurrency(Math.abs(data.mom.diff))}
+            </Badge>
+          )}
+        </div>
+        
+        {/* Row 3: Progress Bar (if budget enabled) */}
+        {data.budget && (
+          <>
+            <Progress 
+              value={Math.min(data.budget.percentage, 100)} 
+              className="h-2 mb-1"
+              style={{
+                // @ts-ignore
+                '--progress-background': getBudgetStatusColor(data.budget.status)
+              }}
+            />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                dari budget {formatCurrency(data.budget.limit)}
+              </span>
+              <span 
+                className="font-medium"
+                style={{ color: getBudgetStatusColor(data.budget.status) }}
+              >
+                {data.budget.percentage.toFixed(0)}%
+              </span>
+            </div>
+          </>
+        )}
+      </Card>
+    </motion.div>
+  );
+}
+
+// Mobile: Compact Card Component
+function CategoryCompactCard({ 
+  data, 
+  onClick,
+  index 
+}: { 
+  data: CategoryDataItem; 
+  onClick: () => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+    >
+      <Card 
+        className="p-3 cursor-pointer active:bg-muted/50 transition-colors"
+        onClick={onClick}
+      >
+        {/* Line 1: Icon + Name + Count */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xl">{data.emoji}</span>
+          <span className="font-medium">{data.label}</span>
+          <span className="text-xs text-muted-foreground ml-auto">
+            ({data.count} transaksi)
+          </span>
+        </div>
+        
+        {/* Line 2: Amount + MoM */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="font-semibold">{formatCurrency(data.amount)}</span>
+          {data.mom && (
+            <span className="text-xs flex items-center gap-1">
+              {data.mom.trend === 'up' ? (
+                <TrendingUp className="size-3 text-destructive" />
+              ) : (
+                <TrendingDown className="size-3 text-green-500" />
+              )}
+              {formatCurrency(Math.abs(data.mom.diff))}
+            </span>
+          )}
+        </div>
+        
+        {/* Line 3: Progress bar if budget */}
+        {data.budget && (
+          <Progress 
+            value={Math.min(data.budget.percentage, 100)}
+            className="h-2 mb-1"
+            style={{
+              // @ts-ignore
+              '--progress-background': getBudgetStatusColor(data.budget.status)
+            }}
+          />
+        )}
+        
+        {/* Line 4: Budget context */}
+        {data.budget && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Budget: {formatCurrency(data.budget.limit)}</span>
+            <span 
+              className="font-medium"
+              style={{ color: getBudgetStatusColor(data.budget.status) }}
+            >
+              {data.budget.percentage.toFixed(0)}%
+            </span>
+          </div>
+        )}
+      </Card>
+    </motion.div>
+  );
+}
+
+const CategoryBreakdownComponent = memo(function CategoryBreakdown({ 
   open,
   onOpenChange,
   monthKey, 
@@ -903,151 +1050,7 @@ export function CategoryBreakdown({
       </DialogContent>
     </Dialog>
   );
-}
+});
 
-// Desktop: Smart Card Component
-function CategorySmartCard({ 
-  data, 
-  onClick,
-  index 
-}: { 
-  data: CategoryDataItem; 
-  onClick: () => void;
-  index: number;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
-    >
-      <Card 
-        className="p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-        onClick={onClick}
-      >
-        {/* Row 1: Icon + Name + Count */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{data.emoji}</span>
-            <span className="font-medium">{data.label}</span>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {data.count} trans
-          </span>
-        </div>
-        
-        {/* Row 2: Amount + MoM Badge */}
-        <div className="flex items-center justify-between mb-2">
-          <span className="font-semibold">{formatCurrency(data.amount)}</span>
-          {data.mom && (
-            <Badge 
-              variant={data.mom.trend === 'up' ? 'destructive' : 'default'}
-              className="text-xs"
-            >
-              {data.mom.trend === 'up' ? <TrendingUp className="size-3 mr-1" /> : <TrendingDown className="size-3 mr-1" />}
-              {formatCurrency(Math.abs(data.mom.diff))}
-            </Badge>
-          )}
-        </div>
-        
-        {/* Row 3: Progress Bar (if budget enabled) */}
-        {data.budget && (
-          <>
-            <Progress 
-              value={Math.min(data.budget.percentage, 100)} 
-              className="h-2 mb-1"
-              style={{
-                // @ts-ignore
-                '--progress-background': getBudgetStatusColor(data.budget.status)
-              }}
-            />
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">
-                dari budget {formatCurrency(data.budget.limit)}
-              </span>
-              <span 
-                className="font-medium"
-                style={{ color: getBudgetStatusColor(data.budget.status) }}
-              >
-                {data.budget.percentage.toFixed(0)}%
-              </span>
-            </div>
-          </>
-        )}
-      </Card>
-    </motion.div>
-  );
-}
-
-// Mobile: Compact Card Component
-function CategoryCompactCard({ 
-  data, 
-  onClick,
-  index 
-}: { 
-  data: CategoryDataItem; 
-  onClick: () => void;
-  index: number;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
-    >
-      <Card 
-        className="p-3 cursor-pointer active:bg-muted/50 transition-colors"
-        onClick={onClick}
-      >
-        {/* Line 1: Icon + Name + Count */}
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xl">{data.emoji}</span>
-          <span className="font-medium">{data.label}</span>
-          <span className="text-xs text-muted-foreground ml-auto">
-            ({data.count} transaksi)
-          </span>
-        </div>
-        
-        {/* Line 2: Amount + MoM */}
-        <div className="flex items-center gap-2 mb-2">
-          <span className="font-semibold">{formatCurrency(data.amount)}</span>
-          {data.mom && (
-            <span className="text-xs flex items-center gap-1">
-              {data.mom.trend === 'up' ? (
-                <TrendingUp className="size-3 text-destructive" />
-              ) : (
-                <TrendingDown className="size-3 text-green-500" />
-              )}
-              {formatCurrency(Math.abs(data.mom.diff))}
-            </span>
-          )}
-        </div>
-        
-        {/* Line 3: Progress bar if budget */}
-        {data.budget && (
-          <Progress 
-            value={Math.min(data.budget.percentage, 100)}
-            className="h-2 mb-1"
-            style={{
-              // @ts-ignore
-              '--progress-background': getBudgetStatusColor(data.budget.status)
-            }}
-          />
-        )}
-        
-        {/* Line 4: Budget context */}
-        {data.budget && (
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Budget: {formatCurrency(data.budget.limit)}</span>
-            <span 
-              className="font-medium"
-              style={{ color: getBudgetStatusColor(data.budget.status) }}
-            >
-              {data.budget.percentage.toFixed(0)}%
-            </span>
-          </div>
-        )}
-      </Card>
-    </motion.div>
-  );
-}
+CategoryBreakdownComponent.displayName = 'CategoryBreakdown';
+export { CategoryBreakdownComponent as CategoryBreakdown };
