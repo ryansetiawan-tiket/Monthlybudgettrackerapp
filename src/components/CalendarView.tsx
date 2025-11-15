@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from './ui/use-mobile';
 import { useMobileBackButton } from '../hooks/useMobileBackButton';
 import { useSwipeGesture } from '../hooks/useSwipeGesture';
+import { usePreventPullToRefresh } from '../hooks/usePreventPullToRefresh';
 import { formatCurrency } from '../utils/currency';
 import { Badge } from './ui/badge';
 import type { Expense, AdditionalIncome, Pocket, CategorySettings } from '../types';
@@ -88,6 +89,9 @@ export function CalendarView({
     velocityThreshold: 0.5,
     enabled: isMobile && isDrawerOpen,
   });
+
+  // Prevent pull-to-refresh on mobile
+  usePreventPullToRefresh(isMobile && isDrawerOpen);
 
   // Parse viewMonth string (use internal state, not prop)
   const [year, monthNum] = viewMonth.split('-').map(Number);
