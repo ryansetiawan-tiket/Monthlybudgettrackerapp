@@ -24,7 +24,6 @@ import { TrendingUp, TrendingDown, BarChart3, ChevronDown, ChevronUp, Sparkles }
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { INSIGHTS_POOL, getRandomInsights } from './category-insights-pool';
 import { Button } from "./ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 
 interface Expense {
   id: string;

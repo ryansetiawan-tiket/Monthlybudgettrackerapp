@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, memo, lazy, Suspense } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
@@ -29,7 +29,6 @@ import { toast } from "sonner@2.0.3";
 import { useIsMobile } from "./ui/use-mobile";
 import { getCategoryEmoji, getCategoryLabel } from "../utils/calculations";
 import { EXPENSE_CATEGORIES, LEGACY_CATEGORY_ID_MAP } from "../constants";
-import { BulkEditCategoryDialog } from "./BulkEditCategoryDialog";
 import { CategoryFilterBadge } from "./CategoryFilterBadge";
 import { CategoryBreakdown } from "./CategoryBreakdown";
 import { useCategorySettings } from "../hooks/useCategorySettings";
@@ -46,128 +45,20 @@ import {
   TooltipTrigger,
 } from "./ui/tooltip";
 import { useDialogRegistration } from "../hooks/useDialogRegistration";
-import { usePreventPullToRefresh } from "../hooks/usePreventPullToRefresh";
 import { DialogPriority } from "../constants";
-import SimulationSandbox from "./SimulationSandbox";
-import { AdvancedFilterDrawer } from "./AdvancedFilterDrawer";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 import { ExpenseItemWrapper } from "./ExpenseItemWrapper";
-import { ItemActionSheet } from "./ItemActionSheet";
+import type { ExpenseItem, Expense, AdditionalIncome, PocketBalance, ExpenseListProps } from "../types/expense";
+import { normalizeCategoryId } from "../utils/expenseHelpers";
+import { useExpenseFiltering } from "../hooks/useExpenseFiltering";
+import { useExpenseActions } from "../hooks/useExpenseActions";
+import { useBulkSelection } from "../hooks/useBulkSelection";
 
-/**
- * 🔧 BACKWARD COMPATIBILITY HELPER
- * Normalizes legacy category IDs (0, 1, 2, etc.) to new string keys (food, transport, etc.)
- * 
- * @param categoryId - The category ID (can be old numeric or new string)
- * @returns Normalized category key
- * 
- * @example
- * normalizeCategoryId('1') → 'transport'
- * normalizeCategoryId('transport') → 'transport'
- * normalizeCategoryId('custom_abc123') → 'custom_abc123'
- */
-function normalizeCategoryId(categoryId: string | undefined): string {
-  if (!categoryId) return 'other';
-  
-  // Check if it's a legacy numeric ID
-  if (categoryId in LEGACY_CATEGORY_ID_MAP) {
-    return LEGACY_CATEGORY_ID_MAP[categoryId];
-  }
-  
-  // Already normalized or custom category
-  return categoryId;
-}
-
-interface ExpenseItem {
-  name: string;
-  amount: number;
-  category?: string; // Per-item category support
-}
-
-interface Expense {
-  id: string;
-  name: string;
-  amount: number;
-  date: string;
-  items?: ExpenseItem[];
-  color?: string;
-  fromIncome?: boolean;
-  currency?: string;
-  originalAmount?: number;
-  exchangeRate?: number;
-  conversionType?: string;
-  deduction?: number;
-  pocketId?: string;
-  groupId?: string;
-  category?: string;
-}
-
-interface AdditionalIncome {
-  id: string;
-  name: string;
-  amount: number;
-  currency: string;
-  exchangeRate: number | null;
-  amountIDR: number;
-  conversionType: string;
-  date: string;
-  deduction: number;
-  pocketId?: string;
-  createdAt?: string;
-}
-
-interface PocketBalance {
-  pocketId: string;
-  originalAmount: number;
-  transferIn: number;
-  transferOut: number;
-  expenses: number;
-  availableBalance: number;
-}
-
-interface ExpenseListProps {
-  expenses: Expense[];
-  onDeleteExpense: (id: string) => void;
-  onEditExpense: (id: string, expense: Omit<Expense, 'id'>) => void;
-  onBulkDeleteExpenses: (ids: string[]) => Promise<void>;
-  onBulkUpdateCategory?: (ids: string[], category: string) => Promise<void>;
-  onMoveToIncome?: (expense: Expense) => void;
-  pockets?: Array<{id: string; name: string}>;
-  balances?: PocketBalance[];
-  categoryFilter?: Set<import('../types').ExpenseCategory>; // Phase 7
-  onClearFilter?: () => void; // Phase 7
-  onCategoryClick?: (category: import('../types').ExpenseCategory) => void; // 📜 Scroll to filtered results
-  // Income-related props
-  incomes?: AdditionalIncome[];
-  onDeleteIncome?: (id: string) => void;
-  onUpdateIncome?: (id: string, income: {
-    name: string;
-    amount: number;
-    currency: string;
-    exchangeRate: number | null;
-    amountIDR: number;
-    conversionType: string;
-    date: string;
-    deduction: number;
-    pocketId: string;
-  }) => void;
-  globalDeduction?: number;
-  onUpdateGlobalDeduction?: (deduction: number) => void;
-  onOpenCategoryManager?: () => void; // Phase 8: Open CategoryManager
-  onOpenAddTransaction?: () => void; // Desktop transaction entry
-  onOpenTemplateManager?: () => void; // Desktop template manager
-  // Budget-related props (for SimulationSandbox)
-  initialBudget?: number;
-  // 🏗️ ARCHITECTURE FIX: NEW - Carry-over breakdown props
-  carryOverAssets?: number;
-  carryOverLiabilities?: number;
-  // Month/Year for CategoryBreakdown MoM calculation
-  selectedMonth?: number;
-  selectedYear?: number;
-  // ✨ NEW: External control for opening Category Breakdown modal
-  externalOpenCategoryBreakdown?: boolean;
-  onCategoryBreakdownClose?: () => void;
-}
+// 🚀 Lazy-loaded heavy modal components (Phase 2)
+const BulkEditCategoryDialog = lazy(() => import("./BulkEditCategoryDialog").then(m => ({ default: m.BulkEditCategoryDialog })));
+const AdvancedFilterDrawer = lazy(() => import("./AdvancedFilterDrawer").then(m => ({ default: m.AdvancedFilterDrawer })));
+const SimulationSandbox = lazy(() => import("./SimulationSandbox"));
+const ItemActionSheet = lazy(() => import("./ItemActionSheet").then(m => ({ default: m.ItemActionSheet })));
 
 function ExpenseListComponent({ 
   expenses, 
@@ -200,7 +91,9 @@ function ExpenseListComponent({
   selectedYear,
   // ✨ NEW: External category breakdown control
   externalOpenCategoryBreakdown = false,
-  onCategoryBreakdownClose
+  onCategoryBreakdownClose,
+  // 🔒 NEW: Modal state callback
+  onModalStateChange
 }: ExpenseListProps) {
   const isMobile = useIsMobile();
   
@@ -293,43 +186,13 @@ function ExpenseListComponent({
   
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [editingExpense, setEditingExpense] = useState<Omit<Expense, 'id'>>({ 
-    name: '', 
-    amount: 0, 
-    date: '', 
-    items: [], 
-    color: '', 
-    fromIncome: undefined,
-    currency: undefined,
-    originalAmount: undefined,
-    exchangeRate: undefined,
-    conversionType: undefined,
-    deduction: undefined,
-    pocketId: undefined,
-    groupId: undefined,
-    category: undefined,
-    emoji: undefined
-  });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
-  const [matchedCategories, setMatchedCategories] = useState<Set<string>>(new Set());
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  
   const [upcomingExpanded, setUpcomingExpanded] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(false);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [expenseToDelete, setExpenseToDelete] = useState<{ id: string; name: string; amount: number } | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
   
-  // Bulk select states
-  const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
-  const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
-  const [selectedIncomeIds, setSelectedIncomeIds] = useState<Set<string>>(new Set());
+ 
   
-  // Track input strings for item amounts (for math expression support)
-  const [itemAmountInputs, setItemAmountInputs] = useState<{ [index: number]: string }>({});
+  
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkEditCategoryDialog, setShowBulkEditCategoryDialog] = useState(false);
@@ -339,25 +202,66 @@ function ExpenseListComponent({
   
   const [showCategoryDrawer, setShowCategoryDrawer] = useState(false);
   const [showGlobalDeductionInput, setShowGlobalDeductionInput] = useState(false);
-  const [activeCategoryFilter, setActiveCategoryFilter] = useState<Set<import('../types').ExpenseCategory>>(new Set());
   
   // Phase 2: Smart Simulation Sandbox state
   const [showSandbox, setShowSandbox] = useState(false);
   const [sandboxContext, setSandboxContext] = useState<'all' | 'expense' | 'income'>('all');
   
-  // Advanced Filter state
-  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
-  const [selectedCategoryFilters, setSelectedCategoryFilters] = useState<Set<string>>(new Set());
-  const [selectedPocketFilters, setSelectedPocketFilters] = useState<Set<string>>(new Set());
-  const [selectedIncomeSourceFilters, setSelectedIncomeSourceFilters] = useState<Set<string>>(new Set());
-  const [activeFilters, setActiveFilters] = useState<{
-    categories: Set<string>;
-    pockets: Set<string>;
-    incomeSources: Set<string>;
-  }>({
-    categories: new Set(),
-    pockets: new Set(),
-    incomeSources: new Set(),
+
+  // 🎯 Phase 3 - CANARY #3: Expense Actions Hook
+  // ⚠️ CRITICAL: Must be called BEFORE any useDialogRegistration that uses these states!
+  const {
+    // Edit states
+    editingExpenseId,
+    editingExpense,
+    setEditingExpense,
+    editingIncomeId,
+    editingIncome,
+    setEditingIncome,
+    itemAmountInputs,
+    setItemAmountInputs,
+    isUpdatingExpense,
+    isUpdatingIncome,
+
+    // Delete states
+    deleteConfirmOpen,
+    setDeleteConfirmOpen,
+    expenseToDelete,
+    setExpenseToDelete,
+
+    // Mobile action sheet states
+    actionSheetOpen,
+    setActionSheetOpen,
+    actionSheetItem,
+    setActionSheetItem,
+
+    // Edit handlers - Expense
+    handleEditExpense,
+    handleCloseEditExpense,
+    handleSaveEditExpense,
+
+    // Edit handlers - Income
+    handleEditIncome,
+    handleCloseEditIncome,
+
+    // Delete handlers
+    handleDeleteExpense,
+    handleConfirmDeleteExpense,
+    handleCancelDeleteExpense,
+
+    // Mobile action sheet handlers
+    handleLongPressItem,
+    handleSheetEdit,
+    handleSheetDelete,
+    handleSheetMoveToIncome,
+  } = useExpenseActions({
+    expenses,
+    incomes,
+    onEditExpense,
+    onDeleteExpense,
+    onDeleteIncome,
+    onMoveToIncome,
+    getLocalDateFromISO,
   });
   
   // Register simulation sandbox for back button handling
@@ -372,21 +276,10 @@ function ExpenseListComponent({
     'simulation-sandbox'
   );
   
-  // Income editing states
-  const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
   
-  // Loading states for edit operations
-  const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
-  const [isUpdatingIncome, setIsUpdatingIncome] = useState(false);
+ 
   
-  // 📱 Mobile Bottom Sheet Action states
-  const [actionSheetOpen, setActionSheetOpen] = useState(false);
-  const [actionSheetItem, setActionSheetItem] = useState<{
-    id: string;
-    name: string;
-    type: 'expense' | 'income';
-    fromIncome?: boolean;
-  } | null>(null);
+  
   
   // Register action sheet for back button handling
   useDialogRegistration(
@@ -412,14 +305,14 @@ function ExpenseListComponent({
     DialogPriority.MEDIUM,
     'edit-income-drawer'
   );
-  const [editingIncome, setEditingIncome] = useState<Partial<AdditionalIncome>>({});
+ 
   
   // Register edit expense drawer for back button handling
   useDialogRegistration(
     editingExpenseId !== null,
     (open) => {
       if (!open) {
-        handleCloseEditDialog();
+        handleCloseEditExpense();
       }
     },
     DialogPriority.MEDIUM,
@@ -440,8 +333,7 @@ function ExpenseListComponent({
     'category-breakdown-drawer'
   );
   
-  // 📱 Prevent pull-to-refresh on mobile when drawers are open
-  usePreventPullToRefresh(editingExpenseId !== null || !!editingIncomeId || actionSheetOpen || showCategoryDrawer || isFilterDrawerOpen);
+  // ⚠️ MOVED: Track all modal/drawer states - moved after useExpenseFiltering hook
   
   // ✨ NEW: Sync external state to internal state (for BudgetOverview shortcut)
   useEffect(() => {
@@ -482,6 +374,15 @@ function ExpenseListComponent({
   const getDateNumber = (dateString: string): string => {
     const date = new Date(dateString);
     return date.getDate().toString();
+  };
+
+  // Helper function to check if date is in the past
+  const isPast = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+    return date < today;
   };
 
   // Extract all unique names, day names, dates, and categories (CONTEXTUAL to active tab)
@@ -532,105 +433,128 @@ function ExpenseListComponent({
     return allSuggestions.sort();
   }, [expenses, incomes, activeTab, allCategories, settings]);
 
-  // Filter suggestions based on search query
-  const suggestions = useMemo(() => {
-    if (!searchQuery.trim()) return [];
+  // 🚀 Phase 3: Extract filtering logic to custom hook
+  const {
+    // Search state
+    searchQuery,
+    isSearchExpanded,
+    setIsSearchExpanded,
+    setSearchQuery,
+    setShowSuggestions,
+    matchedCategories,
+    setMatchedCategories,
+    showSuggestions,
+    selectedSuggestionIndex,
+    setSelectedSuggestionIndex,
+    searchInputRef,
+    suggestionsRef,
+    suggestions,
     
-    const lowerQuery = searchQuery.toLowerCase();
-    return allNames.filter(name => 
-      name.toLowerCase().includes(lowerQuery)
-    ).slice(0, 10); // Limit to 10 suggestions
-  }, [allNames, searchQuery]);
-
-  // Close suggestions when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        searchInputRef.current && 
-        !searchInputRef.current.contains(event.target as Node) &&
-        suggestionsRef.current &&
-        !suggestionsRef.current.contains(event.target as Node)
-      ) {
-        setShowSuggestions(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value);
-    // Show suggestions when there's text (both mobile and desktop)
-    setShowSuggestions(value.trim().length > 0);
-    setSelectedSuggestionIndex(-1);
+    // Filter state
+    isFilterDrawerOpen,
+    setIsFilterDrawerOpen,
+    selectedCategoryFilters,
+    setSelectedCategoryFilters,
+    selectedPocketFilters,
+    setSelectedPocketFilters,
+    selectedIncomeSourceFilters,
+    setSelectedIncomeSourceFilters,
+    activeFilters,
+    setActiveFilters,
+    activeCategoryFilter,
+    setActiveCategoryFilter,
     
-    // ✅ KATEGORI DETECTION: Check if query matches any category
-    if (value.trim() && activeTab === 'expense') {
-      const lowerQuery = value.toLowerCase();
-      const matched = new Set<string>();
-      
-      allCategories.forEach(cat => {
-        const categoryLabel = getCategoryLabel(cat.id as any, settings);
-        if (categoryLabel.toLowerCase().includes(lowerQuery)) {
-          matched.add(cat.id);
-        }
-      });
-      
-      setMatchedCategories(matched);
-    } else {
-      setMatchedCategories(new Set());
-    }
-  };
+    // Filtered data
+    sortedAndFilteredExpenses,
+    filteredAndSortedIncomes,
+    categoryFilteredExpenses,
+    
+    // Search handlers
+    handleSearchChange,
+    handleClearSearch,
+    handleSelectSuggestion,
+    handleKeyDown,
+    
+    // Filter handlers
+    toggleCategoryFilter,
+    togglePocketFilter,
+    toggleIncomeSourceFilter,
+    applyFilters,
+    resetFilters,
+  } = useExpenseFiltering({
+    expenses,
+    incomes,
+    activeTab,
+    sortOrder,
+    allCategories,
+    allNames,
+    settings,
+    getPocketName,
+    getDayName,
+    getDateNumber,
+    isPast,
+  });
+
+  // ⚠️ All search/filter logic moved to useExpenseFiltering hook
+
+  // ✅ Extract sorted expenses from filtering hook
+  const upcomingExpenses = sortedAndFilteredExpenses?.sortedUpcoming || [];
+  const historyExpenses = sortedAndFilteredExpenses?.sortedHistory || [];
+  const allSortedExpenses = sortedAndFilteredExpenses?.combined || [];
+
+  // 🎯 Phase 3 - CANARY #2: Bulk selection hook
+  const {
+    isBulkSelectMode,
+    selectedExpenseIds,
+    selectedIncomeIds,
+    selectedCount,
+    allSelected: isAllSelected,
+    handleActivateBulkMode,
+    handleCancelBulkMode,
+    handleToggleBulkMode,
+    handleToggleSelectExpense,
+    handleToggleSelectIncome,
+    handleSelectAllExpenses,
+    handleSelectAllIncomes,
+    handleToggleSelectAll,
+    setIsBulkSelectMode,
+    setSelectedExpenseIds,
+    setSelectedIncomeIds,
+  } = useBulkSelection({
+    activeTab,
+    allSortedExpenses,
+    incomes: filteredAndSortedIncomes,
+  });
+
+  // ⚠️ REMOVED - Duplicate hook call (now initialized earlier before dialog registrations)
   
-  const handleClearSearch = () => {
-    setSearchQuery('');
-    setMatchedCategories(new Set());
-    setShowSuggestions(false);
-    setSelectedSuggestionIndex(-1);
-  };
+  // 🔒 Track all modal/drawer states and notify parent
+  useEffect(() => {
+    const isAnyModalOpen = 
+      !!editingExpenseId || 
+      !!editingIncomeId || 
+      showCategoryDrawer || 
+      isFilterDrawerOpen ||
+      actionSheetOpen ||
+      showSandbox ||
+      deleteConfirmOpen ||
+      showBulkDeleteDialog ||
+      showBulkEditCategoryDialog;
 
-  const handleSelectSuggestion = (suggestion: string) => {
-    setSearchQuery(suggestion);
-    setShowSuggestions(false);
-    setSelectedSuggestionIndex(-1);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Handle Ctrl/Cmd+A to select all text
-    if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-      e.preventDefault();
-      if (searchInputRef.current) {
-        searchInputRef.current.select();
-      }
-      return;
-    }
-    
-    if (!showSuggestions || suggestions.length === 0) return;
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        setSelectedSuggestionIndex(prev => 
-          prev < suggestions.length - 1 ? prev + 1 : prev
-        );
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
-        break;
-      case 'Enter':
-        e.preventDefault();
-        if (selectedSuggestionIndex >= 0) {
-          handleSelectSuggestion(suggestions[selectedSuggestionIndex]);
-        }
-        break;
-      case 'Escape':
-        setShowSuggestions(false);
-        setSelectedSuggestionIndex(-1);
-        break;
-    }
-  };
+    // Notify parent component (App.tsx) about modal state
+    onModalStateChange?.(isAnyModalOpen);
+  }, [
+    editingExpenseId, 
+    editingIncomeId, 
+    showCategoryDrawer, 
+    isFilterDrawerOpen,
+    actionSheetOpen,
+    showSandbox,
+    deleteConfirmOpen,
+    showBulkDeleteDialog,
+    showBulkEditCategoryDialog,
+    onModalStateChange
+  ]);
 
   const toggleExpanded = (id: string) => {
     setExpandedItems(prev => {
@@ -722,38 +646,7 @@ function ExpenseListComponent({
            date.getFullYear() === today.getFullYear();
   };
 
-  const isPast = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    date.setHours(0, 0, 0, 0);
-    return date < today;
-  };
-
-  // Bulk selection handlers (supports both expense and income tabs)
-  const handleActivateBulkMode = useCallback(() => {
-    setIsBulkSelectMode(true);
-    if (activeTab === 'expense') {
-      setSelectedExpenseIds(new Set());
-    } else {
-      setSelectedIncomeIds(new Set());
-    }
-  }, [activeTab]);
-
-  const handleCancelBulkMode = useCallback(() => {
-    setIsBulkSelectMode(false);
-    setSelectedExpenseIds(new Set());
-    setSelectedIncomeIds(new Set());
-  }, []);
-
-  // Toggle handler for ConsolidatedToolbar
-  const handleToggleBulkMode = useCallback(() => {
-    if (isBulkSelectMode) {
-      handleCancelBulkMode();
-    } else {
-      handleActivateBulkMode();
-    }
-  }, [isBulkSelectMode, handleCancelBulkMode, handleActivateBulkMode]);
+  
 
   // Phase 2: Handler to open sandbox with smart context
   const handleOpenSandbox = () => {
@@ -763,137 +656,9 @@ function ExpenseListComponent({
     setShowSandbox(true);
   };
 
-  // Advanced Filter handlers
-  const toggleCategoryFilter = (categoryId: string) => {
-    setSelectedCategoryFilters(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(categoryId)) {
-        newSet.delete(categoryId);
-      } else {
-        newSet.add(categoryId);
-      }
-      return newSet;
-    });
-  };
+ 
 
-  const togglePocketFilter = (pocketId: string) => {
-    setSelectedPocketFilters(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(pocketId)) {
-        newSet.delete(pocketId);
-      } else {
-        newSet.add(pocketId);
-      }
-      return newSet;
-    });
-  };
-
-  const toggleIncomeSourceFilter = (sourceName: string) => {
-    setSelectedIncomeSourceFilters(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sourceName)) {
-        newSet.delete(sourceName);
-      } else {
-        newSet.add(sourceName);
-      }
-      return newSet;
-    });
-  };
-
-  const applyFilters = () => {
-    // Copy temporary selections to active filters
-    setActiveFilters({
-      categories: new Set(selectedCategoryFilters),
-      pockets: new Set(selectedPocketFilters),
-      incomeSources: new Set(selectedIncomeSourceFilters),
-    });
-    
-    // Clear the pie chart category filter if advanced filter is active
-    if (selectedCategoryFilters.size > 0) {
-      setActiveCategoryFilter(new Set());
-    }
-    
-    // Close drawer
-    setIsFilterDrawerOpen(false);
-    
-    // Show success toast
-    const filterCount = selectedCategoryFilters.size + selectedPocketFilters.size + selectedIncomeSourceFilters.size;
-    if (filterCount > 0) {
-      toast.success(`✅ ${filterCount} filter diterapkan`);
-    }
-  };
-
-  const resetFilters = () => {
-    // Clear all selections
-    setSelectedCategoryFilters(new Set());
-    setSelectedPocketFilters(new Set());
-    setSelectedIncomeSourceFilters(new Set());
-    setActiveFilters({
-      categories: new Set(),
-      pockets: new Set(),
-      incomeSources: new Set(),
-    });
-    
-    // Clear existing category filter badge
-    setActiveCategoryFilter(new Set());
-    
-    // Close drawer
-    setIsFilterDrawerOpen(false);
-    
-    // Show toast
-    toast.info('🔄 Filter direset');
-  };
-
-  const handleToggleSelectExpense = (id: string) => {
-    setSelectedExpenseIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  };
-
-  const handleToggleSelectIncome = (id: string) => {
-    setSelectedIncomeIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  };
-
-  const handleSelectAllExpenses = () => {
-    // ✅ FIX: Use allSortedExpenses (combined array) instead of sortedAndFilteredExpenses object
-    const visibleExpenses = activeTab === 'expense' ? allSortedExpenses : [];
-    if (selectedExpenseIds.size === visibleExpenses.length) {
-      setSelectedExpenseIds(new Set());
-    } else {
-      setSelectedExpenseIds(new Set(visibleExpenses.map(exp => exp.id)));
-    }
-  };
-
-  const handleSelectAllIncomes = () => {
-    if (selectedIncomeIds.size === incomes.length) {
-      setSelectedIncomeIds(new Set());
-    } else {
-      setSelectedIncomeIds(new Set(incomes.map(inc => inc.id)));
-    }
-  };
-
-  // Unified handler for "Pilih semua" checkbox in toolbar
-  const handleToggleSelectAll = () => {
-    if (activeTab === 'expense') {
-      handleSelectAllExpenses();
-    } else {
-      handleSelectAllIncomes();
-    }
-  };
+  
 
   const handleBulkDeleteIncomes = async () => {
     if (selectedIncomeIds.size === 0 || !onDeleteIncome) return;
@@ -933,286 +698,9 @@ function ExpenseListComponent({
   
   const totalNetIncome = subtotalAfterIndividualDeductions - (globalDeduction || 0);
 
-  // ✅ IMPROVED: Fuzzy search for expenses - includes category matching and ALL history
-  const fuzzyMatchExpense = (expense: Expense, query: string): boolean => {
-    if (!query || !query.trim()) return true;
-    
-    const lowerQuery = query.toLowerCase();
-    
-    // Check expense name
-    if (expense.name.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    // Check items if they exist
-    if (expense.items && expense.items.length > 0) {
-      const itemMatch = expense.items.some(item => 
-        item.name.toLowerCase().includes(lowerQuery)
-      );
-      if (itemMatch) return true;
-    }
-    
-    // Check day name
-    const dayName = getDayName(expense.date);
-    if (dayName.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    // Check date number
-    const dateNumber = getDateNumber(expense.date);
-    if (dateNumber.includes(lowerQuery)) {
-      return true;
-    }
-    
-    // ✅ NEW: Check category name
-    if (expense.category) {
-      const categoryLabel = getCategoryLabel(expense.category as any, settings);
-      if (categoryLabel.toLowerCase().includes(lowerQuery)) {
-        return true;
-      }
-    }
-    
-    // ✅ NEW: Check pocket name
-    const pocketName = getPocketName(expense.pocketId);
-    if (pocketName.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    return false;
-  };
+ 
+
   
-  // ✅ NEW: Fuzzy search for incomes - includes ALL history
-  const fuzzyMatchIncome = (income: AdditionalIncome, query: string): boolean => {
-    if (!query || !query.trim()) return true;
-    
-    const lowerQuery = query.toLowerCase();
-    
-    // Check income name
-    if (income.name.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    // Check day name
-    const dayName = getDayName(income.date);
-    if (dayName.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    // Check date number
-    const dateNumber = getDateNumber(income.date);
-    if (dateNumber.includes(lowerQuery)) {
-      return true;
-    }
-    
-    // Check pocket name
-    const pocketName = getPocketName(income.pocketId);
-    if (pocketName.toLowerCase().includes(lowerQuery)) {
-      return true;
-    }
-    
-    return false;
-  };
-
-  // Phase 7: Filter by category first, then by tab (expense/income), then by date
-  const categoryFilteredExpenses = useMemo(() => {
-    let filtered = expenses;
-    
-    // Filter by tab (expense or income)
-    filtered = filtered.filter(expense => {
-      if (activeTab === 'expense') {
-        return !expense.fromIncome; // Show only expenses
-      } else {
-        return expense.fromIncome; // Show only income
-      }
-    });
-    
-    // ✅ NEW: Advanced Category Filter (multi-select) - takes priority
-    if (activeFilters.categories.size > 0) {
-      filtered = filtered.filter(expense => {
-        // ✅ Support filtering by item-level categories (template expenses)
-        if (expense.items && expense.items.length > 0) {
-          // Check if ANY item matches the filter
-          return expense.items.some(item => {
-            const rawCategory = ((item as any).category || 'other') as string;
-            const normalizedCategory = normalizeCategoryId(rawCategory); // 🔧 Normalize!
-            return activeFilters.categories.has(normalizedCategory);
-          });
-        } else {
-          // Check expense-level category (regular expenses)
-          const rawCategory = (expense.category || 'other') as string;
-          const normalizedCategory = normalizeCategoryId(rawCategory); // 🔧 Normalize!
-          return activeFilters.categories.has(normalizedCategory);
-        }
-      });
-    }
-    // Legacy: Then filter by category if needed (combine categoryFilter from props and activeCategoryFilter from breakdown)
-    // Only apply if advanced filter is NOT active
-    else {
-      const combinedFilter = new Set([...Array.from(categoryFilter), ...Array.from(activeCategoryFilter)]);
-      if (combinedFilter.size > 0) {
-        filtered = filtered.filter(expense => {
-          // ✅ NEW: Support filtering by item-level categories (template expenses)
-          if (expense.items && expense.items.length > 0) {
-            // Check if ANY item matches the filter
-            return expense.items.some(item => {
-              const rawCategory = ((item as any).category || 'other');
-              const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
-              return combinedFilter.has(normalizedCategory);
-            });
-          } else {
-            // Check expense-level category (regular expenses)
-            const rawCategory = (expense.category || 'other');
-            const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
-            return combinedFilter.has(normalizedCategory);
-          }
-        });
-      }
-    }
-    
-    // ��� NEW: Advanced Pocket Filter (multi-select, expense only)
-    if (activeFilters.pockets.size > 0 && activeTab === 'expense') {
-      filtered = filtered.filter(expense => {
-        return expense.pocketId && activeFilters.pockets.has(expense.pocketId);
-      });
-    }
-    
-    return filtered;
-  }, [expenses, categoryFilter, activeCategoryFilter, activeTab, activeFilters]);
-
-  // ✅ IMPROVED: Sort and filter expenses - no date restriction, with category filter
-  // ⚠️ CRITICAL: sortOrder ONLY applies to "Hari Ini & Mendatang" section
-  // History section is ALWAYS sorted desc (newest first)
-  const sortedAndFilteredExpenses = useMemo(() => {
-    if (activeTab !== 'expense') return [];
-    
-    let filtered = [...categoryFilteredExpenses];
-    
-    // ✅ NEW: If category detected AND user is searching, show all from that category OR match search
-    if (matchedCategories.size > 0 && searchQuery.trim()) {
-      filtered = filtered.filter(expense => {
-        // ✅ Support item-level categories (template expenses)
-        let categoryMatches = false;
-        
-        if (expense.items && expense.items.length > 0) {
-          // Check if ANY item's category matches
-          categoryMatches = expense.items.some(item => {
-            const rawCategory = ((item as any).category || 'other');
-            const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
-            return matchedCategories.has(normalizedCategory);
-          });
-        } else {
-          // Check expense-level category
-          const rawCategory = (expense.category || 'other');
-          const normalizedCategory = normalizeCategoryId(rawCategory) as import('../types').ExpenseCategory; // 🔧 Normalize!
-          categoryMatches = matchedCategories.has(normalizedCategory);
-        }
-        
-        // Show if category matches OR if search text matches
-        return categoryMatches || fuzzyMatchExpense(expense, searchQuery);
-      });
-    } else {
-      // Regular search filter
-      filtered = filtered.filter((expense) => fuzzyMatchExpense(expense, searchQuery));
-    }
-    
-    // ✅ NEW LOGIC: Split first, then sort separately
-    // Split into upcoming (today & future) and history (past)
-    const upcoming = filtered.filter(exp => !isPast(exp.date));
-    const history = filtered.filter(exp => isPast(exp.date));
-    
-    // Sort upcoming based on user preference (sortOrder)
-    const sortedUpcoming = upcoming.sort((a, b) => {
-      const dateCompare = sortOrder === 'asc' 
-        ? new Date(a.date).getTime() - new Date(b.date).getTime() 
-        : new Date(b.date).getTime() - new Date(a.date).getTime();
-      
-      // If dates are the same, prioritize template expenses (with items)
-      if (dateCompare === 0) {
-        const aHasItems = a.items && a.items.length > 0;
-        const bHasItems = b.items && b.items.length > 0;
-        
-        // Template expenses (with items) come first
-        if (aHasItems && !bHasItems) return -1;
-        if (!aHasItems && bHasItems) return 1;
-        return 0;
-      }
-      
-      return dateCompare;
-    });
-    
-    // Sort history ALWAYS desc (newest first) - fixed, not affected by sortOrder
-    const sortedHistory = history.sort((a, b) => {
-      const dateCompare = new Date(b.date).getTime() - new Date(a.date).getTime();
-      
-      if (dateCompare === 0) {
-        const aHasItems = a.items && a.items.length > 0;
-        const bHasItems = b.items && b.items.length > 0;
-        
-        if (aHasItems && !bHasItems) return -1;
-        if (!aHasItems && bHasItems) return 1;
-        return 0;
-      }
-      
-      return dateCompare;
-    });
-    
-    // Combine: upcoming first, then history
-    const combined = [...sortedUpcoming, ...sortedHistory];
-    
-    // ⚠️ Return object dengan upcoming & history terpisah untuk menghindari re-filter
-    return { sortedUpcoming, sortedHistory, combined };
-  }, [categoryFilteredExpenses, sortOrder, searchQuery, matchedCategories, activeTab]);
-
-  // ✅ Extract from useMemo result
-  const upcomingExpenses = sortedAndFilteredExpenses.sortedUpcoming || [];
-  const historyExpenses = sortedAndFilteredExpenses.sortedHistory || [];
-  const allSortedExpenses = sortedAndFilteredExpenses.combined || [];
-
-  // ✅ NEW: Filter and sort incomes (with income source filter)
-  const filteredAndSortedIncomes = useMemo(() => {
-    let filtered = [...incomes];
-    
-    // Apply income source filter
-    if (activeFilters.incomeSources.size > 0) {
-      filtered = filtered.filter(income => activeFilters.incomeSources.has(income.name));
-    }
-    
-    // Apply search filter
-    filtered = filtered.filter(income => fuzzyMatchIncome(income, searchQuery));
-    
-    // Sort by date (newest first by default)
-    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [incomes, activeFilters.incomeSources, searchQuery]);
-
-  // Check if all filtered expenses are selected
-  const isAllSelected = useMemo(() => {
-    return allSortedExpenses.length > 0 && 
-           selectedExpenseIds.size === allSortedExpenses.length &&
-           allSortedExpenses.every(exp => selectedExpenseIds.has(exp.id));
-  }, [selectedExpenseIds, allSortedExpenses]);
-
-  // Bulk select handlers with useCallback for performance - REMOVED (using handlers defined above that support both expense and income)
-
-  const handleToggleExpense = useCallback((id: string) => {
-    setSelectedExpenseIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    if (isAllSelected) {
-      setSelectedExpenseIds(new Set());
-    } else {
-      const allIds = new Set(allSortedExpenses.map(exp => exp.id));
-      setSelectedExpenseIds(allIds);
-    }
-  }, [isAllSelected, sortedAndFilteredExpenses]);
 
   const handleBulkDelete = useCallback(() => {
     if (selectedExpenseIds.size === 0) return;
@@ -1258,20 +746,7 @@ function ExpenseListComponent({
     }
   }, [onBulkUpdateCategory]);
 
-  // Auto-exit bulk mode when expenses change (e.g., month change)
-  useEffect(() => {
-    if (isBulkSelectMode) {
-      // Keep selections valid - remove any that no longer exist
-      const validIds = new Set(
-        Array.from(selectedExpenseIds).filter(id => 
-          expenses.some(exp => exp.id === id)
-        )
-      );
-      if (validIds.size !== selectedExpenseIds.size) {
-        setSelectedExpenseIds(validIds);
-      }
-    }
-  }, [expenses, isBulkSelectMode, selectedExpenseIds]);
+ 
 
   // Keyboard support: Escape to exit bulk mode / close search / close drawer
   useEffect(() => {
@@ -1318,40 +793,16 @@ function ExpenseListComponent({
     }
   }, [showCategoryDrawer]);
 
-  const handleEditExpense = (id: string) => {
-    const expense = expenses.find(e => e.id === id);
-    if (expense) {
-      setEditingExpenseId(id);
-      // ✅ FIX: Extract LOCAL date (not UTC) for timezone consistency
-      const dateOnly = expense.date ? getLocalDateFromISO(expense.date) : expense.date;
-      setEditingExpense({ 
-        name: expense.name, 
-        amount: expense.amount, 
-        date: dateOnly, 
-        items: expense.items ? [...expense.items] : [], 
-        color: expense.color || '',
-        fromIncome: expense.fromIncome,
-        currency: expense.currency,
-        originalAmount: expense.originalAmount,
-        exchangeRate: expense.exchangeRate,
-        conversionType: expense.conversionType,
-        deduction: expense.deduction,
-        pocketId: expense.pocketId,
-        groupId: expense.groupId,  // Preserve groupId
-        category: expense.category,  // 🔧 CRITICAL FIX: Include category!
-        emoji: (expense as any).emoji  // 🔧 FIX: Preserve template emoji
-      });
-      // Initialize input strings for items
-      const initialInputs: { [index: number]: string } = {};
-      expense.items?.forEach((item, index) => {
-        initialInputs[index] = item.amount.toString();
-      });
-      setItemAmountInputs(initialInputs);
-    }
+  // ⚠️ DEPRECATED - This handler logic now exists in useExpenseActions hook
+  // TODO: Remove after all references updated to use hook handler
+  const handleEditExpense_DEPRECATED = (id: string) => {
+    // Now handled by useExpenseActions hook - call hook's handler instead
+    handleEditExpense(id);
   };
 
   // 📱 Mobile Bottom Sheet Handlers
-  const handleLongPressItem = useCallback((id: string, type: 'expense' | 'income') => {
+  // ⚠️ These still use old state - will be migrated gradually
+  const handleLongPressItem_OLD = useCallback((id: string, type: 'expense' | 'income') => {
     if (isBulkSelectMode) return; // Skip if in bulk mode
     
     if (type === 'expense') {
@@ -1378,124 +829,11 @@ function ExpenseListComponent({
     }
   }, [isBulkSelectMode, expenses, incomes]);
 
-  const handleSheetEdit = useCallback(() => {
-    if (!actionSheetItem) return;
-    
-    if (actionSheetItem.type === 'expense') {
-      handleEditExpense(actionSheetItem.id);
-    } else {
-      // Income edit
-      const income = incomes.find(i => i.id === actionSheetItem.id);
-      if (income) {
-        setEditingIncomeId(income.id);
-        setEditingIncome(income);
-      }
-    }
-  }, [actionSheetItem, incomes]);
+ 
 
-  const handleSheetDelete = useCallback(() => {
-    if (!actionSheetItem) return;
-    
-    if (actionSheetItem.type === 'expense') {
-      const expense = expenses.find(e => e.id === actionSheetItem.id);
-      if (expense) {
-        setExpenseToDelete({ 
-          id: expense.id, 
-          name: expense.name, 
-          amount: expense.amount 
-        });
-        setDeleteConfirmOpen(true);
-      }
-    } else {
-      // Income delete
-      onDeleteIncome?.(actionSheetItem.id);
-    }
-  }, [actionSheetItem, expenses, onDeleteIncome]);
-
-  const handleSheetMoveToIncome = useCallback(() => {
-    if (!actionSheetItem || actionSheetItem.type !== 'expense') return;
-    
-    const expense = expenses.find(e => e.id === actionSheetItem.id);
-    if (expense && expense.fromIncome) {
-      onMoveToIncome?.(expense);
-    }
-  }, [actionSheetItem, expenses, onMoveToIncome]);
-
-  const handleSaveEditExpense = async () => {
-    if (editingExpenseId) {
-      // Recalculate amount if items exist
-      let finalAmount = editingExpense.amount;
-      if (editingExpense.items && editingExpense.items.length > 0) {
-        finalAmount = editingExpense.items.reduce((sum, item) => sum + item.amount, 0);
-      }
-      
-      // ✅ FIX: Keep date in YYYY-MM-DD format (use local date, not UTC)
-      const finalDate = editingExpense.date?.includes('T')
-        ? getLocalDateFromISO(editingExpense.date)
-        : editingExpense.date;
-      
-      console.log('[ExpenseList] Saving edit - Category:', editingExpense.category);
-      
-      setIsUpdatingExpense(true);
-      try {
-        // 🔧 FIX: Include category and emoji in update
-        await onEditExpense(editingExpenseId, { 
-          ...editingExpense, 
-          amount: finalAmount,
-          date: finalDate,
-          category: editingExpense.category, // ← CRITICAL: Include category
-          emoji: editingExpense.emoji // ← CRITICAL: Preserve template emoji
-        });
-        
-        // 🔧 FIX: Close dialog ONLY after successful update
-        setEditingExpenseId(null);
-        setEditingExpense({ 
-          name: '', 
-          amount: 0, 
-          date: '', 
-          items: [], 
-          color: '', 
-          fromIncome: undefined,
-          currency: undefined,
-          originalAmount: undefined,
-          exchangeRate: undefined,
-          conversionType: undefined,
-          deduction: undefined,
-          pocketId: undefined,
-          groupId: undefined,
-          category: undefined, // ← Add category to reset state
-          emoji: undefined // ← Add emoji to reset state
-        });
-      } catch (error) {
-        console.error('Error updating expense:', error);
-        // Error toast already shown by parent handler
-      } finally {
-        setIsUpdatingExpense(false);
-      }
-    }
-  };
-
-  const handleCloseEditDialog = () => {
-    setEditingExpenseId(null);
-    setEditingExpense({ 
-      name: '', 
-      amount: 0, 
-      date: '', 
-      items: [], 
-      color: '', 
-      fromIncome: undefined,
-      currency: undefined,
-      originalAmount: undefined,
-      exchangeRate: undefined,
-      conversionType: undefined,
-      deduction: undefined,
-      pocketId: undefined,
-      groupId: undefined,
-      category: undefined,
-      emoji: undefined
-    });
-    setItemAmountInputs({});
-  };
+  // ⚠️ DEPRECATED - Use handleCloseEditExpense from hook instead
+  // Keeping as alias temporarily for backward compatibility
+  const handleCloseEditDialog = handleCloseEditExpense;
 
   // Evaluate math expression
   const evaluateMathExpression = (expression: string): number => {
@@ -1620,12 +958,15 @@ function ExpenseListComponent({
     return grouped;
   };
 
+  // ⚠️ REMOVED - Now handled by useExpenseFiltering hook (filteredAndSortedIncomes)
+  /*
   // ✅ NEW: Filter incomes with search (CONTEXTUAL for income tab)
   const filteredIncomes = useMemo(() => {
     if (activeTab !== 'income') return incomes;
     
     return incomes.filter((income) => fuzzyMatchIncome(income, searchQuery));
   }, [incomes, searchQuery, activeTab]);
+  */
 
   // ⚠️ REMOVED duplicate split - already handled in useMemo above
   // upcomingExpenses and historyExpenses are now extracted from sortedAndFilteredExpenses
@@ -1764,7 +1105,7 @@ function ExpenseListComponent({
                       {isBulkSelectMode && (
                         <Checkbox
                           checked={selectedExpenseIds.has(expense.id)}
-                          onCheckedChange={() => handleToggleExpense(expense.id)}
+                          onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                           onClick={(e) => e.stopPropagation()}
                           className="mt-0.5"
                         />
@@ -1832,7 +1173,7 @@ function ExpenseListComponent({
                     {isBulkSelectMode && (
                       <Checkbox
                         checked={selectedExpenseIds.has(expense.id)}
-                        onCheckedChange={() => handleToggleExpense(expense.id)}
+                        onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                         onClick={(e) => e.stopPropagation()}
                       />
                     )}
@@ -1992,7 +1333,7 @@ function ExpenseListComponent({
                 {isBulkSelectMode && (
                   <Checkbox
                     checked={selectedExpenseIds.has(expense.id)}
-                    onCheckedChange={() => handleToggleExpense(expense.id)}
+                    onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                     className="mt-0.5"
                   />
                 )}
@@ -2072,7 +1413,7 @@ function ExpenseListComponent({
               {isBulkSelectMode && (
                 <Checkbox
                   checked={selectedExpenseIds.has(expense.id)}
-                  onCheckedChange={() => handleToggleExpense(expense.id)}
+                  onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                 />
               )}
               <div>
@@ -2193,7 +1534,7 @@ function ExpenseListComponent({
                   {isBulkSelectMode && (
                     <Checkbox
                       checked={selectedExpenseIds.has(expense.id)}
-                      onCheckedChange={() => handleToggleExpense(expense.id)}
+                      onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
                   )}
@@ -2350,7 +1691,7 @@ function ExpenseListComponent({
             {isBulkSelectMode && (
               <Checkbox
                 checked={selectedExpenseIds.has(expense.id)}
-                onCheckedChange={() => handleToggleExpense(expense.id)}
+                onCheckedChange={() => handleToggleSelectExpense(expense.id)}
                 className="border-neutral-400 data-[state=checked]:border-primary"
               />
             )}
@@ -3705,13 +3046,15 @@ function ExpenseListComponent({
 
       {/* Bulk Edit Category Dialog */}
       {onBulkUpdateCategory && (
-        <BulkEditCategoryDialog
-          open={showBulkEditCategoryDialog}
-          onOpenChange={setShowBulkEditCategoryDialog}
-          selectedExpenseIds={Array.from(selectedExpenseIds)}
-          expenses={expenses}
-          onUpdate={handleConfirmBulkEditCategory}
-        />
+        <Suspense fallback={<div className="hidden" />}>
+          <BulkEditCategoryDialog
+            open={showBulkEditCategoryDialog}
+            onOpenChange={setShowBulkEditCategoryDialog}
+            selectedExpenseIds={Array.from(selectedExpenseIds)}
+            expenses={expenses}
+            onUpdate={handleConfirmBulkEditCategory}
+          />
+        </Suspense>
       )}
       
       {/* Category Breakdown - Now handles its own Dialog/Drawer with Insight Boxes */}
@@ -3857,60 +3200,66 @@ function ExpenseListComponent({
       )}
       
       {/* Phase 2: Simulation Sandbox */}
-      <SimulationSandbox
-        isOpen={showSandbox}
-        onClose={() => setShowSandbox(false)}
-        expenses={expenses}
-        incomes={incomes}
-        initialTab={sandboxContext}
-        globalDeduction={globalDeduction}
-        initialBudget={initialBudget}
-        carryOverAssets={carryOverAssets}
-        carryOverLiabilities={carryOverLiabilities}
-      />
+      <Suspense fallback={<div className="hidden" />}>
+        <SimulationSandbox
+          isOpen={showSandbox}
+          onClose={() => setShowSandbox(false)}
+          expenses={expenses}
+          incomes={incomes}
+          initialTab={sandboxContext}
+          globalDeduction={globalDeduction}
+          initialBudget={initialBudget}
+          carryOverAssets={carryOverAssets}
+          carryOverLiabilities={carryOverLiabilities}
+        />
+      </Suspense>
       
       {/* ✅ NEW: Advanced Filter Drawer */}
-      <AdvancedFilterDrawer
-        open={isFilterDrawerOpen}
-        onOpenChange={setIsFilterDrawerOpen}
-        activeTab={activeTab}
-        selectedCategories={selectedCategoryFilters}
-        onCategoryToggle={toggleCategoryFilter}
-        selectedPockets={selectedPocketFilters}
-        onPocketToggle={togglePocketFilter}
-        selectedIncomeSources={selectedIncomeSourceFilters}
-        onIncomeSourceToggle={toggleIncomeSourceFilter}
-        onApply={applyFilters}
-        onReset={resetFilters}
-        allCategories={allCategories}
-        allPockets={pockets.map(p => {
-          const balance = Array.isArray(balances) 
-            ? (balances.find(b => b.pocketId === p.id)?.availableBalance || 0)
-            : 0;
-          return {
-            id: p.id,
-            name: p.name,
-            emoji: p.emoji || '💰',
-            balance: balance,
-            isActive: true
-          };
-        })}
-        allIncomeSources={allIncomeSources}
-        settings={settings}
-      />
+      <Suspense fallback={<div className="hidden" />}>
+        <AdvancedFilterDrawer
+          open={isFilterDrawerOpen}
+          onOpenChange={setIsFilterDrawerOpen}
+          activeTab={activeTab}
+          selectedCategories={selectedCategoryFilters}
+          onCategoryToggle={toggleCategoryFilter}
+          selectedPockets={selectedPocketFilters}
+          onPocketToggle={togglePocketFilter}
+          selectedIncomeSources={selectedIncomeSourceFilters}
+          onIncomeSourceToggle={toggleIncomeSourceFilter}
+          onApply={applyFilters}
+          onReset={resetFilters}
+          allCategories={allCategories}
+          allPockets={pockets.map(p => {
+            const balance = Array.isArray(balances) 
+              ? (balances.find(b => b.pocketId === p.id)?.availableBalance || 0)
+              : 0;
+            return {
+              id: p.id,
+              name: p.name,
+              emoji: p.emoji || '💰',
+              balance: balance,
+              isActive: true
+            };
+          })}
+          allIncomeSources={allIncomeSources}
+          settings={settings}
+        />
+      </Suspense>
 
       {/* 📱 Mobile Bottom Sheet for Item Actions */}
       {actionSheetItem && (
-        <ItemActionSheet
-          open={actionSheetOpen}
-          onOpenChange={setActionSheetOpen}
-          itemName={actionSheetItem.name}
-          itemType={actionSheetItem.type}
-          onEdit={handleSheetEdit}
-          onDelete={handleSheetDelete}
-          showMoveToIncome={actionSheetItem.type === 'expense' && actionSheetItem.fromIncome === true}
-          onMoveToIncome={handleSheetMoveToIncome}
-        />
+        <Suspense fallback={<div className="hidden" />}>
+          <ItemActionSheet
+            open={actionSheetOpen}
+            onOpenChange={setActionSheetOpen}
+            itemName={actionSheetItem.name}
+            itemType={actionSheetItem.type}
+            onEdit={handleSheetEdit}
+            onDelete={handleSheetDelete}
+            showMoveToIncome={actionSheetItem.type === 'expense' && actionSheetItem.fromIncome === true}
+            onMoveToIncome={handleSheetMoveToIncome}
+          />
+        </Suspense>
       )}
     </Card>
   );

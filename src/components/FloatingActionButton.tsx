@@ -28,7 +28,7 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 // Custom hook for scroll detection
-function useScrollDetection() {
+function useScrollDetection(fabRef: React.RefObject<HTMLDivElement>) {
   const [isScrolling, setIsScrolling] = useState(false);
   const [isTouching, setIsTouching] = useState(false);
   const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -56,11 +56,19 @@ function useScrollDetection() {
       }, idleDelay);
     };
     
-    const handleTouchStart = () => {
+    const handleTouchStart = (e: TouchEvent) => {
+      // ✅ FIX: Ignore touches on FAB to prevent false scroll detection
+      if (fabRef.current && fabRef.current.contains(e.target as Node)) {
+        return;
+      }
       setIsTouching(true);
     };
     
-    const handleTouchEnd = () => {
+    const handleTouchEnd = (e: TouchEvent) => {
+      // ✅ FIX: Ignore touches on FAB to prevent false scroll detection
+      if (fabRef.current && fabRef.current.contains(e.target as Node)) {
+        return;
+      }
       setIsTouching(false);
       
       // Trigger recheck scroll state after touch end
@@ -92,7 +100,7 @@ function useScrollDetection() {
         clearTimeout(idleTimeoutRef.current);
       }
     };
-  }, [isTouching, isScrolling]);
+  }, [isTouching, isScrolling, fabRef]);
   
   return isScrolling || isTouching;
 }
@@ -116,8 +124,8 @@ export function FloatingActionButton({
   });
   const [isDragging, setIsDragging] = useState(false);
   const [snapBackX, setSnapBackX] = useState(0);
-  const isScrolling = useScrollDetection();
-  const fabRef = useRef<HTMLDivElement>(null);
+  const fabRef = useRef<HTMLDivElement>(null); // ✅ FIX: Move ref declaration before usage
+  const isScrolling = useScrollDetection(fabRef);
   
   // Save FAB side preference to localStorage whenever it changes
   useEffect(() => {
@@ -172,7 +180,11 @@ export function FloatingActionButton({
   }, [isDragging]);
 
   // Toggle manual hide
-  const toggleManualHide = useCallback(() => {
+  const toggleManualHide = useCallback((e?: React.MouseEvent | React.TouchEvent) => {
+    // ✅ FIX: Prevent event propagation to avoid conflicts
+    e?.preventDefault();
+    e?.stopPropagation();
+    
     setIsManuallyHidden(prev => !prev);
     if (isExpanded) {
       setIsExpanded(false);
@@ -423,6 +435,10 @@ export function FloatingActionButton({
         {/* Chevron Toggle Button - JAM 10.30, Hidden when expanded */}
         <motion.button
           onClick={toggleManualHide}
+          onPointerDown={(e) => {
+            // ✅ FIX: Stop propagation to prevent drag on parent
+            e.stopPropagation();
+          }}
           className={cn(
             "absolute",
             "w-6 h-6", // 24×24px - Perfect square base
@@ -440,6 +456,7 @@ export function FloatingActionButton({
             minWidth: '24px',     // Prevent shrink
             minHeight: '24px',    // Prevent shrink
             pointerEvents: isExpanded ? 'none' : 'auto' // Disable clicks when hidden
+            // ✅ REMOVED touchAction: 'none' - let parent handle it
           }}
           animate={{
             left: '50%',

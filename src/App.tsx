@@ -57,7 +57,6 @@ import { useCategorySettings } from "./hooks/useCategorySettings";
 import { DialogStackProvider } from "./contexts/DialogStackContext";
 import { useMobileBackButton } from "./hooks/useMobileBackButton";
 import { usePullToRefresh } from "./hooks/usePullToRefresh";
-import { usePreventPullToRefresh } from "./hooks/usePreventPullToRefresh";
 import { PullToRefreshIndicator } from "./components/PullToRefreshIndicator";
 import { useIsMobile } from "./components/ui/use-mobile";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -285,15 +284,15 @@ function AppContent() {
   // ✨ NEW: Wishlist Dialog State (for Tab 2 - Pockets view)
   const [showWishlistDialog, setShowWishlistDialog] = useState(false);
   const [wishlistPocket, setWishlistPocket] = useState<Pocket | null>(null);
+  
+  // 🔒 NEW: Modal/Drawer State Tracker (for pull-to-refresh control)
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Category Settings Hook
   const { settings: categorySettings } = useCategorySettings();
 
   const baseUrl = getBaseUrl(projectId);
   const isMobile = useIsMobile();
-  
-  // 📱 Prevent pull-to-refresh on mobile when wishlist drawer is open
-  usePreventPullToRefresh(showWishlistDialog);
 
   // Pull to Refresh handler - refresh all data
   const handlePullToRefresh = useCallback(async () => {
@@ -318,9 +317,18 @@ function AppContent() {
   }, [selectedYear, selectedMonth, fetchBudgetData, fetchPockets, refreshPockets]);
 
   // Pull to Refresh hook (mobile only)
+  // ✅ Disabled when ANY modal/drawer is open to prevent conflict
+  const hasAnyModalOpen = 
+    isModalOpen || // ExpenseList drawers (tracked via onModalStateChange)
+    showWishlistDialog || // Wishlist dialog (Tab 2)
+    showTimelineDrawer || // Timeline drawer (Tab 2)
+    openIncomeBreakdownFromCard || // Income breakdown drawer
+    isTransferDialogOpen || // Transfer between pockets dialog
+    isManagePocketsDialogOpen; // Manage pockets dialog
+  
   const pullToRefreshState = usePullToRefresh({
     onRefresh: handlePullToRefresh,
-    enabled: isMobile,
+    enabled: isMobile && !hasAnyModalOpen,
     threshold: 80,
     maxPullDistance: 120,
     resistance: 0.5,
@@ -1661,6 +1669,8 @@ function AppContent() {
               // ✨ NEW: Smart shortcut - External category breakdown control
               externalOpenCategoryBreakdown={openCategoryBreakdownFromCard}
               onCategoryBreakdownClose={() => setOpenCategoryBreakdownFromCard(false)}
+              // 🔒 NEW: Modal state tracking (for pull-to-refresh control)
+              onModalStateChange={setIsModalOpen}
             />
           </motion.div>
             </>

@@ -6572,8 +6572,15 @@ html {
   font-size: var(--font-size);
 }
 
-body.drawer-open {
-  overscroll-behavior-y: contain;
+body[data-vaul-drawer-visible="true"], html:has(body[data-vaul-drawer-visible="true"]), body.drawer-open {
+  overscroll-behavior: contain;
+  touch-action: none;
+  overflow: hidden;
+}
+
+[data-vaul-drawer-visible="true"] [data-vaul-drawer], [data-vaul-drawer-visible="true"] [data-slot="drawer-content"] {
+  touch-action: pan-y;
+  overflow-y: auto;
 }
 
 @media (width <= 768px) {

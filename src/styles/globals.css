@@ -190,9 +190,41 @@ html {
   font-size: var(--font-size);
 }
 
-/* Prevent pull-to-refresh when drawer is open (mobile optimization) */
+/* ============================================
+   🔒 SCROLL LOCK - Drawer/Dialog Protection
+   ============================================
+   Mencegah pull-to-refresh dan scroll propagation 
+   saat drawer atau dialog terbuka.
+   
+   Vaul library otomatis menambahkan atribut:
+   - [data-vaul-drawer-visible="true"] ke body saat drawer open
+*/
+
+/* 1️⃣ Primary: Vaul drawer scroll lock */
+body[data-vaul-drawer-visible="true"],
+html:has(body[data-vaul-drawer-visible="true"]) {
+  /* 🛑 Mencegah overscroll/pull-to-refresh "bocor" ke halaman */
+  overscroll-behavior: contain;
+  
+  /* 🛑 Nonaktifkan touch gesture di body (halaman di belakang drawer) */
+  touch-action: none;
+  
+  /* 🛑 Kunci scroll halaman (cadangan jika library gagal) */
+  overflow: hidden;
+}
+
+/* 2️⃣ Cadangan: Manual class jika diperlukan */
 body.drawer-open {
-  overscroll-behavior-y: contain;
+  overscroll-behavior: contain;
+  touch-action: none;
+  overflow: hidden;
+}
+
+/* ✅ PENTING: Drawer content sendiri harus tetap scrollable */
+[data-vaul-drawer-visible="true"] [data-vaul-drawer],
+[data-vaul-drawer-visible="true"] [data-slot="drawer-content"] {
+  touch-action: pan-y; /* Allow vertical scroll inside drawer */
+  overflow-y: auto;
 }
 
 /* Mobile Touch Optimization */

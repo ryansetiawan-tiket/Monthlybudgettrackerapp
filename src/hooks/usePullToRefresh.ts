@@ -67,10 +67,8 @@ export function usePullToRefresh({
 
     // Only pull down (positive deltaY) and only when at top
     if (deltaY > 0 && window.scrollY === 0) {
-      // Prevent default scroll behavior when pulling
-      if (deltaY > 10) {
-        e.preventDefault();
-      }
+      // ✅ FIX BUG 2: Prevent default IMMEDIATELY to avoid jittery scroll
+      e.preventDefault();
 
       // Apply resistance to make it feel natural
       const resistedDistance = Math.min(
@@ -137,8 +135,8 @@ export function usePullToRefresh({
   useEffect(() => {
     if (!enabled || !isMobile) return;
 
-    // Use passive: false to allow preventDefault
-    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    // ✅ FIX BUG 1: passive: false untuk touchstart agar bisa preventDefault
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
     document.addEventListener('touchmove', handleTouchMove, { passive: false });
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
