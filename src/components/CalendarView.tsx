@@ -358,7 +358,7 @@ export function CalendarView({
         </div>
 
         {/* Insight Bars Container - Properly aligned */}
-        <div className="space-y-3">
+        <div className="space-y-3 px-4">
           {/* Insight Bar - Highest Spending Day (Mobile-Optimized: NO truncate!) */}
           {hasHighestSpending && (
             <motion.button

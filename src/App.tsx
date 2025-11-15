@@ -237,6 +237,7 @@ function AppContent() {
   const [isIncomeDialogOpen, setIsIncomeDialogOpen] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false); // Desktop unified dialog
+  const [isCalendarDialogOpen, setIsCalendarDialogOpen] = useState(false); // Desktop calendar view
   const [managePocketsInitialMode, setManagePocketsInitialMode] = useState<'list' | 'create'>('list');
   
   // ✨ NEW: Smart shortcut - Category Breakdown state
@@ -1555,6 +1556,7 @@ function AppContent() {
                   selectedMonth={selectedMonth}
                   selectedYear={selectedYear}
                   onMonthChange={handleMonthChange}
+                  onCalendarClick={() => startTransition(() => setIsCalendarDialogOpen(true))}
                   onSettingsClick={() => startTransition(() => setIsBudgetDialogOpen(true))}
                 />
               </motion.div>
@@ -1884,6 +1886,38 @@ function AppContent() {
             />
           )}
         </Suspense>
+        
+        {/* Desktop: Calendar View Dialog */}
+        {!isMobile && (
+          <Dialog open={isCalendarDialogOpen} onOpenChange={setIsCalendarDialogOpen}>
+            <DialogContent className="max-w-[95vw] w-[95vw] h-[95vh] max-h-[95vh] p-6 overflow-hidden flex flex-col" aria-describedby={undefined}>
+              <DialogHeader className="flex-shrink-0">
+                <DialogTitle>Kalender Transaksi</DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto -mx-6 px-6">
+                <Suspense fallback={<DialogSkeleton />}>
+                  <CalendarView
+                    month={`${selectedYear}-${String(selectedMonth).padStart(2, '0')}`}
+                    expenses={expenses}
+                    incomes={additionalIncomes}
+                    pockets={pockets}
+                    settings={categorySettings}
+                    onClose={() => setIsCalendarDialogOpen(false)}
+                    onEditExpense={handleEditExpense}
+                    onDeleteExpense={handleDeleteExpense}
+                    onEditIncome={handleUpdateIncome}
+                    onDeleteIncome={handleDeleteIncome}
+                    onMonthChange={(year, month) => {
+                      setSelectedYear(year);
+                      setSelectedMonth(month);
+                    }}
+                    embedded={false} // ✅ DIALOG MODE: Fullscreen mode in dialog
+                  />
+                </Suspense>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
         
         {/* ✨ NEW: Income Breakdown Dialog */}
         <IncomeBreakdown
