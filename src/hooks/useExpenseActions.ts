@@ -128,7 +128,7 @@ export function useExpenseActions({
         deduction: expense.deduction,
         pocketId: expense.pocketId,
         groupId: expense.groupId, // Preserve groupId
-        category: expense.category, // 🔧 CRITICAL FIX: Include category!
+        category: expense.category, //  CRITICAL FIX: Include category!
         emoji: (expense as any).emoji, // 🔧 FIX: Preserve template emoji
       });
       // Initialize input strings for items
@@ -336,12 +336,15 @@ export function useExpenseActions({
     itemAmountInputs,
     setItemAmountInputs,
     isUpdatingExpense,
+    setIsUpdatingExpense,
 
     // Edit income state
     editingIncomeId,
+    setEditingIncomeId,
     editingIncome,
     setEditingIncome,
     isUpdatingIncome,
+    setIsUpdatingIncome,
 
     // Delete confirmation state
     deleteConfirmOpen,

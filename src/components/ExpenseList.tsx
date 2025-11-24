@@ -220,12 +220,15 @@ function ExpenseListComponent({
     editingExpense,
     setEditingExpense,
     editingIncomeId,
+    setEditingIncomeId,
     editingIncome,
     setEditingIncome,
     itemAmountInputs,
     setItemAmountInputs,
     isUpdatingExpense,
+    setIsUpdatingExpense,
     isUpdatingIncome,
+    setIsUpdatingIncome,
 
     // Delete states
     deleteConfirmOpen,

@@ -4,6 +4,16 @@ import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { toast } from "sonner@2.0.3";
 import { useIsMobile } from "./ui/use-mobile";
 import { WishlistSimulation } from "./WishlistSimulation";
+import { motion, AnimatePresence } from "motion/react";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Separator } from "./ui/separator";
+import { Switch } from "./ui/switch";
+import { Label } from "./ui/label";
+import { Skeleton } from "./ui/skeleton";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "./ui/drawer";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { ChevronLeft, Heart, TrendingUp, TrendingDown, Loader2 } from "lucide-react";
 
 interface Pocket {
   id: string;
